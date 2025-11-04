@@ -347,29 +347,7 @@
                               </div>
                             </div>
                           </div>
-                          <!-- 如果是 key='value' 格式（类似 INI），解析后展示 -->
-                          <div v-else-if="isKeyValueResult(tool.result)" class="divide-y" :class="isDark ? 'divide-gray-700' : 'divide-gray-200'">
-                            <div 
-                              v-for="(value, key) in parseKeyValueResult(tool.result)" 
-                              :key="key"
-                              class="px-3 py-2 flex items-start gap-3"
-                            >
-                              <div 
-                                class="font-semibold text-xs flex-shrink-0 pt-0.5"
-                                :class="isDark ? 'text-gray-400' : 'text-gray-600'"
-                                style="min-width: 120px;"
-                              >
-                                {{ key }}:
-                              </div>
-                              <div 
-                                class="text-xs flex-1 break-words"
-                                :class="isDark ? 'text-gray-200' : 'text-gray-800'"
-                              >
-                                <span class="text-blue-400">'{{ value }}'</span>
-                              </div>
-                            </div>
-                          </div>
-                          <!-- 其他格式，保持原样显示 -->
+                          <!-- 其他格式，直接显示 -->
                           <div v-else class="px-3 py-2">
                             <div 
                               class="text-xs font-mono whitespace-pre-wrap break-words"
@@ -1070,42 +1048,6 @@ const parseJSONResult = (result: string | null): Record<string, any> => {
   } catch {
     return {}
   }
-}
-
-// 判断结果是否是 key='value' 格式（类似 INI）
-const isKeyValueResult = (result: string | null): boolean => {
-  if (!result || typeof result !== 'string') return false
-  // 检查是否包含 key='value' 或 key="value" 模式
-  const keyValuePattern = /^\s*\w+\s*=\s*['"][^'"]*['"]\s*$/
-  // 检查是否包含多个 key='value' 对（用空格分隔）
-  const parts = result.trim().split(/\s+(?=\w+\s*=\s*['"])/)
-  if (parts.length === 0) return false
-  
-  // 至少有一个 key='value' 格式的部分
-  return parts.some(part => {
-    const trimmed = part.trim()
-    return /^\w+\s*=\s*['"][^'"]*['"]\s*$/.test(trimmed)
-  })
-}
-
-// 解析 key='value' 格式的结果
-const parseKeyValueResult = (result: string | null): Record<string, string> => {
-  const parsed: Record<string, string> = {}
-  
-  if (!result || typeof result !== 'string') return parsed
-  
-  // 匹配 key='value' 或 key="value" 格式
-  // 使用正则表达式匹配
-  const pattern = /(\w+)\s*=\s*['"]([^'"]*)['"]/g
-  let match
-  
-  while ((match = pattern.exec(result)) !== null) {
-    const key = match[1]
-    const value = match[2]
-    parsed[key] = value
-  }
-  
-  return parsed
 }
 
 // 格式化工具结果（完整内容）

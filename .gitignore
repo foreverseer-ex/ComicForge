@@ -30,3 +30,4 @@ dist-ssr
 resources/
 *__pycache__/
 */config.json
+storage/

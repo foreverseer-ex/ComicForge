@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, List, AsyncGenerator, Any
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool, BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
@@ -55,72 +56,6 @@ from api.routers.reader import (
 from api.schemas.chat import ChatMessage, ChatIteration, ToolCall
 from api.services.db import MemoryService, HistoryService
 from api.settings import app_settings
-
-
-def extract_tool_result(output: Any) -> str | None:
-    """
-    从工具输出中提取实际结果内容。
-    
-    如果输出是字符串格式如 "content='...' name='...' tool_call_id='...'",
-    则提取 content 部分的内容。
-    否则直接返回原值。
-    
-    :param output: 工具输出
-    :return: 提取后的结果内容
-    """
-    result = extract_tool_result_and_id(output)
-    return result["content"]
-
-
-def extract_tool_result_and_id(output: Any) -> dict:
-    """
-    从工具输出中提取实际结果内容和 tool_call_id。
-    
-    如果输出是字符串格式如 "content='...' name='...' tool_call_id='...'",
-    则提取 content 和 tool_call_id。
-    否则直接返回原值。
-    
-    :param output: 工具输出
-    :return: {"content": 结果内容, "tool_call_id": 调用ID}
-    """
-    if output is None:
-        return {"content": None, "tool_call_id": None}
-    
-    # 如果是字符串，尝试解析 content='...' 和 tool_call_id='...' 格式
-    if isinstance(output, str):
-        import re
-        
-        content = None
-        tool_call_id = None
-        
-        # 匹配 content='...' 或 content="..." 格式
-        # 使用非贪婪匹配，直到遇到 name= 或 tool_call_id= 或字符串结束
-        # 处理多行内容和转义字符
-        content_pattern = r"content\s*=\s*(['\"])(.*?)\1(?=\s+(?:name|tool_call_id)\s*=|\s*$)"
-        content_match = re.search(content_pattern, output, re.DOTALL)
-        if content_match:
-            content = content_match.group(2)
-            # 处理转义字符
-            content = content.replace("\\'", "'").replace('\\"', '"')
-            content = content.replace("\\n", "\n").replace("\\t", "\t")
-        
-        # 匹配 tool_call_id='...' 或 tool_call_id="..." 格式
-        id_pattern = r"tool_call_id\s*=\s*(['\"])([^'\"]*)\1"
-        id_match = re.search(id_pattern, output)
-        if id_match:
-            tool_call_id = id_match.group(2)
-        
-        # 如果成功提取了 content，返回结果
-        if content is not None:
-            return {"content": content, "tool_call_id": tool_call_id}
-        
-        # 如果没有匹配到 content= 格式，检查是否是纯 content 值（没有 name 和 tool_call_id）
-        # 这种情况下可能是直接的字符串值
-        if "name=" not in output and "tool_call_id=" not in output:
-            return {"content": output, "tool_call_id": None}
-    
-    # 如果不是特殊格式，直接返回字符串形式
-    return {"content": str(output) if output else None, "tool_call_id": None}
 
 
 def tool_wrapper(func):
@@ -406,21 +341,21 @@ class AbstractLlmService(ABC):
         """
         if not self.is_ready():
             return
-        
+
         count = HistoryService.count(project_id)
         res_round = count % app_settings.llm.summary_epoch
-        
+
         if count > 0 and res_round == 0:
             try:
                 # 获取最近的消息
                 start_index = count - app_settings.llm.summary_epoch
                 messages = self.build_system_messages(project_id)
                 recent_messages = HistoryService.list(project_id, start_index=start_index, end_index=count)
-                
+
                 # 获取现有摘要
                 chat_summary = MemoryService.get_summary(project_id)
                 summary_value = chat_summary.data if chat_summary and chat_summary.data else ""
-                
+
                 # 构建摘要提示词
                 summary_message = SUMMARY_MESSAGE_TEMPLATE.format(
                     previous_rounds=count - app_settings.llm.summary_epoch,
@@ -436,7 +371,7 @@ class AbstractLlmService(ABC):
 
                 # 调用 agent 生成摘要
                 result = self.agent.invoke({"messages": messages})
-                
+
                 # 提取摘要文本
                 summary_text = ""
                 if hasattr(result, "messages") and result.messages:
@@ -445,7 +380,7 @@ class AbstractLlmService(ABC):
                         summary_text = last_msg.content
                     elif isinstance(last_msg, dict) and "content" in last_msg:
                         summary_text = last_msg["content"]
-                
+
                 # 保存摘要
                 if summary_text:
                     MemoryService.update_summary(project_id, summary_text)
@@ -488,7 +423,7 @@ class AbstractLlmService(ABC):
             messages = self.build_system_messages(project_id)
             self.summary_history(project_id)
             chat_summary_memory = MemoryService.get_summary(project_id)
-            
+
             # 2. 创建用户消息并写入数据库
             user_message = ChatMessage(
                 message_id=str(uuid.uuid4()),
@@ -532,7 +467,7 @@ class AbstractLlmService(ABC):
                 suggests=[]
             )
             HistoryService.create(assistant_message)
-            
+
             # 发送消息ID
             yield {'type': 'message_id', 'message_id': assistant_message_id}
             yield {'type': 'status', 'status': 'thinking'}
@@ -554,12 +489,12 @@ class AbstractLlmService(ABC):
                     if message_chunk and hasattr(message_chunk, "content") and message_chunk.content:
                         content = message_chunk.content
                         assistant_context += content
-                        
+
                         # 实时更新数据库中的助手消息
                         assistant_message.context = assistant_context
                         assistant_message.tools = assistant_tools.copy()
                         HistoryService.update(assistant_message)
-                        
+
                         yield {'type': 'content', 'content': content}
 
                 # 处理工具调用开始事件
@@ -567,19 +502,21 @@ class AbstractLlmService(ABC):
                     tool_name = chunk.get("name", "")
                     tool_input = chunk.get("data", {}).get("input", {})
                     logger.info(f"✅ 工具调用: {tool_name}, 参数: {tool_input}")
-                    
+                    args = tool_input if isinstance(tool_input, dict) else {}
+                    if 'request' in args and len(args) == 1:
+                        args = args['request']
                     # 添加工具调用到列表（结果暂时为空）
                     tool_call = {
                         "name": tool_name,
-                        "args": tool_input if isinstance(tool_input, dict) else {},
+                        "args": args,
                         "result": None
                     }
                     assistant_tools.append(tool_call)
-                    
+
                     # 更新数据库
                     assistant_message.tools = assistant_tools.copy()
                     HistoryService.update(assistant_message)
-                    
+
                     # 发送工具调用开始事件
                     yield {
                         'type': 'tool_start',
@@ -592,34 +529,30 @@ class AbstractLlmService(ABC):
                 # 处理工具调用结束事件
                 elif event_type == "on_tool_end":
                     tool_name = chunk.get("name", "")
-                    tool_output = chunk.get("data", {}).get("output")
-                    
-                    # 提取实际的结果内容和 tool_call_id
-                    result_data = extract_tool_result_and_id(tool_output)
-                    actual_result = result_data["content"]
-                    tool_call_id = result_data["tool_call_id"]
-                    
-                    logger.info(f"✅ 工具调用完成: {tool_name}, 结果长度={len(str(actual_result)) if actual_result else 0}")
-                    
+                    tool_output: ToolMessage = chunk.get("data", {}).get("output")
+
+                    logger.info(
+                        f"✅ 工具调用完成: {tool_name}, 结果长度={len(str(tool_output.content)) if tool_output.content else 0}")
+
                     # 更新最后一个工具调用的结果和 tool_call_id
                     if assistant_tools:
-                        assistant_tools[-1]["result"] = actual_result
-                        if tool_call_id:
-                            assistant_tools[-1]["tool_call_id"] = tool_call_id
-                    
+                        assistant_tools[-1]["result"] = tool_output.content
+                        assistant_tools[-1]["status"] = tool_output.status
+                        assistant_tools[-1]["tool_call_id"] = tool_output.tool_call_id
+
                     # 更新数据库
                     assistant_message.tools = assistant_tools.copy()
                     HistoryService.update(assistant_message)
-                    
+
                     # 发送工具调用结束事件
                     yield {
                         'type': 'tool_end',
                         'name': tool_name,
-                        'result': actual_result
+                        'result': tool_output.content
                     }
                     # 发送完整的工具列表
                     yield {'type': 'tools', 'tools': assistant_tools.copy()}
-                    
+
                     # 特殊处理：如果工具是 add_choices，更新 suggests
                     if tool_name == "add_choices":
                         from api.routers.llm import _session_choices
@@ -636,7 +569,7 @@ class AbstractLlmService(ABC):
                         assistant_message.suggests = suggests
                         assistant_suggests = suggests
                         HistoryService.update(assistant_message)
-                        
+
                         # 发送建议更新
                         yield {'type': 'suggests', 'suggests': suggests}
 
@@ -645,7 +578,7 @@ class AbstractLlmService(ABC):
             assistant_message.context = assistant_context
             assistant_message.tools = assistant_tools.copy()
             HistoryService.update(assistant_message)
-            
+
             yield {'type': 'status', 'status': 'ready'}
             logger.info(f"✅ 对话完成: {len(assistant_context)} 字符, {len(assistant_tools)} 个工具调用")
 
@@ -683,7 +616,7 @@ class AbstractLlmService(ABC):
             assistant_message.status = "error"
             assistant_message.context = error_msg
             HistoryService.update(assistant_message)
-            
+
             yield {'type': 'status', 'status': 'error'}
             yield {'type': 'error', 'error': error_msg}
 
@@ -727,7 +660,7 @@ class AbstractLlmService(ABC):
             messages = self.build_system_messages(project_id)
             self.summary_history(project_id)
             chat_summary_memory = MemoryService.get_summary(project_id)
-            
+
             # 2. 创建用户消息并写入数据库
             user_message = ChatMessage(
                 message_id=str(uuid.uuid4()),
@@ -789,12 +722,12 @@ class AbstractLlmService(ABC):
                     if message_chunk and hasattr(message_chunk, "content") and message_chunk.content:
                         content = message_chunk.content
                         assistant_context += content
-                        
+
                         # 实时更新数据库中的助手消息
                         assistant_message.context = assistant_context
                         assistant_message.tools = assistant_tools.copy()
                         HistoryService.update(assistant_message)
-                        
+
                         yield content
 
                 # 处理工具调用开始事件
@@ -802,15 +735,17 @@ class AbstractLlmService(ABC):
                     tool_name = chunk.get("name", "")
                     tool_input = chunk.get("data", {}).get("input", {})
                     logger.info(f"✅ 工具调用: {tool_name}, 参数: {tool_input}")
-                    
+                    args = tool_input if isinstance(tool_input, dict) else {}
+                    if 'request' in args and len(args) == 1:
+                        args = args['request']
                     # 添加工具调用到列表（结果暂时为空）
                     tool_call = {
                         "name": tool_name,
-                        "args": tool_input if isinstance(tool_input, dict) else {},
+                        "args": args,
                         "result": None
                     }
                     assistant_tools.append(tool_call)
-                    
+
                     # 更新数据库
                     assistant_message.tools = assistant_tools.copy()
                     HistoryService.update(assistant_message)
@@ -818,25 +753,21 @@ class AbstractLlmService(ABC):
                 # 处理工具调用结束事件
                 elif event_type == "on_tool_end":
                     tool_name = chunk.get("name", "")
-                    tool_output = chunk.get("data", {}).get("output")
-                    
-                    # 提取实际的结果内容和 tool_call_id
-                    result_data = extract_tool_result_and_id(tool_output)
-                    actual_result = result_data["content"]
-                    tool_call_id = result_data["tool_call_id"]
-                    
-                    logger.info(f"✅ 工具调用完成: {tool_name}, 结果长度={len(str(actual_result)) if actual_result else 0}")
-                    
+                    tool_output: ToolMessage = chunk.get("data", {}).get("output")
+
+                    logger.info(
+                        f", 结果长度={len(str(tool_output.content)) if tool_output.content else 0}")
+
                     # 更新最后一个工具调用的结果和 tool_call_id
                     if assistant_tools:
-                        assistant_tools[-1]["result"] = actual_result
-                        if tool_call_id:
-                            assistant_tools[-1]["tool_call_id"] = tool_call_id
-                    
+                        assistant_tools[-1]["result"] = tool_output.content
+                        assistant_tools[-1]["status"] = tool_output.status
+                        assistant_tools[-1]["tool_call_id"] = tool_output.tool_call_id
+
                     # 更新数据库
                     assistant_message.tools = assistant_tools.copy()
                     HistoryService.update(assistant_message)
-                    
+
                     # 特殊处理：如果工具是 add_choices，更新 suggests
                     if tool_name == "add_choices":
                         from api.routers.llm import _session_choices
@@ -858,7 +789,7 @@ class AbstractLlmService(ABC):
             assistant_message.context = assistant_context
             assistant_message.tools = assistant_tools.copy()
             HistoryService.update(assistant_message)
-            
+
             logger.info(f"✅ 对话完成: {len(assistant_context)} 字符, {len(assistant_tools)} 个工具调用")
 
         except Exception as e:
@@ -1038,7 +969,7 @@ class AbstractLlmService(ABC):
             iteration_message.data = iteration.model_dump()
             iteration_message.status = "thinking"
             HistoryService.update(iteration_message)
-            
+
             logger.debug(
                 f"已更新迭代消息进度: index={iteration.index}/{iteration.stop}, "
                 f"summary长度={len(iteration.summary) if iteration.summary else 0}")
@@ -1050,7 +981,7 @@ class AbstractLlmService(ABC):
         # 3. 迭代完成，执行最终操作
         logger.info(f"迭代完成，开始执行最终操作：{iteration.target}")
         final_prompt = self._build_final_operation_prompt(iteration)
-        
+
         # 清空之前的工具调用（只保留最终操作的工具调用）
         final_tools: list[dict] = []
         final_context_ref = [""]  # 使用列表引用以便修改
@@ -1065,7 +996,7 @@ class AbstractLlmService(ABC):
         iteration_message.tools = final_tools.copy()
         iteration_message.data = iteration.model_dump()
         HistoryService.update(iteration_message)
-        
+
         logger.info(
             f"✅ 迭代完成: index={iteration.index}/{iteration.stop}, "
             f"summary长度={len(iteration.summary)}, 工具调用数={len(final_tools)}")
@@ -1136,11 +1067,11 @@ class AbstractLlmService(ABC):
         # 迭代过程中的工具调用不需要记录（用户要求）
 
     async def _call_llm_final_operation(
-        self, 
-        prompt: str, 
-        project_id: str,
-        tools_list: list,
-        context_ref: list
+            self,
+            prompt: str,
+            project_id: str,
+            tools_list: list,
+            context_ref: list
     ) -> AsyncGenerator[str, None]:
         """
         调用LLM执行最终操作（允许所有工具，记录到数据库）。
@@ -1189,26 +1120,23 @@ class AbstractLlmService(ABC):
                 tool_name = chunk.get("name", "")
                 tool_input = chunk.get("data", {}).get("input", {})
                 logger.info(f"✅ [最终操作] 工具调用：{tool_name}")
-                
+                args = tool_input if isinstance(tool_input, dict) else {}
+                if 'request' in args and len(args) == 1:
+                    args = args['request']
                 tool_call = {
                     "name": tool_name,
-                    "args": tool_input if isinstance(tool_input, dict) else {},
+                    "args": args,
                     "result": None
                 }
                 tools_list.append(tool_call)
 
             elif event_type == "on_tool_end":
                 tool_name = chunk.get("name", "")
-                tool_output = chunk.get("data", {}).get("output")
-                
-                # 提取实际的结果内容和 tool_call_id
-                result_data = extract_tool_result_and_id(tool_output)
-                actual_result = result_data["content"]
-                tool_call_id = result_data["tool_call_id"]
-                
+                tool_output: ToolMessage = chunk.get("data", {}).get("output")
+
                 logger.info(f"✅ [最终操作] 工具调用完成：{tool_name}")
 
                 if tools_list:
-                    tools_list[-1]["result"] = actual_result
-                    if tool_call_id:
-                        tools_list[-1]["tool_call_id"] = tool_call_id
+                    tools_list[-1]["result"] = tool_output.content
+                    tools_list[-1]["status"] = tool_output.status
+                    tools_list[-1]["tool_call_id"] = tool_output.tool_call_id
