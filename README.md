@@ -61,6 +61,7 @@ AI 驱动的小说创作与可视化工具：对话、绘图、模型元数据�
 ComicForge/
 ├── src/
 │   ├── api/                   # 后端 FastAPI 服务
+│   │   ├── main.py            # FastAPI 主应用
 │   │   ├── routers/           # API 路由
 │   │   │   ├── project.py     # 项目管理路由
 │   │   │   ├── actor.py       # 角色管理路由
@@ -71,52 +72,92 @@ ComicForge/
 │   │   │   ├── llm.py         # LLM 路由
 │   │   │   ├── chat.py        # 聊天路由
 │   │   │   ├── history.py     # 历史记录路由
-│   │   │   └── file.py        # 文件路由
+│   │   │   ├── file.py        # 文件路由
+│   │   │   ├── help.py        # 帮助路由
+│   │   │   └── settings.py    # 设置路由
 │   │   ├── services/          # 业务服务层
 │   │   │   ├── db/            # 数据库服务（SQLModel）
+│   │   │   │   ├── base.py          # 数据库基础类
 │   │   │   │   ├── project_service.py   # 项目管理
 │   │   │   │   ├── actor_service.py     # 角色管理
 │   │   │   │   ├── memory_service.py    # 记忆管理
 │   │   │   │   ├── novel_service.py     # 小说内容
 │   │   │   │   ├── draw_service.py      # 绘图服务
-│   │   │   │   └── history_service.py   # 历史记录
+│   │   │   │   ├── history_service.py   # 历史记录
+│   │   │   │   └── summary_service.py   # 摘要服务
 │   │   │   ├── llm/           # LLM 服务
 │   │   │   │   ├── base.py    # 抽象基类
 │   │   │   │   ├── openai.py  # OpenAI 兼容（xAI/OpenAI/Anthropic/Google）
 │   │   │   │   └── ollama.py  # Ollama 本地模型
 │   │   │   ├── draw/          # 绘图服务
+│   │   │   │   ├── base.py        # 绘图服务基类
 │   │   │   │   ├── sd_forge.py    # SD-Forge 本地生成
 │   │   │   │   └── civitai.py     # Civitai 云端生成
 │   │   │   ├── model_meta/    # 模型元数据服务
+│   │   │   │   ├── base.py    # 元数据服务基类
 │   │   │   │   ├── local.py   # 本地模型扫描
 │   │   │   │   └── civitai.py # Civitai 元数据获取
-│   │   │   └── chat.py        # 聊天服务
+│   │   │   ├── chat.py        # 聊天服务
+│   │   │   ├── novel_parser.py # 小说解析器
+│   │   │   └── transform.py   # 数据转换工具
 │   │   ├── schemas/           # Pydantic 数据模型
 │   │   │   ├── project.py
 │   │   │   ├── actor.py
 │   │   │   ├── memory.py
 │   │   │   ├── novel.py
 │   │   │   ├── chat.py
-│   │   │   └── draw.py
+│   │   │   ├── draw.py
+│   │   │   └── model_meta.py
 │   │   ├── constants/         # 常量定义
 │   │   │   ├── llm.py         # LLM 提供商、模型列表
 │   │   │   ├── actor.py       # 角色标签定义
 │   │   │   ├── memory.py      # 记忆键定义
-│   │   │   └── model_meta.py  # 模型元数据常量
+│   │   │   ├── model_meta.py  # 模型元数据常量
+│   │   │   ├── civitai.py     # Civitai 相关常量
+│   │   │   ├── color.py       # 颜色常量
+│   │   │   └── ui.py          # UI 相关常量
 │   │   ├── settings/          # 配置设置
 │   │   │   ├── llm_setting.py      # LLM 配置
 │   │   │   ├── draw_setting.py     # 绘图配置
 │   │   │   ├── sd_forge_setting.py # SD-Forge 配置
-│   │   │   ├── civitai_setting.py  # Civitai 配置
-│   │   │   └── ui_setting.py       # UI 配置
+│   │   │   └── civitai_setting.py  # Civitai 配置
 │   │   └── utils/             # 工具函数
 │   │       ├── path.py        # 路径工具
 │   │       ├── download.py    # 下载工具
-│   │       └── ...
+│   │       ├── civitai.py     # Civitai 工具
+│   │       ├── hash.py        # 哈希工具
+│   │       ├── url_util.py    # URL 工具
+│   │       └── pubsub.py      # 发布订阅工具
 │   │
+│   ├── views/                 # Vue 视图页面
+│   │   ├── HomeView.vue       # 主页视图
+│   │   ├── ChatView.vue       # 聊天视图
+│   │   ├── ActorView.vue      # 角色管理视图
+│   │   ├── MemoryView.vue     # 记忆管理视图
+│   │   ├── ContentView.vue    # 内容管理视图
+│   │   ├── ModelView.vue      # 模型管理视图
+│   │   ├── HelpView.vue       # 帮助视图
+│   │   └── SettingsView.vue   # 设置视图
+│   ├── components/            # Vue 组件
+│   │   ├── Navigation.vue     # 导航组件
+│   │   └── settings/          # 设置相关组件
+│   │       ├── LlmSettingsSection.vue
+│   │       ├── DrawSettingsSection.vue
+│   │       ├── SdForgeSettingsSection.vue
+│   │       └── CivitaiSettingsSection.vue
+│   ├── router/                # Vue Router 配置
+│   │   └── index.ts
+│   ├── stores/                # Pinia 状态管理
+│   │   ├── index.ts
+│   │   ├── project.ts         # 项目状态
+│   │   └── theme.ts           # 主题状态
+│   ├── styles/                # 样式文件
+│   │   └── highlight.css      # 代码高亮样式
+│   ├── assets/                # 静态资源
+│   │   └── vue.svg
+│   ├── desperate/             # 旧版 Flet UI（已废弃）
 │   ├── App.vue                # Vue 根组件
 │   ├── main.ts                # 前端入口文件
-│   ├── components/            # Vue 组件
 │   └── style.css              # 全局样式
 │
 ├── storage/                   # 数据存储目录
@@ -125,6 +166,15 @@ ComicForge/
 │       ├── chat_history/      # 聊天历史（JSON）
 │       ├── model_meta/        # 模型元数据缓存
 │       └── projects/          # 项目数据（图像等）
+│
+├── tests/                     # 测试文件
+│   ├── api/                   # API 测试
+│   └── sd_forge/              # SD-Forge 测试
+│
+├── scripts/                   # 开发脚本
+│   ├── dev-server.py          # 开发服务器启动脚本
+│   ├── dev-server.bat         # Windows 启动脚本
+│   └── dev-server.sh          # Linux/Mac 启动脚本
 │
 ├── config.json                # 配置文件（自动生成）
 ├── package.json               # 前端依赖配置
@@ -279,22 +329,48 @@ export CIVITAI_API_TOKEN="..."
 
 **配置优先级**：环境变量 > 配置文件 > 默认值
 
+## 🎨 前端架构
+
+ComicForge 使用 Vue 3 + TypeScript 构建现代化的前后端分离架构。
+
+### 主要视图页面
+
+- **HomeView** - 项目主页（项目信息、小说段落、图片展示）
+- **ChatView** - AI 对话页面（流式对话、工具调用、迭代模式）
+- **ActorView** - 角色管理页面（角色列表、创建编辑、立绘生成）
+- **MemoryView** - 记忆管理页面（键值对管理、批量操作）
+- **ContentView** - 内容管理页面（章节导航、段落编辑）
+- **ModelView** - 模型管理页面（本地扫描、Civitai 集成、元数据查看）
+- **HelpView** - 帮助文档页面（MCP 工具说明、使用指南）
+- **SettingsView** - 设置页面（LLM、绘图、SD-Forge、Civitai 配置）
+
+### 状态管理（Pinia）
+
+- **project** - 当前项目状态、项目列表
+- **theme** - 主题设置（深色/浅色模式）
+
+### 路由配置
+
+使用 Vue Router 进行单页应用路由管理，支持动态路由和路由守卫。
+
 ## 🔌 API 服务
 
 ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API 访问所有功能。
 
 ### 主要路由
 
-- `/project/*` - 项目管理
-- `/actor/*` - 角色管理
-- `/memory/*` - 记忆管理
-- `/reader/*` - 内容读取
-- `/novel/*` - 小说内容
-- `/draw/*` - 图像生成
-- `/llm/*` - LLM 相关功能
-- `/chat/*` - 聊天对话
-- `/history/*` - 历史记录
-- `/file/*` - 文件服务
+- `/project/*` - 项目管理（CRUD、列表）
+- `/actor/*` - 角色管理（创建、更新、删除、立绘生成）
+- `/memory/*` - 记忆管理（键值存储、预定义键）
+- `/reader/*` - 内容读取（单行、批量、章节）
+- `/novel/*` - 小说内容（章节列表、摘要）
+- `/draw/*` - 图像生成（SD-Forge、Civitai、模型元数据）
+- `/llm/*` - LLM 相关功能（模型列表、工具定义）
+- `/chat/*` - 聊天对话（流式对话、迭代模式）
+- `/history/*` - 历史记录（会话管理、消息历史）
+- `/file/*` - 文件服务（图片访问）
+- `/help/*` - 帮助文档（MCP 工具说明）
+- `/settings/*` - 设置管理（配置读取与保存）
 
 ## 🛠 主要功能详解
 
@@ -448,6 +524,68 @@ def test_your_endpoint(client):
     response = client.get("/your-endpoint")
     assert response.status_code == 200
 ```
+
+## 📊 项目进度
+
+### ✅ 已完成功能
+
+#### 后端 API（FastAPI）
+- ✅ 项目管理（CRUD、列表、切换）
+- ✅ 角色管理（创建、更新、删除、示例图、立绘生成）
+- ✅ 记忆管理（键值存储、预定义键、批量操作）
+- ✅ 小说内容读取（单行、批量、章节范围、摘要）
+- ✅ 图像生成（SD-Forge 本地生成、Civitai 集成）
+- ✅ 模型元数据（本地扫描、Civitai 抓取、筛选）
+- ✅ LLM 集成（OpenAI/xAI/Ollama/Anthropic/Google）
+- ✅ AI 对话（流式输出、工具调用、迭代模式）
+- ✅ 历史记录（会话管理、消息持久化）
+- ✅ 配置管理（读取、保存、环境变量优先级）
+- ✅ 文件服务（图片访问、静态资源）
+- ✅ 帮助文档（MCP 工具定义、使用说明）
+
+#### 前端 UI（Vue 3 + TypeScript）
+- ✅ 主页视图（项目信息、小说段落、图片展示）
+- ✅ 聊天视图（流式对话、Markdown 渲染、工具调用显示）
+- ✅ 角色管理视图（角色列表、创建编辑、立绘生成）
+- ✅ 记忆管理视图（键值对编辑、批量删除）
+- ✅ 内容管理视图（章节导航、段落浏览）
+- ✅ 模型管理视图（模型列表、元数据查看、筛选）
+- ✅ 设置视图（LLM、绘图、SD-Forge、Civitai 配置）
+- ✅ 帮助视图（工具说明、使用指南）
+- ✅ 导航组件（侧边栏、路由切换）
+- ✅ 状态管理（Pinia：项目状态、主题切换）
+- ✅ 响应式布局（适配不同屏幕尺寸）
+
+#### 工具与服务
+- ✅ MCP 工具系统（40+ 工具函数）
+- ✅ 数据库服务（SQLite + SQLModel）
+- ✅ 聊天服务（流式处理、工具调用解析）
+- ✅ 小说解析器（章节识别、摘要生成）
+- ✅ 数据转换工具（格式转换、数据映射）
+
+#### 开发工具
+- ✅ 开发服务器脚本（优化重载速度）
+- ✅ 测试框架（pytest + FastAPI TestClient）
+- ✅ API 文档（Swagger UI + ReDoc）
+- ✅ 类型提示（Python + TypeScript 全面覆盖）
+
+### 🚧 进行中
+
+- 🔄 前端性能优化（虚拟滚动、懒加载）
+- 🔄 更多单元测试覆盖
+- 🔄 错误处理增强
+
+### 📋 计划中
+
+- 📝 用户手册和开发文档
+- 📝 Docker 容器化部署
+- 📝 更多 LLM 提供商支持
+- 📝 插件系统（可扩展工具）
+- 📝 多语言支持（i18n）
+
+### 🗑️ 已废弃
+
+- ❌ **desperate/** 目录 - 旧版 Flet UI 实现（已迁移到 Vue 3）
 
 ## 📄 许可证
 

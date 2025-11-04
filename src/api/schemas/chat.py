@@ -37,6 +37,7 @@ class ToolCall(BaseModel):
     name: str = Field(description="工具名称")
     args: dict = Field(default_factory=dict, description="工具参数")
     result: str | None = Field(default=None, description="工具执行结果")
+    tool_call_id: str | None = Field(default=None, description="工具调用ID（LangChain 内部使用）")
 
 
 class ChatMessage(SQLModel, table=True):

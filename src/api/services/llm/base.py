@@ -68,31 +68,59 @@ def extract_tool_result(output: Any) -> str | None:
     :param output: 工具输出
     :return: 提取后的结果内容
     """
-    if output is None:
-        return None
+    result = extract_tool_result_and_id(output)
+    return result["content"]
+
+
+def extract_tool_result_and_id(output: Any) -> dict:
+    """
+    从工具输出中提取实际结果内容和 tool_call_id。
     
-    # 如果是字符串，尝试解析 content='...' 格式
+    如果输出是字符串格式如 "content='...' name='...' tool_call_id='...'",
+    则提取 content 和 tool_call_id。
+    否则直接返回原值。
+    
+    :param output: 工具输出
+    :return: {"content": 结果内容, "tool_call_id": 调用ID}
+    """
+    if output is None:
+        return {"content": None, "tool_call_id": None}
+    
+    # 如果是字符串，尝试解析 content='...' 和 tool_call_id='...' 格式
     if isinstance(output, str):
         import re
+        
+        content = None
+        tool_call_id = None
+        
         # 匹配 content='...' 或 content="..." 格式
         # 使用非贪婪匹配，直到遇到 name= 或 tool_call_id= 或字符串结束
         # 处理多行内容和转义字符
-        pattern = r"content\s*=\s*(['\"])(.*?)\1(?=\s+(?:name|tool_call_id)\s*=|\s*$)"
-        match = re.search(pattern, output, re.DOTALL)
-        if match:
-            content = match.group(2)
+        content_pattern = r"content\s*=\s*(['\"])(.*?)\1(?=\s+(?:name|tool_call_id)\s*=|\s*$)"
+        content_match = re.search(content_pattern, output, re.DOTALL)
+        if content_match:
+            content = content_match.group(2)
             # 处理转义字符
             content = content.replace("\\'", "'").replace('\\"', '"')
             content = content.replace("\\n", "\n").replace("\\t", "\t")
-            return content
+        
+        # 匹配 tool_call_id='...' 或 tool_call_id="..." 格式
+        id_pattern = r"tool_call_id\s*=\s*(['\"])([^'\"]*)\1"
+        id_match = re.search(id_pattern, output)
+        if id_match:
+            tool_call_id = id_match.group(2)
+        
+        # 如果成功提取了 content，返回结果
+        if content is not None:
+            return {"content": content, "tool_call_id": tool_call_id}
         
         # 如果没有匹配到 content= 格式，检查是否是纯 content 值（没有 name 和 tool_call_id）
         # 这种情况下可能是直接的字符串值
         if "name=" not in output and "tool_call_id=" not in output:
-            return output
+            return {"content": output, "tool_call_id": None}
     
     # 如果不是特殊格式，直接返回字符串形式
-    return str(output) if output else None
+    return {"content": str(output) if output else None, "tool_call_id": None}
 
 
 def tool_wrapper(func):
@@ -566,14 +594,18 @@ class AbstractLlmService(ABC):
                     tool_name = chunk.get("name", "")
                     tool_output = chunk.get("data", {}).get("output")
                     
-                    # 提取实际的结果内容（去除 content='...' name='...' tool_call_id='...' 格式的包装）
-                    actual_result = extract_tool_result(tool_output)
+                    # 提取实际的结果内容和 tool_call_id
+                    result_data = extract_tool_result_and_id(tool_output)
+                    actual_result = result_data["content"]
+                    tool_call_id = result_data["tool_call_id"]
                     
                     logger.info(f"✅ 工具调用完成: {tool_name}, 结果长度={len(str(actual_result)) if actual_result else 0}")
                     
-                    # 更新最后一个工具调用的结果
+                    # 更新最后一个工具调用的结果和 tool_call_id
                     if assistant_tools:
                         assistant_tools[-1]["result"] = actual_result
+                        if tool_call_id:
+                            assistant_tools[-1]["tool_call_id"] = tool_call_id
                     
                     # 更新数据库
                     assistant_message.tools = assistant_tools.copy()
@@ -788,14 +820,18 @@ class AbstractLlmService(ABC):
                     tool_name = chunk.get("name", "")
                     tool_output = chunk.get("data", {}).get("output")
                     
-                    # 提取实际的结果内容（去除 content='...' name='...' tool_call_id='...' 格式的包装）
-                    actual_result = extract_tool_result(tool_output)
+                    # 提取实际的结果内容和 tool_call_id
+                    result_data = extract_tool_result_and_id(tool_output)
+                    actual_result = result_data["content"]
+                    tool_call_id = result_data["tool_call_id"]
                     
                     logger.info(f"✅ 工具调用完成: {tool_name}, 结果长度={len(str(actual_result)) if actual_result else 0}")
                     
-                    # 更新最后一个工具调用的结果
+                    # 更新最后一个工具调用的结果和 tool_call_id
                     if assistant_tools:
                         assistant_tools[-1]["result"] = actual_result
+                        if tool_call_id:
+                            assistant_tools[-1]["tool_call_id"] = tool_call_id
                     
                     # 更新数据库
                     assistant_message.tools = assistant_tools.copy()
@@ -1165,10 +1201,14 @@ class AbstractLlmService(ABC):
                 tool_name = chunk.get("name", "")
                 tool_output = chunk.get("data", {}).get("output")
                 
-                # 提取实际的结果内容（去除 content='...' name='...' tool_call_id='...' 格式的包装）
-                actual_result = extract_tool_result(tool_output)
+                # 提取实际的结果内容和 tool_call_id
+                result_data = extract_tool_result_and_id(tool_output)
+                actual_result = result_data["content"]
+                tool_call_id = result_data["tool_call_id"]
                 
                 logger.info(f"✅ [最终操作] 工具调用完成：{tool_name}")
 
                 if tools_list:
                     tools_list[-1]["result"] = actual_result
+                    if tool_call_id:
+                        tools_list[-1]["tool_call_id"] = tool_call_id

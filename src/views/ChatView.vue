@@ -41,7 +41,7 @@
       <!-- 消息列表 -->
       <div 
         v-for="message in messages" 
-        :key="message.message_id" 
+        :key="message._internalKey || message.message_id" 
         class="message-item"
       >
         <!-- 用户消息 -->
@@ -81,7 +81,7 @@
                 ]"
                 rows="3"
                 style="min-height: 60px;"
-                ref="editingTextareaRef"
+                :ref="el => { if (el) editingTextareaRef = el }"
               ></textarea>
               <button
                 @click="confirmRestart"
@@ -130,6 +130,38 @@
           
           <!-- 消息内容 - 无卡片样式 -->
           <div class="w-full max-w-[90%] flex-1">
+            <!-- AI 思考中提示 -->
+            <div 
+              v-if="message.status === 'thinking' && !message.context && (!message.tools || message.tools.length === 0)"
+              class="flex items-center gap-2 mb-2"
+            >
+              <div class="flex items-center gap-1.5">
+                <div 
+                  class="w-2 h-2 rounded-full animate-bounce"
+                  :class="isDark ? 'bg-blue-400' : 'bg-blue-500'"
+                  style="animation-delay: 0ms;"
+                ></div>
+                <div 
+                  class="w-2 h-2 rounded-full animate-bounce"
+                  :class="isDark ? 'bg-blue-400' : 'bg-blue-500'"
+                  style="animation-delay: 150ms;"
+                ></div>
+                <div 
+                  class="w-2 h-2 rounded-full animate-bounce"
+                  :class="isDark ? 'bg-blue-400' : 'bg-blue-500'"
+                  style="animation-delay: 300ms;"
+                ></div>
+              </div>
+              <span 
+                :class="[
+                  'text-sm',
+                  isDark ? 'text-gray-400' : 'text-gray-500'
+                ]"
+              >
+                AI 思考中...
+              </span>
+            </div>
+
             <!-- 工具调用 -->
             <div v-if="message.tools && message.tools.length > 0" class="mb-4 space-y-1">
               <div 
@@ -522,6 +554,7 @@ interface ChatMessage {
   tools: ToolCall[]
   suggests: string[]
   created_at: string
+  _internalKey?: string  // 内部稳定 key，用于 Vue 的 :key 绑定
 }
 
 interface ToolCall {
@@ -562,7 +595,7 @@ const showClearHistoryDialog = ref(false)
 // 编辑消息相关
 const editingMessageId = ref<string | null>(null)
 const editingText = ref('')
-const editingTextareaRef = ref<HTMLTextAreaElement | null>(null)
+let editingTextareaRef: HTMLTextAreaElement | null = null
 
 // 工具调用展开状态：messageId -> toolIndex -> expanded
 const toolExpandState = ref<Record<string, Record<number, boolean>>>({})
@@ -579,9 +612,14 @@ const loadHistory = async () => {
 
   loadingHistory.value = true
   try {
-    messages.value = await api.get('/history/list', {
+    const loadedMessages = await api.get('/history/list', {
       params: { project_id: selectedProjectId.value }
     })
+    // 为每条历史消息添加稳定的 _internalKey
+    messages.value = loadedMessages.map((msg: ChatMessage) => ({
+      ...msg,
+      _internalKey: msg._internalKey || `loaded-${msg.message_id}`
+    }))
     // 滚动到底部
     nextTick(() => {
       scrollToBottom()
@@ -609,6 +647,7 @@ const sendMessage = async () => {
   }
 
   // 创建用户消息（临时显示，稍后会被数据库中的消息替换）
+  const userInternalKey = `user-${Date.now()}-${Math.random()}`
   const userMessage: ChatMessage = {
     message_id: `temp-${Date.now()}`,
     project_id: selectedProjectId.value,
@@ -618,13 +657,15 @@ const sendMessage = async () => {
     message_type: 'normal',
     tools: [],
     suggests: [],
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
+    _internalKey: userInternalKey
   }
   messages.value.push(userMessage)
   scrollToBottom()
 
   // 开始流式传输
   isStreaming.value = true
+  const assistantInternalKey = `assistant-${Date.now()}-${Math.random()}`
   currentAssistantMessage = {
     message_id: `streaming-${Date.now()}`,
     project_id: selectedProjectId.value,
@@ -633,7 +674,8 @@ const sendMessage = async () => {
     status: 'thinking',
     message_type: 'normal',
     tools: [],
-    suggests: []
+    suggests: [],
+    _internalKey: assistantInternalKey
   }
   messages.value.push(currentAssistantMessage as ChatMessage)
   scrollToBottom()
@@ -734,13 +776,15 @@ const handleStreamEvent = (data: any) => {
   if (eventType === 'message_id') {
     // 更新消息ID（将临时ID替换为真实ID）
     const oldId = currentAssistantMessage?.message_id
+    const internalKey = currentAssistantMessage?._internalKey
     if (currentAssistantMessage) {
       currentAssistantMessage.message_id = data.message_id
     }
-    // 找到临时消息并更新ID
+    // 找到临时消息并更新ID（保持 _internalKey 不变以避免重新渲染）
     const index = messages.value.findIndex(m => m.message_id === oldId)
     if (index !== -1 && currentAssistantMessage) {
-      messages.value[index] = { ...currentAssistantMessage } as ChatMessage
+      messages.value[index].message_id = data.message_id
+      // 保留 _internalKey，避免因 key 变化导致组件重新挂载
     }
   } else if (eventType === 'content') {
     // 流式更新内容
@@ -1116,7 +1160,7 @@ const startEditMessage = (messageId: string, content: string) => {
   editingMessageId.value = messageId
   editingText.value = content
   nextTick(() => {
-    editingTextareaRef.value?.focus()
+    editingTextareaRef?.focus()
   })
 }
 
@@ -1124,6 +1168,7 @@ const startEditMessage = (messageId: string, content: string) => {
 const cancelEdit = () => {
   editingMessageId.value = null
   editingText.value = ''
+  editingTextareaRef = null
 }
 
 // 确认重新开始（使用编辑后的内容）
@@ -1149,8 +1194,8 @@ const confirmRestart = async () => {
     // 先取消编辑状态
     cancelEdit()
 
-    // 删除这条消息之后的所有消息
-    const messagesToDelete = messages.value.slice(messageIndex + 1)
+    // 删除从这条消息开始的所有消息（包括这条消息本身）
+    const messagesToDelete = messages.value.slice(messageIndex)
     for (const msg of messagesToDelete) {
       try {
         await api.delete(`/history/${msg.message_id}`, {
@@ -1158,20 +1203,6 @@ const confirmRestart = async () => {
         })
       } catch (e) {
         console.error(`删除消息 ${msg.message_id} 失败:`, e)
-      }
-    }
-
-    // 更新当前消息的内容（如果内容有变化）
-    if (editedText !== messages.value[messageIndex].context) {
-      try {
-        await api.put(`/history/${messageIdToRestart}`, {
-          context: editedText
-        }, {
-          params: { project_id: selectedProjectId.value }
-        })
-      } catch (e) {
-        console.error(`更新消息失败:`, e)
-        // 如果更新失败，仍然继续流程
       }
     }
 
@@ -1384,6 +1415,20 @@ onUnmounted(() => {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* 优化思考中的弹跳动画 */
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-bounce {
+  animation: bounce 1.4s infinite ease-in-out;
 }
 
 .markdown-content :deep(pre) {
