@@ -1,0 +1,46 @@
+import httpx
+import pytest
+
+from api.services import SdForgeService
+
+
+def _server_available(base_url: str) -> bool:
+    """检查 SD Forge 服务器是否可用。
+    
+    :param base_url: 服务器基础URL
+    :return: 服务器是否可用
+    """
+    try:
+        with httpx.Client(timeout=2.0) as c:
+            r = c.get(f"{base_url}/sdapi/v1/sd-models")
+            r.raise_for_status()
+            return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _server_available("http://127.0.0.1:7860"), reason="sd-forge 服务器不可用")
+def test_txt2img_minimal():
+    """测试最小参数的文生图功能。
+    
+    验证 SD Forge 服务的 txt2img API 是否能正常工作并返回预期的响应格式。
+    """
+    svc = SdForgeService()
+    resp = svc.create_text2image(
+        prompt="a cute cat, high quality",
+        negative_prompt="",
+        width=512,
+        height=512,
+        steps=10,
+        cfg_scale=7.0,
+        sampler_name="DPM++ 2M Karras",
+        seed=42,
+        n_iter=1,
+        batch_size=1,
+        loras=None,
+        timeout=60.0,
+    )
+    assert isinstance(resp, dict)
+    # 典型响应包含 base64 图片列表
+    assert "images" in resp and isinstance(resp["images"], list)
+    assert len(resp["images"]) >= 1
