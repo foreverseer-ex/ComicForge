@@ -3,6 +3,7 @@ import './style.css'
 import App from './App.vue'
 import router from './router'
 import pinia from './stores'
+import { initImageCache } from './utils/imageCache'
 
 // Vue app 初始化
 try {
@@ -10,6 +11,11 @@ try {
   
   app.use(pinia)
   app.use(router)
+  
+  // 初始化图片缓存
+  initImageCache().catch(err => {
+    console.warn('初始化图片缓存失败:', err)
+  })
   
   app.mount('#app')
 } catch (error) {

@@ -803,16 +803,20 @@ const loadCurrentParagraph = async () => {
     
     // 获取当前段落内容
     try {
-      const content = await api.get(`/reader/line/${currentProject.value.project_id}/${chapter}/${line}`)
+      const content = await api.get('/reader/line', {
+        params: {
+          project_id: currentProject.value.project_id,
+          chapter,
+          line
+        }
+      })
       // 立即更新内容，不等待图片加载
       currentParagraph.value = content
       
       // 加载对应的图片（使用当前行的行号）
       const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7864'
-      // 图片路径：/file/image/{project_id}/{line}
-      // 注意：line 是全局行号，不是章节内的行号
-      // 但根据后端实现，似乎使用当前行号即可
-      const imageUrl = `${baseURL}/file/image/${currentProject.value.project_id}/${line}`
+      // 图片路径：/file/image?project_id=...&line=...
+      const imageUrl = `${baseURL}/file/image?project_id=${currentProject.value.project_id}&line=${line}`
       // 先设置URL，如果图片不存在会在handleImageError中处理
       currentImageUrl.value = imageUrl
     } catch (error: any) {
@@ -844,7 +848,12 @@ const prevParagraph = async () => {
       newChapter -= 1
       // 获取上一章的所有行，取最后一行的行号
       try {
-        const chapterLines = await api.get(`/reader/lines/${currentProject.value.project_id}/${newChapter}`)
+        const chapterLines = await api.get('/reader/lines', {
+          params: {
+            project_id: currentProject.value.project_id,
+            chapter: newChapter
+          }
+        })
         if (chapterLines && chapterLines.length > 0) {
           newLine = chapterLines[chapterLines.length - 1].line
         } else {
@@ -858,7 +867,7 @@ const prevParagraph = async () => {
 
     if (newLine >= 0 && newChapter >= 0) {
       // 更新项目进度
-      await api.put(`/project/${currentProject.value.project_id}/progress`, null, {
+      await api.put(`/project/${currentProject.value.project_id}`, null, {
         params: {
           current_line: newLine,
           current_chapter: newChapter
@@ -883,7 +892,12 @@ const nextParagraph = async () => {
 
     // 检查是否超出当前章节
     try {
-      const chapterLines = await api.get(`/reader/lines/${currentProject.value.project_id}/${newChapter}`)
+      const chapterLines = await api.get('/reader/lines', {
+        params: {
+          project_id: currentProject.value.project_id,
+          chapter: newChapter
+        }
+      })
       if (chapterLines && chapterLines.length > 0) {
         const maxLine = chapterLines[chapterLines.length - 1].line
         if (newLine > maxLine && newChapter < currentProject.value.total_chapters - 1) {
@@ -907,7 +921,7 @@ const nextParagraph = async () => {
     }
 
     // 更新项目进度
-    await api.put(`/project/${currentProject.value.project_id}/progress`, null, {
+    await api.put(`/project/${currentProject.value.project_id}`, null, {
       params: {
         current_line: newLine,
         current_chapter: newChapter
@@ -1020,7 +1034,7 @@ const jumpToPosition = async () => {
   
   try {
     // 更新项目进度
-    await api.put(`/project/${currentProject.value.project_id}/progress`, null, {
+    await api.put(`/project/${currentProject.value.project_id}`, null, {
       params: {
         current_line: targetLine,
         current_chapter: targetChapter
@@ -1112,42 +1126,17 @@ const processFile = async (file: File) => {
 const uploadFile = async (file: File) => {
   isUploading.value = true
   try {
-    const formData = new FormData()
-    formData.append('file', file)
-    
-    // 使用 axios 直接调用，不通过拦截器（让浏览器自动设置 Content-Type 和 boundary）
-    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7864'
-    const response = await axios.post(`${baseURL}/file/upload`, formData)
-    
-    // axios 返回的响应对象，数据在 response.data 中
-    const data = response.data
-    if (data && data.file_path) {
-      projectForm.value.novel_path = data.file_path
-      console.log('文件上传成功:', data)
-    } else {
-      throw new Error('响应数据格式错误: 缺少 file_path 字段')
-    }
+    // 注意：文件上传功能已被移除，直接使用本地文件路径
+    // 如果用户选择文件，我们直接使用 File 对象的路径
+    // 但浏览器出于安全考虑，不能直接访问文件路径
+    // 所以这里我们提示用户：文件上传功能暂不可用
+    alert('文件上传功能暂不可用，请直接提供文件路径')
+    projectForm.value.novel_path = ''
+    selectedFile.value = null
+    selectedFileName.value = ''
   } catch (error: any) {
-    console.error('文件上传失败:', error)
-    let message = '文件上传失败'
-    if (error.response) {
-      // 服务器返回了错误响应
-      if (error.response.status === 404) {
-        message = 'API 端点不存在，请检查后端服务是否正常运行'
-      } else if (error.response.data?.detail) {
-        message = error.response.data.detail
-      } else {
-        message = `服务器错误: ${error.response.status} ${error.response.statusText}`
-      }
-    } else if (error.request) {
-      // 请求已发出但没有收到响应
-      message = '无法连接到服务器，请检查后端服务是否启动'
-    } else {
-      // 其他错误
-      message = error.message || '文件上传失败'
-    }
-    alert(message)
-    // 清除选择
+    console.error('文件处理失败:', error)
+    alert('文件处理失败，请检查文件是否有效')
     selectedFile.value = null
     selectedFileName.value = ''
     projectForm.value.novel_path = ''
@@ -1205,8 +1194,8 @@ const saveProject = async () => {
         params.novel_path = projectForm.value.novel_path.trim()
       }
 
-      const newProject = await api.post('/project/create', null, { params })
-      selectedProjectId.value = newProject.project_id
+      const response = await api.post('/project/create', null, { params })
+      selectedProjectId.value = response.project_id
     }
     
     // 重置表单

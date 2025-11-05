@@ -24,3 +24,10 @@ class CivitaiSettings(BaseModel):
         gt=0,
         description="API 请求超时时间（秒）"
     )
+    
+    max_concurrency: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="导入模型时的最大并发数（1-10）"
+    )

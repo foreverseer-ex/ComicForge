@@ -97,11 +97,12 @@
         class="h-full flex items-center justify-center py-20"
       >
         <div 
+          @click="showCreateDialog = true"
           :class="[
-            'text-center rounded-lg border p-8',
+            'text-center rounded-lg border p-8 cursor-pointer transition-all',
             isDark 
-              ? 'bg-gray-800 border-gray-700' 
-              : 'bg-white border-gray-200'
+              ? 'bg-gray-800 border-gray-700 hover:bg-gray-700 hover:border-gray-600' 
+              : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'
           ]"
         >
           <UserGroupIcon 
@@ -122,7 +123,7 @@
               isDark ? 'text-gray-500' : 'text-gray-500'
             ]"
           >
-            点击"新增角色"按钮开始添加角色
+            点击此处或"新增角色"按钮开始添加角色
           </p>
         </div>
       </div>
@@ -380,6 +381,7 @@
       @edit="handleEdit"
       @generate="handleGenerate"
       @examples="openExamplesDialog"
+      @refresh="handleRefresh"
     />
   </div>
 </template>
@@ -435,7 +437,7 @@ const loadActors = async () => {
 
   loading.value = true
   try {
-    const data = await api.get('/actor/', {
+    const data = await api.get('/actor/list', {
       params: {
         project_id: selectedProjectId.value,
         limit: 1000
@@ -471,13 +473,10 @@ const saveActor = async () => {
   try {
     if (editingActor.value) {
       // 更新角色
-      await api.put(`/actor/${editingActor.value.actor_id}`, null, {
-        params: {
-          project_id: selectedProjectId.value,
-          name: actorForm.value.name.trim(),
-          desc: actorForm.value.desc.trim(),
-          color: actorForm.value.color.trim()
-        }
+      await api.put(`/actor/${editingActor.value.actor_id}`, {
+        name: actorForm.value.name.trim(),
+        desc: actorForm.value.desc.trim(),
+        color: actorForm.value.color.trim()
       })
     } else {
       // 创建角色
@@ -543,11 +542,7 @@ const confirmDelete = async () => {
 
   deleting.value = true
   try {
-    await api.delete(`/actor/${actorToDelete.value.actor_id}`, {
-      params: {
-        project_id: selectedProjectId.value
-      }
-    })
+    await api.delete(`/actor/${actorToDelete.value.actor_id}`)
     
     actorToDelete.value = null
     await loadActors()
@@ -556,6 +551,18 @@ const confirmDelete = async () => {
     alert('删除角色失败: ' + (error.response?.data?.detail || error.message))
   } finally {
     deleting.value = false
+  }
+}
+
+// 刷新角色列表（用于详情对话框更新后刷新）
+const handleRefresh = async () => {
+  await loadActors()
+  // 如果详情对话框打开，更新其数据
+  if (detailActor.value) {
+    const updatedActor = actors.value.find(a => a.actor_id === detailActor.value?.actor_id)
+    if (updatedActor) {
+      detailActor.value = updatedActor
+    }
   }
 }
 
@@ -575,7 +582,16 @@ watch(showCreateDialog, (newVal) => {
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
+  // 初始化 store（从 localStorage 恢复项目ID）
+  projectStore.init()
+  
+  // 确保项目列表已加载
+  if (projectStore.projects.length === 0) {
+    await projectStore.loadProjects()
+  }
+  
+  // 加载角色列表
   loadActors()
 })
 </script>

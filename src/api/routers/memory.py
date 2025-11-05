@@ -32,10 +32,10 @@ router = APIRouter(
 
 # ==================== 记忆条目操作 ====================
 
-@router.post("/create", response_model=MemoryEntry, summary="创建记忆条目")
+@router.post("/create", summary="创建记忆条目")
 async def create_memory(
     request: MemoryCreateRequest
-) -> MemoryEntry:
+) -> dict:
     """
     创建新的记忆条目。
     
@@ -43,7 +43,7 @@ async def create_memory(
         request: 创建记忆的请求体，包含 project_id, key, value, description
     
     Returns:
-        创建的记忆条目（包含生成的 memory_id）
+        创建的记忆条目ID（memory_id）
     
     实现要点：
     - 生成唯一 memory_id
@@ -70,37 +70,40 @@ async def create_memory(
     )
     
     # 保存到数据库
-    created_entry = MemoryService.create(entry)
+    MemoryService.create(entry)
     logger.info(f"创建记忆条目: {request.key} (project: {request.project_id})")
     
-    return created_entry
+    return {"memory_id": memory_id}
 
 
 @router.get("/list", response_model=List[MemoryEntry], summary="列出记忆")
 async def list_memories(
     project_id: str,
     key: Optional[str] = None,
-    limit: int = 100
+    limit: int = 100,
+    offset: int = 0
 ) -> List[MemoryEntry]:
     """
-    列出项目的记忆条目。
+    列出项目的记忆条目，支持分页。
     
     Args:
-        project_id: 项目ID
+        project_id: 项目ID（查询参数）
         key: 按键名过滤（可选，精确匹配）
         limit: 返回数量限制（默认100，最大1000）
+        offset: 偏移量（默认0）
     
     Returns:
         符合条件的记忆列表
     """
     # 获取项目的所有记忆条目
-    entries = MemoryService.list(project_id, limit=limit)
+    entries = MemoryService.list(project_id, limit=limit + offset)
     
     # 如果提供了键名过滤，应用过滤
     if key:
         entries = [e for e in entries if e.key == key]
     
-    return entries
+    # 应用偏移量（简单的内存分页）
+    return entries[offset:offset + limit]
 
 
 # ==================== 预定义键查询 ====================
@@ -114,7 +117,7 @@ async def get_key_description(
     获取键的描述（如果在预定义列表中）。
     
     Args:
-        key: 记忆键名
+        key: 记忆键名（查询参数）
     
     Returns:
         包含键和描述的字典 {"key": "...", "description": "..."}
@@ -159,23 +162,55 @@ async def get_all_key_descriptions() -> Dict[str, str]:
     return memory_description
 
 
+# ==================== 批量操作 ====================
+# 注意：这些路由必须在 /{memory_id} 之前定义，避免路径冲突
+
+@router.delete("/clear", summary="清空项目的所有记忆")
+async def clear_memories(
+    project_id: str
+) -> dict:
+    """
+    清空指定项目的所有记忆条目。
+    
+    Args:
+        project_id: 项目ID（查询参数）
+    
+    Returns:
+        删除结果（包含删除的记录数）
+    
+    警告：
+    - 此操作不可恢复
+    - 会删除该项目的所有记忆条目
+    """
+    count = MemoryService.clear(project_id)
+    logger.info(f"清空项目 {project_id} 的所有记忆: {count} 条")
+    return {
+        "message": f"已清空项目的所有记忆条目",
+        "project_id": project_id,
+        "deleted_count": count
+    }
+
+
+# ==================== 基于ID的CRUD操作 ====================
+# 注意：ID参数通过路径参数传递，权限验证在服务层进行
+# 注意：这些路由必须在具体路径（如 /clear）之后定义，避免路径冲突
+
 @router.get("/{memory_id}", response_model=MemoryEntry, summary="获取记忆条目")
-async def get_memory(
-    project_id: str,
-    memory_id: str
-) -> MemoryEntry:
+async def get_memory(memory_id: str) -> MemoryEntry:
     """
     获取指定记忆条目。
     
     Args:
-        project_id: 项目ID
-        memory_id: 记忆ID
+        memory_id: 记忆ID（路径参数）
     
     Returns:
         记忆条目
+    
+    Raises:
+        404: 记忆条目不存在
     """
     entry = MemoryService.get(memory_id)
-    if not entry or entry.project_id != project_id:
+    if not entry:
         raise HTTPException(status_code=404, detail=f"记忆条目不存在: {memory_id}")
     
     return entry
@@ -183,7 +218,6 @@ async def get_memory(
 
 @router.put("/{memory_id}", response_model=MemoryEntry, summary="更新记忆")
 async def update_memory(
-    project_id: str,
     memory_id: str,
     request: MemoryUpdateRequest
 ) -> MemoryEntry:
@@ -191,16 +225,18 @@ async def update_memory(
     更新记忆条目。
     
     Args:
-        project_id: 项目ID
-        memory_id: 记忆ID
+        memory_id: 记忆ID（路径参数）
         request: 更新记忆的请求体，包含 key, value, description（都是可选的）
     
     Returns:
         更新后的记忆条目
+    
+    Raises:
+        404: 记忆条目不存在
     """
-    # 先检查记忆是否存在且属于该会话
+    # 检查记忆是否存在
     entry = MemoryService.get(memory_id)
-    if not entry or entry.project_id != project_id:
+    if not entry:
         raise HTTPException(status_code=404, detail=f"记忆条目不存在: {memory_id}")
     
     # 构建更新字典
@@ -217,28 +253,27 @@ async def update_memory(
     if not updated_entry:
         raise HTTPException(status_code=404, detail=f"记忆条目不存在: {memory_id}")
     
-    logger.info(f"更新记忆条目: {memory_id} (session: {project_id})")
+    logger.info(f"更新记忆条目: {memory_id} (project: {updated_entry.project_id})")
     return updated_entry
 
 
 @router.delete("/{memory_id}", summary="删除记忆")
-async def delete_memory(
-    project_id: str,
-    memory_id: str
-) -> dict:
+async def delete_memory(memory_id: str) -> dict:
     """
     删除记忆条目。
     
     Args:
-        project_id: 项目ID
-        memory_id: 记忆ID
+        memory_id: 记忆ID（路径参数）
     
     Returns:
-        删除结果
+        删除的记忆ID
+    
+    Raises:
+        404: 记忆条目不存在
     """
-    # 先检查记忆是否存在且属于该会话
+    # 检查记忆是否存在
     entry = MemoryService.get(memory_id)
-    if not entry or entry.project_id != project_id:
+    if not entry:
         raise HTTPException(status_code=404, detail=f"记忆条目不存在: {memory_id}")
     
     # 删除记忆
@@ -246,32 +281,6 @@ async def delete_memory(
     if not success:
         raise HTTPException(status_code=404, detail=f"记忆条目不存在: {memory_id}")
     
-    logger.info(f"删除记忆条目: {memory_id} (project: {project_id})")
-    return {"message": "记忆条目删除成功", "memory_id": memory_id}
-
-
-@router.delete("/project/{project_id}/all", summary="批量删除项目的所有记忆")
-async def delete_all_memories(
-    project_id: str
-) -> dict:
-    """
-    删除指定项目的所有记忆条目。
-    
-    Args:
-        project_id: 项目ID
-    
-    Returns:
-        删除结果（包含删除的记录数）
-    
-    警告：
-    - 此操作不可恢复
-    - 会删除该项目的所有记忆条目
-    """
-    count = MemoryService.clear(project_id)
-    logger.info(f"批量删除项目 {project_id} 的所有记忆: {count} 条")
-    return {
-        "message": f"已删除项目的所有记忆条目",
-        "project_id": project_id,
-        "deleted_count": count
-    }
+    logger.info(f"删除记忆条目: {memory_id} (project: {entry.project_id})")
+    return {"memory_id": memory_id}
 

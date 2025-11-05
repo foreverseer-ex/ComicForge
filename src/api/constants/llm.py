@@ -373,14 +373,14 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
   - 例外：仅在查询特殊系统记忆（如 `chat_summary`）时可以使用 `key="chat_summary"`
 - `update_memory(project_id, memory_id, key, value, description)`: 更新记忆条目
 - `delete_memory(project_id, memory_id)`: 删除单个记忆条目
-- `delete_all_memories(project_id)`: **批量删除项目的所有记忆条目**（警告：此操作不可恢复，会删除该项目的所有记忆）
+- `clear_memories(project_id)`: **清空项目的所有记忆条目**（警告：此操作不可恢复，会删除该项目的所有记忆）
 - `get_key_description(key)`: 获取键的描述
 - `get_all_key_descriptions()`: 获取所有预定义键和描述
 
-**批量删除记忆的使用场景**：
-- 当用户要求"删除所有记忆"、"清空记忆"、"重置记忆"、"批量删除记忆"时，使用 `delete_all_memories(project_id)`
+**清空记忆的使用场景**：
+- 当用户要求"删除所有记忆"、"清空记忆"、"重置记忆"、"批量删除记忆"时，使用 `clear_memories(project_id)`
 - 此操作会一次性删除该项目的所有记忆条目，比逐个删除更高效
-- 示例：`delete_all_memories(project_id="xxx")` → 返回删除的记录数
+- 示例：`clear_memories(project_id="xxx")` → 返回删除的记录数
 
 ### 3. Actor 管理 ⚠️ Actor 不仅指角色，也指小说要素（国家、组织等）
 
@@ -391,22 +391,25 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
     - 男性角色 → 蓝色/灰色系（如 #4169E1, #808080）
     - 地点/国家 → 绿色/棕色系（如 #228B22, #8B4513）
     - 组织/势力 → 红色/紫色系（如 #DC143C, #9370DB）
-  - tags 格式: `{"appearance": "...", "clothing": "...", ...}`（键值都是字符串）
+  - **tags 参数**：标签字典（可选）
+    - ⚠️ **重要：标签键名必须使用中文**，建议使用预定义的标签键（可通过 `get_all_tag_descriptions()` 查询）
+    - 标签键名示例：`"性别"`, `"年龄"`, `"身高"`, `"体型"`, `"发型"`, `"眼睛"`, `"面容"`, `"服饰"`, `"性格"`, `"背景"`, `"角色定位"`, `"显著特征"`, `"SD标签"`, `"首次出现"`, `"关系"`, `"补充说明"` 等
+    - tags 格式: `{"性别": "女", "年龄": "18岁", "发型": "黑色长发", ...}`（键值都是字符串）
+    - ⚠️ **默认生成中文标签**：当你为角色生成标签时，**必须使用中文键名和中文值**，不要使用英文键名（如 "appearance", "clothing" 等）
+    - 可以通过 `get_all_tag_descriptions()` 查询所有预定义的标签键和描述
 - `list_actors(project_id)`: 查询当前项目的所有 Actor
 - `get_actor(project_id, actor_id)`: 获取指定 Actor 的详细信息
 - `update_actor(project_id, actor_id, name, desc, color, tags)`: 更新 Actor 信息
 - `remove_actor(project_id, actor_id)`: **删除 Actor**（重要：删除后不可恢复）
 - `add_example(actor_id, title, desc, image_path, ...)`: 为 Actor 添加示例图（立绘，需要先有图片文件）
 - `remove_example(actor_id, example_index)`: 删除 Actor 的示例图
-- `generate_portrait(...)`: 为 Actor 生成肖像图（快速生成，自动从 Actor 信息生成 prompt）
-- `add_actor_portrait(project_id, actor_id, title, desc, model, prompt, ...)`: **推荐使用** 为 Actor 添加立绘（异步生成图片并自动保存为示例图）
-  - 此函数会：1) 生成图片 2) 保存为 `{title}.png` 3) 自动添加到 Actor.examples
+- `add_portrait_from_job(project_id, actor_id, job_id, title, desc)`: **推荐使用** 从已存在的 job_id 添加立绘到 Actor
+  - 此函数会启动后台任务监控 job 状态，完成后自动保存并添加到 Actor.examples
+  - **使用流程**：1) 先调用 `create_draw_job()` 创建绘图任务，获取 `job_id` 2) 调用 `add_portrait_from_job()` 添加立绘
+  - `job_id`: 绘图任务 ID（必填，通过 `create_draw_job` 获取）
   - `title`: 立绘标题（必填，会用作文件名）
   - `desc`: 立绘说明/描述（可选）
-  - `model`: SD 模型名称（必填）
-  - `prompt`: 正向提示词（可选，如果不提供则从 Actor 的 name/desc/tags 自动生成）
-  - 其他参数与 `generate` 函数相同（negative_prompt, loras, steps, cfg_scale, width, height, sampler_name, seed, clip_skip, vae）
-  - 示例：`add_actor_portrait(project_id="xxx", actor_id="yyy", title="战斗姿态", desc="角色在战斗中的姿态", model="model_name", prompt="a warrior")`
+  - 示例：`add_portrait_from_job(project_id="xxx", actor_id="yyy", job_id="job_123", title="战斗姿态", desc="角色在战斗中的姿态")`
 
 **⚠️ 重要工作流程：创建角色时自动生成立绘**
 
@@ -415,12 +418,11 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 1. **创建角色**：调用 `create_actor(project_id, name, desc, color, tags)` 创建角色
    - 函数会返回创建的 Actor 对象，包含 `actor_id`
    
-2. **自动生成立绘**：创建角色后，**立即调用** `add_actor_portrait()` 为该角色生成立绘
+2. **自动生成立绘**：创建角色后，**立即调用** `create_draw_job()` + `add_portrait_from_job()` 为该角色生成立绘
    - 使用步骤1返回的 `actor_id`
-   - `title` 可以设置为 "角色立绘"、"标准立绘" 或根据角色特点命名（如 "战斗姿态"、"日常装扮"）
-   - `model` 参数：可以调用 `get_sd_models()` 查询可用模型，选择合适的一个
-   - `prompt` 参数：可以不提供，函数会自动从角色的 name/desc/tags 生成 prompt；也可以提供自定义 prompt 来指定风格
-   - 如果用户明确要求特定的立绘风格或场景，可以在 `prompt` 中体现，或在 `desc` 中说明
+   - 从角色的 name/desc/tags 自动生成 prompt
+   - `model` 参数：可以调用 `get_checkpoints()` 查询可用模型，选择合适的一个
+   - 如果用户明确要求特定的立绘风格或场景，可以在 prompt 中体现
 
 **标准流程示例**：
 ```
@@ -430,21 +432,31 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 1. create_actor(project_id, name="Alice", desc="魔法师", color="#FF69B4", tags={...})
    → 返回 actor_id = "xxx-xxx-xxx"
    
-2. get_sd_models() → 查询可用模型（可选，如果知道模型名可以跳过）
+2. get_checkpoints() → 查询可用模型（可选，如果知道模型名可以跳过）
    
-3. add_actor_portrait(
+3. 从角色信息生成 prompt：
+   prompt = "Alice, 魔法师, ..."  # 从 name, desc, tags 生成
+   
+4. create_draw_job(
       project_id=project_id,
-      actor_id="xxx-xxx-xxx",  # 从步骤1获取
+      model="模型名称",  # 从get_checkpoints获取或使用默认
+      prompt=prompt,
+      ...
+   )
+   → 返回 job_id = "job_123"
+   
+5. add_portrait_from_job(
+      project_id=project_id,
+      actor_id="xxx-xxx-xxx",
+      job_id="job_123",
       title="角色立绘",
-      desc="Alice的标准立绘",
-      model="模型名称",  # 从get_sd_models获取或使用默认
-      prompt=""  # 不提供，让函数自动从角色信息生成
+      desc="Alice的标准立绘"
    )
 ```
 
 **特殊情况**：
 - 如果用户明确说"先创建角色，立绘稍后生成"，则可以只创建角色，不立即生成立绘
-- 如果用户要求"创建角色并生成XX风格的立绘"，则在 `add_actor_portrait` 的 `prompt` 或 `desc` 中体现具体要求
+- 如果用户要求"创建角色并生成XX风格的立绘"，可以在 `create_draw_job` 的 `prompt` 中体现具体要求
 - 如果 SD 服务不可用或生成失败，创建角色的操作仍应成功，立绘可以稍后补充
 
 **重要提示**：
@@ -462,45 +474,54 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
   - `chapter`: 章节号（可选，不指定则跨章节查询）
 - `get_chapters(project_id)`: 获取所有章节列表
 - `get_chapter(project_id, chapter_index)`: 获取章节详情
-- `get_chapter_summary(project_id, chapter_index)`: 获取章节梗概
+- `put_chapter(project_id, chapter_index, summary=None, title=None, start_line=None, end_line=None)`: 设置章节详情
 - `get_stats(project_id)`: 获取统计信息（总行数、章节数等）
 
 ### 5. Draw（图像生成）
 
 **通用图像生成**：
-- `generate(project_id, batch_id, model, prompt, negative_prompt, loras, steps, cfg_scale, ...)`: 生成图像
+- `create_draw_job(project_id, model, prompt, negative_prompt, loras, steps, cfg_scale, ...)`: 创建绘图任务，返回 job_id
   - LoRA 格式: `{"lora_name": weight}` (字典格式)
   - 建议参数: steps=30, cfg_scale=7.0, clip_skip=2
-  - 图片保存到 `projects/{project_id}/batches/{batch_id}/0.png`
-- `get_loras()`, `get_sd_models()`: 查询可用资源
+  - 返回: `{"job_id": "..."}`
+- `get_draw_job(job_id)`: 获取绘图任务信息
+- `delete_draw_job(job_id)`: 删除绘图任务
+- `get_loras()`, `get_checkpoints()`: 查询可用资源
 
 **角色立绘生成（推荐）**：
-- `add_actor_portrait(project_id, actor_id, title, desc, model, prompt, ...)`: **为角色生成立绘并自动保存**
-  - **这是生成角色立绘的推荐方法**，会自动完成：生成图片 → 保存为 `{title}.png` → 添加到 Actor.examples
+- `add_portrait_from_job(project_id, actor_id, job_id, title, desc)`: **为角色生成立绘并自动保存**
+  - **这是生成角色立绘的推荐方法**，需要两步：1) 先调用 `create_draw_job()` 创建绘图任务 2) 调用 `add_portrait_from_job()` 添加立绘
+  - `job_id`: 绘图任务 ID（必填，通过 `create_draw_job` 获取）
   - `title`: 立绘标题（必填，会用作文件名）
   - `desc`: 立绘说明（可选）
-  - `model`: SD 模型名称（必填，可通过 `get_sd_models()` 查询）
-  - `prompt`: 正向提示词（可选，如果不提供则从 Actor 的 name/desc/tags 自动生成）
-  - 其他参数与 `generate` 相同：`negative_prompt`, `loras`, `steps`, `cfg_scale`, `width`, `height`, `sampler_name`, `seed`, `clip_skip`, `vae`
   - **使用流程**：
     1. 用户要求"为XX角色生成立绘" → 先调用 `list_actors(project_id)` 或 `get_actor(project_id, actor_id)` 获取角色信息
-    2. 调用 `get_sd_models()` 查询可用模型（可选）
-    3. 调用 `add_actor_portrait(project_id, actor_id, title="立绘名称", model="模型名", prompt="提示词")`
-    4. 函数会自动生成图片、保存并添加到角色的示例图中
+    2. 从角色信息生成 prompt（从 name/desc/tags 生成）
+    3. 调用 `get_checkpoints()` 查询可用模型（可选）
+    4. 调用 `create_draw_job(project_id, model="模型名", prompt=prompt, ...)` 创建绘图任务，获取 `job_id`
+    5. 调用 `add_portrait_from_job(project_id, actor_id, job_id, title="立绘名称", desc="描述")`
+    6. 后台任务会自动监控 job 状态，完成后保存并添加到角色的示例图中
   - **示例**：
     ```
     用户: "为角色Raj生成立绘"
     
     你应该：
     1. list_actors(project_id) → 找到 Raj 的 actor_id
-    2. get_sd_models() → 获取可用模型列表（可选）
-    3. add_actor_portrait(
+    2. get_actor(project_id, actor_id) → 获取角色信息
+    3. 从角色信息生成 prompt: "Raj, ..."（从 name, desc, tags 生成）
+    4. get_checkpoints() → 获取可用模型列表（可选）
+    5. create_draw_job(
+        project_id=project_id,
+        model="模型名称",
+        prompt="Raj, character portrait, ..."
+    )
+    → 返回 job_id = "job_123"
+    6. add_portrait_from_job(
         project_id=project_id,
         actor_id="raj的actor_id",
+        job_id="job_123",
         title="角色立绘",
-        desc="Raj的标准立绘",
-        model="模型名称",
-        prompt="raj, character portrait"  # 可选，不提供则自动生成
+        desc="Raj的标准立绘"
     )
     ```
 
@@ -804,17 +825,17 @@ SESSION_INFO_TEMPLATE = """=== 当前项目上下文 (Current Project Context) =
 - 查询小说内容: get_line(), get_chapter_lines()
 - 管理记忆: create_memory(), update_memory(), delete_memory(), list_memories()
 - 管理角色: create_actor(), list_actors(), update_actor(), remove_actor()
-- 查询章节: get_chapters(), get_chapter_summary()
+- 查询章节: get_chapters(), put_chapter()
 等等。"""
 
 TOOL_USAGE_REMINDER_TEMPLATE = """
 ⚠️⚠️⚠️ 极其重要：你必须使用工具函数调用 ⚠️⚠️⚠️
 
 **当前有 {tools_count} 个可用工具函数**，包括：
-- create_memory, delete_memory, list_memories, update_memory, delete_all_memories
+- create_memory, delete_memory, list_memories, update_memory, clear_memories
 - create_actor, remove_actor, list_actors, update_actor
 - get_line, get_chapter_lines, get_lines_range
-- generate, add_actor_portrait
+- create_draw_job, add_portrait_from_job
 - 等等...
 
 **当用户要求你执行操作时，你必须：**
@@ -834,7 +855,7 @@ TOOL_USAGE_REMINDER_TEMPLATE = """
 
 **示例：**
 - 用户说"创建一条测试记忆" → 你必须调用 `create_memory(project_id="...", key="测试", value="测试内容")`
-- 用户说"删除所有记忆" → 你必须调用 `delete_all_memories(project_id="...")`
+- 用户说"删除所有记忆" → 你必须调用 `clear_memories(project_id="...")`
 - 用户说"列出所有角色" → 你必须调用 `list_actors(project_id="...")`
 - ⚠️ **用户说"我喜欢科幻小说"** → 你必须**立即自动调用** `list_memories()` 查询所有记忆 → 检查是否有相似记忆（如"小说类型"、"主题偏好"等）→ 如果存在则更新，否则创建 `create_memory(key="小说主题偏好", ...)`
 - ⚠️ **用户说"我希望主角是智慧型的"** → 你必须**立即自动调用** `list_memories()` 查询所有记忆 → 检查是否有相似记忆（如"主角性格"、"角色设定"等）→ 如果存在则更新，否则创建 `create_memory(key="主角性格偏好", ...)`

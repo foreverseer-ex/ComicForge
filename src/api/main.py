@@ -21,6 +21,7 @@ from api.routers import (
     history,
     settings,
     help,
+    model_meta,
 )
 from api.services.db.base import init_db
 from api.settings import AppSettings
@@ -80,6 +81,7 @@ app.include_router(chat.router)
 app.include_router(history.router)
 app.include_router(settings.router)
 app.include_router(help.router)
+app.include_router(model_meta.router)
 
 
 @app.get("/", tags=["根路径"])

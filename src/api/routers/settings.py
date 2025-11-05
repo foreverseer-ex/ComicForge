@@ -14,6 +14,7 @@ from api.settings.llm_setting import LlmSettings
 from api.settings.draw_setting import DrawSettings
 from api.settings.civitai_setting import CivitaiSettings
 from api.settings.sd_forge_setting import SdForgeSettings
+from api.settings.frontend_setting import FrontendSettings
 
 router = APIRouter(
     prefix="/settings",
@@ -30,6 +31,7 @@ class SettingsUpdateRequest(BaseModel):
     draw: Dict[str, Any] | None = None
     civitai: Dict[str, Any] | None = None
     sd_forge: Dict[str, Any] | None = None
+    frontend: Dict[str, Any] | None = None
 
 
 # ==================== 设置读取 ====================
@@ -67,6 +69,12 @@ async def get_civitai_settings() -> CivitaiSettings:
 async def get_sd_forge_settings() -> SdForgeSettings:
     """获取 SD Forge 服务配置"""
     return app_settings.sd_forge
+
+
+@router.get("/frontend", response_model=FrontendSettings, summary="获取前端设置")
+async def get_frontend_settings() -> FrontendSettings:
+    """获取前端 UI 配置"""
+    return app_settings.frontend
 
 
 # ==================== 设置更新 ====================
@@ -192,6 +200,34 @@ async def update_sd_forge_settings(settings: Dict[str, Any]) -> SdForgeSettings:
         raise HTTPException(status_code=400, detail=f"更新 SD Forge 设置失败: {str(e)}")
 
 
+@router.put("/frontend", response_model=FrontendSettings, summary="更新前端设置")
+async def update_frontend_settings(settings: Dict[str, Any]) -> FrontendSettings:
+    """
+    更新前端设置。
+    
+    Args:
+        settings: 前端设置的字典，只包含要更新的字段
+    
+    Returns:
+        更新后的前端设置对象
+    """
+    try:
+        current_dict = app_settings.frontend.model_dump()
+        current_dict.update(settings)
+        new_frontend_settings = FrontendSettings(**current_dict)
+        app_settings.frontend = new_frontend_settings
+        
+        if app_settings.save(reason="更新前端设置"):
+            logger.info("前端设置已更新并保存")
+        else:
+            logger.warning("前端设置已更新，但保存到文件失败")
+        
+        return new_frontend_settings
+    except Exception as e:
+        logger.exception(f"更新前端设置失败: {e}")
+        raise HTTPException(status_code=400, detail=f"更新前端设置失败: {str(e)}")
+
+
 @router.put("/", response_model=AppSettings, summary="批量更新设置")
 async def update_settings(request: SettingsUpdateRequest) -> AppSettings:
     """
@@ -238,6 +274,13 @@ async def update_settings(request: SettingsUpdateRequest) -> AppSettings:
             current_dict.update(request.sd_forge)
             app_settings.sd_forge = SdForgeSettings(**current_dict)
             updated_sections.append("sd_forge")
+        
+        # 更新前端设置
+        if request.frontend is not None:
+            current_dict = app_settings.frontend.model_dump()
+            current_dict.update(request.frontend)
+            app_settings.frontend = FrontendSettings(**current_dict)
+            updated_sections.append("frontend")
         
         if updated_sections:
             # 保存到配置文件

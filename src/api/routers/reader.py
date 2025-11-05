@@ -22,7 +22,7 @@ router = APIRouter(
 
 # ==================== 行读取 ====================
 
-@router.get("/line/{project_id}/{chapter}/{line}", summary="读取指定行", response_model=NovelContent)
+@router.get("/line", summary="读取指定行", response_model=NovelContent)
 async def get_line(
     project_id: str,
     chapter: int,
@@ -32,9 +32,9 @@ async def get_line(
     读取指定行的内容。
     
     Args:
-        project_id: 项目ID
-        chapter: 章节号（从0开始）
-        line: 行号（从0开始）
+        project_id: 项目ID（查询参数）
+        chapter: 章节号（从0开始，查询参数）
+        line: 行号（从0开始，查询参数）
     
     Returns:
         行内容对象
@@ -51,7 +51,7 @@ async def get_line(
     return content
 
 
-@router.get("/lines/{project_id}/{chapter}", summary="读取章节的所有行", response_model=List[NovelContent])
+@router.get("/lines", summary="读取章节的所有行", response_model=List[NovelContent])
 async def get_chapter_lines(
     project_id: str,
     chapter: int
@@ -60,8 +60,8 @@ async def get_chapter_lines(
     读取指定章节的所有行。
     
     Args:
-        project_id: 项目ID
-        chapter: 章节号
+        project_id: 项目ID（查询参数）
+        chapter: 章节号（查询参数）
     
     Returns:
         章节所有行的内容列表
@@ -69,7 +69,7 @@ async def get_chapter_lines(
     return NovelContentService.get_by_chapter(project_id, chapter)
 
 
-@router.get("/lines/range/{project_id}", summary="批量读取行范围的内容", response_model=List[NovelContent])
+@router.get("/lines/range", summary="批量读取行范围的内容", response_model=List[NovelContent])
 async def get_lines_range(
     project_id: str,
     start_line: int,
@@ -82,10 +82,10 @@ async def get_lines_range(
     可以读取指定章节的行范围，也可以跨章节读取（不指定chapter时）。
     
     Args:
-        project_id: 项目ID
-        start_line: 起始行号（包含，从0开始）
-        end_line: 结束行号（包含）
-        chapter: 章节号（可选，不指定则跨章节查询）
+        project_id: 项目ID（查询参数）
+        start_line: 起始行号（包含，从0开始，查询参数）
+        end_line: 结束行号（包含，查询参数）
+        chapter: 章节号（可选，查询参数，不指定则跨章节查询）
     
     Returns:
         行内容列表（按章节和行号排序）
@@ -102,13 +102,13 @@ async def get_lines_range(
 
 # ==================== 章节管理 ====================
 
-@router.get("/chapters/{project_id}", summary="获取所有章节", response_model=List[ChapterSummary])
+@router.get("/chapters", summary="获取所有章节", response_model=List[ChapterSummary])
 async def get_chapters(project_id: str) -> List[ChapterSummary]:
     """
     获取项目的所有章节摘要列表。
     
     Args:
-        project_id: 项目ID
+        project_id: 项目ID（查询参数）
     
     Returns:
         章节摘要列表
@@ -116,7 +116,7 @@ async def get_chapters(project_id: str) -> List[ChapterSummary]:
     return SummaryService.list(project_id)
 
 
-@router.get("/chapter/{project_id}/{chapter_index}", summary="获取章节详情", response_model=ChapterSummary)
+@router.get("/chapter", summary="获取章节详情", response_model=ChapterSummary)
 async def get_chapter(
     project_id: str,
     chapter_index: int
@@ -125,8 +125,8 @@ async def get_chapter(
     获取指定章节的详细信息。
     
     Args:
-        project_id: 项目ID
-        chapter_index: 章节索引
+        project_id: 项目ID（查询参数）
+        chapter_index: 章节索引（查询参数）
     
     Returns:
         章节摘要
@@ -134,8 +134,8 @@ async def get_chapter(
     Raises:
         HTTPException: 章节不存在时返回 404
     """
-    summary = SummaryService.get(chapter_index)
-    if not summary or summary.project_id != project_id:
+    summary = SummaryService.get(project_id, chapter_index)
+    if not summary:
         raise HTTPException(
             status_code=404,
             detail=f"章节不存在: chapter_index={chapter_index}"
@@ -143,47 +143,25 @@ async def get_chapter(
     return summary
 
 
-@router.get("/chapter/{project_id}/{chapter_index}/summary", summary="获取章节梗概")
-async def get_chapter_summary(
-    project_id: str,
-    chapter_index: int
-) -> dict:
-    """
-    获取指定章节的故事梗概（AI生成）。
-    
-    Args:
-        project_id: 项目ID
-        chapter_index: 章节索引
-    
-    Returns:
-        包含梗概的字典，如果未生成则返回 None
-    """
-    summary = SummaryService.get(chapter_index)
-    if not summary or summary.project_id != project_id:
-        raise HTTPException(
-            status_code=404,
-            detail=f"章节不存在: chapter_index={chapter_index}"
-        )
-    return {
-        "project_id": project_id,
-        "chapter_index": chapter_index,
-        "summary": summary.summary
-    }
-
-
-@router.put("/chapter/{project_id}/{chapter_index}/summary", summary="设置章节梗概", response_model=ChapterSummary)
-async def put_chapter_summary(
+@router.put("/chapter", summary="设置章节详情", response_model=ChapterSummary)
+async def put_chapter(
     project_id: str,
     chapter_index: int,
-    summary_text: str
+    summary: str | None = None,
+    title: str | None = None,
+    start_line: int | None = None,
+    end_line: int | None = None
 ) -> ChapterSummary:
     """
-    设置/更新章节的故事梗概。
+    设置/更新章节详情。
     
     Args:
-        project_id: 项目ID
-        chapter_index: 章节索引
-        summary_text: 故事梗概内容
+        project_id: 项目ID（查询参数）
+        chapter_index: 章节索引（查询参数）
+        summary: 故事梗概内容（可选）
+        title: 章节标题（可选）
+        start_line: 起始行号（可选）
+        end_line: 结束行号（可选）
     
     Returns:
         更新后的章节摘要
@@ -191,31 +169,39 @@ async def put_chapter_summary(
     Raises:
         HTTPException: 章节不存在时返回 404
     """
-    # 更新摘要
-    updated_summary = SummaryService.update(
-        chapter_index=chapter_index,
-        summary=summary_text
-    )
+    # 构建更新字典
+    update_data = {}
+    if summary is not None:
+        update_data["summary"] = summary
+    if title is not None:
+        update_data["title"] = title
+    if start_line is not None:
+        update_data["start_line"] = start_line
+    if end_line is not None:
+        update_data["end_line"] = end_line
     
-    if not updated_summary or updated_summary.project_id != project_id:
+    # 更新摘要
+    updated_summary = SummaryService.update(project_id, chapter_index, **update_data)
+    
+    if not updated_summary:
         raise HTTPException(
             status_code=404,
             detail=f"章节不存在: chapter_index={chapter_index}"
         )
     
-    logger.info(f"更新章节梗概: session={project_id}, chapter={chapter_index}")
+    logger.info(f"更新章节详情: session={project_id}, chapter={chapter_index}")
     return updated_summary
 
 
 # ==================== 统计信息 ====================
 
-@router.get("/stats/{project_id}", summary="获取阅读统计信息")
+@router.get("/stats", summary="获取阅读统计信息")
 async def get_stats(project_id: str) -> dict:
     """
     获取会话的阅读统计信息。
     
     Args:
-        project_id: 项目ID
+        project_id: 项目ID（查询参数）
     
     Returns:
         统计信息字典，包含总行数、章节数等

@@ -5,7 +5,7 @@
 小说文件的上传和管理通过 Session 和 NovelContent 服务处理。
 """
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from loguru import logger
 
@@ -22,14 +22,14 @@ router = APIRouter(
 
 # ==================== Actor 示例图访问 ====================
 
-@router.get("/actor-example/{actor_id}/{example_index}", response_class=FileResponse, summary="获取 Actor 示例图")
+@router.get("/actor-example", response_class=FileResponse, summary="获取 Actor 示例图")
 async def get_actor_example_image(actor_id: str, example_index: int) -> FileResponse:
     """
     获取 Actor 示例图文件。
     
     Args:
-        actor_id: Actor ID
-        example_index: 示例图索引
+        actor_id: Actor ID（查询参数）
+        example_index: 示例图索引（查询参数）
     
     Returns:
         图像文件
@@ -60,14 +60,14 @@ async def get_actor_example_image(actor_id: str, example_index: int) -> FileResp
 
 # ==================== 生成图像访问 ====================
 
-@router.get("/image/{project_id}/{line}", response_class=FileResponse, summary="获取生成的图像")
+@router.get("/image", response_class=FileResponse, summary="获取生成的图像")
 async def get_generated_image(project_id: str, line: int) -> FileResponse:
     """
     获取指定行的生成图像。
     
     Args:
-        project_id: 项目ID
-        line: 行号（从0开始）
+        project_id: 项目ID（查询参数）
+        line: 行号（从0开始，查询参数）
     
     Returns:
         图像文件
@@ -94,67 +94,13 @@ async def get_generated_image(project_id: str, line: int) -> FileResponse:
 
 # ==================== 项目文件访问 ====================
 
-@router.post("/upload", summary="上传文件")
-async def upload_file(file: UploadFile = File(...)) -> dict:
-    """
-    上传文件到临时目录，返回文件路径。
-    
-    Args:
-        file: 上传的文件
-    
-    Returns:
-        包含文件路径的字典
-        {
-            "file_path": "上传后的文件路径",
-            "filename": "原始文件名"
-        }
-    
-    注意：
-        文件会被保存到临时目录，需要调用者决定如何处理（如移动到项目目录）。
-    """
-    # 允许的文件扩展名
-    allowed_extensions = {'.txt', '.pdf', '.doc', '.docx', '.md'}
-    file_ext = Path(file.filename).suffix.lower()
-    
-    if file_ext not in allowed_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的文件格式: {file_ext}。支持格式: {', '.join(allowed_extensions)}"
-        )
-    
-    # 创建临时目录
-    temp_dir = project_home.parent / 'temp' / 'uploads'
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 生成唯一的文件名（保留原始扩展名）
-    import uuid
-    unique_filename = f"{uuid.uuid4()}{file_ext}"
-    file_path = temp_dir / unique_filename
-    
-    # 保存文件
-    try:
-        with open(file_path, 'wb') as f:
-            content = await file.read()
-            f.write(content)
-        
-        logger.info(f"文件上传成功: {file.filename} -> {file_path}")
-        
-        return {
-            "file_path": str(file_path),
-            "filename": file.filename
-        }
-    except Exception as e:
-        logger.error(f"文件上传失败: {e}")
-        raise HTTPException(status_code=500, detail=f"文件上传失败: {str(e)}")
-
-
-@router.get("/project/{project_id}/novel", response_class=FileResponse, summary="获取项目小说文件")
+@router.get("/project/novel", response_class=FileResponse, summary="获取项目小说文件")
 async def get_project_novel(project_id: str) -> FileResponse:
     """
     获取项目的原始小说文件。
     
     Args:
-        project_id: 项目ID
+        project_id: 项目ID（查询参数）
     
     Returns:
         小说文件

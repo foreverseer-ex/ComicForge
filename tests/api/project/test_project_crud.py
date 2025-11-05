@@ -38,17 +38,24 @@ class TestProjectCRUD:
         data = response.json()
         
         assert "project_id" in data
-        assert data["title"] == "测试项目_CRUD"
-        assert "project_path" in data
-        assert "created_at" in data
-        assert "updated_at" in data
+        # 创建 API 现在只返回 project_id
+        project_id = data["project_id"]
+        
+        # 验证项目确实被创建了（通过 GET 接口获取完整信息）
+        get_response = client.get(f"/project/{project_id}")
+        assert get_response.status_code == 200
+        project_data = get_response.json()
+        assert project_data["title"] == "测试项目_CRUD"
+        assert "project_path" in project_data
+        assert "created_at" in project_data
+        assert "updated_at" in project_data
         
         print(f"\n[创建项目] ✅ 成功")
-        print(f"  Project ID: {data['project_id']}")
-        print(f"  标题: {data['title']}")
+        print(f"  Project ID: {project_id}")
+        print(f"  标题: {project_data['title']}")
         
         # 保存 project_id 供后续测试使用
-        pytest.test_project_id = data["project_id"]
+        pytest.test_project_id = project_id
     
     def test_get_project(self, client):
         """测试获取项目"""

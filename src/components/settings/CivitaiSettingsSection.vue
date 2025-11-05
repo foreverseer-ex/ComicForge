@@ -64,6 +64,40 @@
           ]"
         />
       </div>
+
+      <!-- Max Concurrency -->
+      <div class="max-w-[200px]">
+        <label 
+          :class="[
+            'block text-sm font-medium mb-2',
+            isDark ? 'text-gray-300' : 'text-gray-700'
+          ]"
+        >
+          导入最大并发数
+        </label>
+        <input
+          :value="localMaxConcurrency"
+          @blur="handleMaxConcurrencyBlur"
+          @keyup.enter="handleMaxConcurrencyBlur"
+          type="number"
+          min="1"
+          max="10"
+          :class="[
+            'w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2',
+            isDark
+              ? 'bg-gray-700 border-gray-600 text-white focus:ring-blue-500'
+              : 'bg-white border-gray-300 text-gray-900 focus:ring-blue-500'
+          ]"
+        />
+        <p 
+          :class="[
+            'mt-1 text-xs',
+            isDark ? 'text-gray-400' : 'text-gray-500'
+          ]"
+        >
+          范围：1-10，默认 3
+        </p>
+      </div>
     </div>
   </div>
 </template>
@@ -82,12 +116,14 @@ const emit = defineEmits<{
 
 const localApiToken = ref(props.settings?.api_token || '')
 const localTimeout = ref(String(props.settings?.timeout || 30.0))
+const localMaxConcurrency = ref(String(props.settings?.max_concurrency || 3))
 
 // 监听 settings 变化，同步本地状态
 watch(() => props.settings, (newSettings) => {
   if (newSettings) {
     localApiToken.value = newSettings.api_token || ''
     localTimeout.value = String(newSettings.timeout || 30.0)
+    localMaxConcurrency.value = String(newSettings.max_concurrency || 3)
   }
 }, { immediate: true, deep: true })
 
@@ -107,6 +143,18 @@ const handleTimeoutBlur = (event: Event) => {
     emit('update', { timeout: value })
   } else {
     target.value = localTimeout.value // 恢复原值
+  }
+}
+
+// 处理最大并发数
+const handleMaxConcurrencyBlur = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const value = parseInt(target.value)
+  if (!isNaN(value) && value >= 1 && value <= 10) {
+    localMaxConcurrency.value = String(value)
+    emit('update', { max_concurrency: value })
+  } else {
+    target.value = localMaxConcurrency.value // 恢复原值
   }
 }
 </script>

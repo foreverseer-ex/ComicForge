@@ -26,17 +26,17 @@ from api.constants.llm import (
 from api.routers.actor import (
     create_actor, get_actor, list_actors, update_actor,
     remove_actor, get_tag_description, get_all_tag_descriptions,
-    add_example, remove_example, generate_portrait, add_actor_portrait
+    add_example, remove_example, add_portrait_from_job
 )
 from api.routers.draw import (
-    get_loras, get_sd_models, get_options, set_options, generate, get_image,
+    get_loras, get_checkpoints, create_draw_job, get_draw_job, delete_draw_job, get_image,
 )
 from api.routers.llm import (
     add_choices, get_choices, clear_choices, start_iteration,
 )
 from api.routers.memory import (
     create_memory, get_memory, list_memories, update_memory,
-    delete_memory, delete_all_memories, get_key_description, get_all_key_descriptions,
+    delete_memory, clear_memories, get_key_description, get_all_key_descriptions,
 )
 from api.routers.novel import (
     get_chapter_content, get_line_content, get_project_content,
@@ -47,11 +47,11 @@ from api.routers.novel import (
 # 导入所有路由函数（这些函数经过路由层验证，确保安全性）
 # 注意：绝对不能导入 services 层的函数，只能使用 routers 层的函数
 from api.routers.project import (
-    get_project, update_project, update_progress,
+    get_project, update_project,
 )
 from api.routers.reader import (
     get_line, get_chapter_lines, get_lines_range, get_chapters,
-    get_chapter, get_chapter_summary, put_chapter_summary, get_stats,
+    get_chapter, put_chapter, get_stats,
 )
 from api.schemas.chat import ChatMessage, ChatIteration
 from api.services.db import MemoryService, HistoryService
@@ -137,21 +137,21 @@ class AbstractLlmService(ABC):
 
         all_functions = [
             # Project 管理（只允许查询和更新，不允许创建和删除）
-            get_project, update_project, update_progress,
+            get_project, update_project,
             # Actor 管理
             create_actor, get_actor, list_actors, update_actor,
-            remove_actor, add_example, remove_example, generate_portrait, add_actor_portrait,
+            remove_actor, add_example, remove_example, add_portrait_from_job,
             get_tag_description, get_all_tag_descriptions,
             # Memory 管理
             create_memory, get_memory, list_memories, update_memory,
-            delete_memory, delete_all_memories, get_key_description, get_all_key_descriptions,
+            delete_memory, clear_memories, get_key_description, get_all_key_descriptions,
             # Reader 功能
             get_line, get_chapter_lines, get_lines_range, get_chapters,
-            get_chapter, get_chapter_summary, put_chapter_summary, get_stats,
+            get_chapter, put_chapter, get_stats,
             # Novel 内容管理
             get_project_content, get_chapter_content, get_line_content,
             # Draw 功能
-            get_loras, get_sd_models, get_options, set_options, generate, get_image,
+            get_loras, get_checkpoints, create_draw_job, get_draw_job, delete_draw_job, get_image,
             # LLM 辅助功能
             add_choices, get_choices, clear_choices,
             # 迭代模式

@@ -156,6 +156,8 @@ class SdForgeDrawService(AbstractDrawService):
         """
         执行单次绘图。
         
+        注意：如果指定了model和vae，会自动检查当前选项，如果不同则设置。
+        
         :param args: 绘图参数
         :return: job_id
         """
@@ -163,10 +165,32 @@ class SdForgeDrawService(AbstractDrawService):
         job_id = str(uuid.uuid4())
         
         try:
-            # 如果指定了 VAE，先设置 VAE
-            if args.vae:
-                logger.debug(f"设置 VAE: {args.vae}")
-                self._set_options(sd_vae=args.vae)
+            # 如果指定了 model 或 vae，先检查当前选项，如果不同则设置
+            if args.model or args.vae:
+                current_options = self._get_options()
+                need_update = False
+                update_kwargs = {}
+                
+                # 检查 model
+                if args.model:
+                    current_model = current_options.get("sd_model_checkpoint", "")
+                    if current_model != args.model:
+                        logger.debug(f"当前模型 {current_model} 与请求模型 {args.model} 不同，需要切换")
+                        update_kwargs["sd_model_checkpoint"] = args.model
+                        need_update = True
+                
+                # 检查 vae
+                if args.vae:
+                    current_vae = current_options.get("sd_vae", "")
+                    if current_vae != args.vae:
+                        logger.debug(f"当前VAE {current_vae} 与请求VAE {args.vae} 不同，需要切换")
+                        update_kwargs["sd_vae"] = args.vae
+                        need_update = True
+                
+                # 如果需要更新，则设置选项
+                if need_update:
+                    logger.info(f"切换SD选项: {update_kwargs}")
+                    self._set_options(**update_kwargs)
             
             # 调用 SD-Forge API
             result = self._create_text2image(

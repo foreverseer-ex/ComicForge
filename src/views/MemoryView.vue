@@ -20,19 +20,33 @@
           记忆管理
         </h2>
       </div>
-      <button
-        v-if="selectedProjectId"
-        @click="showCreateDialog = true"
-        :class="[
-          'px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2',
-          isDark
-            ? 'bg-blue-600 hover:bg-blue-700 text-white'
-            : 'bg-blue-600 hover:bg-blue-700 text-white'
-        ]"
-      >
-        <PlusIcon class="w-5 h-5" />
-        新增记忆
-      </button>
+      <div v-if="selectedProjectId" class="flex items-center gap-2">
+        <button
+          v-if="memories.length > 0"
+          @click="showClearConfirm = true"
+          :class="[
+            'px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2',
+            isDark
+              ? 'bg-red-600 hover:bg-red-700 text-white'
+              : 'bg-red-600 hover:bg-red-700 text-white'
+          ]"
+        >
+          <TrashIcon class="w-5 h-5" />
+          清空记忆
+        </button>
+        <button
+          @click="showCreateDialog = true"
+          :class="[
+            'px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2',
+            isDark
+              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+              : 'bg-blue-600 hover:bg-blue-700 text-white'
+          ]"
+        >
+          <PlusIcon class="w-5 h-5" />
+          新增记忆
+        </button>
+      </div>
     </div>
 
     <!-- 内容区域 -->
@@ -519,6 +533,73 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- 清空记忆确认对话框 -->
+    <Teleport to="body">
+      <div
+        v-if="showClearConfirm"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        @click.self="showClearConfirm = false"
+      >
+        <div
+          :class="[
+            'w-full max-w-md rounded-lg shadow-xl',
+            isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
+          ]"
+          @click.stop
+        >
+          <div class="p-6">
+            <h2 
+              :class="[
+                'text-xl font-bold mb-4 text-red-600'
+              ]"
+            >
+              确认清空所有记忆
+            </h2>
+            <p 
+              :class="[
+                'mb-4',
+                isDark ? 'text-gray-300' : 'text-gray-700'
+              ]"
+            >
+              即将清空当前项目的所有记忆条目（共 {{ memories.length }} 条）
+            </p>
+            <p 
+              :class="[
+                'text-sm mb-6 text-red-600 font-semibold'
+              ]"
+            >
+              ⚠️ 此操作不可恢复，所有记忆将被永久删除！
+            </p>
+            <div class="flex justify-end gap-3">
+              <button
+                @click="showClearConfirm = false"
+                :class="[
+                  'px-4 py-2 rounded-lg font-medium transition-colors',
+                  isDark
+                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                ]"
+              >
+                取消
+              </button>
+              <button
+                @click="confirmClear"
+                :disabled="clearing"
+                :class="[
+                  'px-4 py-2 rounded-lg font-medium transition-colors',
+                  clearing
+                    ? 'bg-gray-400 cursor-not-allowed text-white'
+                    : 'bg-red-600 hover:bg-red-700 text-white'
+                ]"
+              >
+                {{ clearing ? '清空中...' : '确认清空' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -529,6 +610,7 @@ import { useProjectStore } from '../stores/project'
 import { storeToRefs } from 'pinia'
 import api from '../api'
 import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { showToast } from '../utils/toast'
 
 interface MemoryEntry {
   memory_id: string
@@ -557,6 +639,8 @@ const showCreateDialog = ref(false)
 const editingMemory = ref<MemoryEntry | null>(null)
 const memoryToDelete = ref<MemoryEntry | null>(null)
 const showKeySelector = ref(false)
+const showClearConfirm = ref(false)
+const clearing = ref(false)
 
 // 表单数据
 const memoryForm = ref({
@@ -621,7 +705,7 @@ const loadMemories = async () => {
     memories.value = data || []
   } catch (error: any) {
     console.error('加载记忆失败:', error)
-    alert('加载记忆失败: ' + (error.response?.data?.detail || error.message))
+    showToast('加载记忆失败: ' + (error.response?.data?.detail || error.message), 'error')
     memories.value = []
   } finally {
     loading.value = false
@@ -687,10 +771,6 @@ const saveMemory = async () => {
         key: memoryForm.value.key.trim(),
         value: memoryForm.value.value.trim(),
         description: memoryForm.value.description.trim() || null
-      }, {
-        params: {
-          project_id: selectedProjectId.value
-        }
       })
     } else {
       // 创建记忆
@@ -704,9 +784,10 @@ const saveMemory = async () => {
     
     closeDialog()
     await loadMemories()
+    showToast(editingMemory.value ? '记忆已更新' : '记忆已创建', 'success')
   } catch (error: any) {
     console.error('保存记忆失败:', error)
-    alert('保存记忆失败: ' + (error.response?.data?.detail || error.message))
+    showToast('保存记忆失败: ' + (error.response?.data?.detail || error.message), 'error')
   } finally {
     saving.value = false
   }
@@ -725,19 +806,41 @@ const confirmDelete = async () => {
 
   deleting.value = true
   try {
-    await api.delete(`/memory/${memoryToDelete.value.memory_id}`, {
+    await api.delete(`/memory/${memoryToDelete.value.memory_id}`)
+    
+    memoryToDelete.value = null
+    await loadMemories()
+    showToast('记忆已删除', 'success')
+  } catch (error: any) {
+    console.error('删除记忆失败:', error)
+    showToast('删除记忆失败: ' + (error.response?.data?.detail || error.message), 'error')
+  } finally {
+    deleting.value = false
+  }
+}
+
+// 确认清空所有记忆
+const confirmClear = async () => {
+  if (!selectedProjectId.value) {
+    return
+  }
+
+  clearing.value = true
+  try {
+    const result = await api.delete('/memory/clear', {
       params: {
         project_id: selectedProjectId.value
       }
     })
     
-    memoryToDelete.value = null
+    showClearConfirm.value = false
     await loadMemories()
+    showToast(`已清空 ${result.deleted_count || 0} 条记忆`, 'success')
   } catch (error: any) {
-    console.error('删除记忆失败:', error)
-    alert('删除记忆失败: ' + (error.response?.data?.detail || error.message))
+    console.error('清空记忆失败:', error)
+    showToast('清空记忆失败: ' + (error.response?.data?.detail || error.message), 'error')
   } finally {
-    deleting.value = false
+    clearing.value = false
   }
 }
 

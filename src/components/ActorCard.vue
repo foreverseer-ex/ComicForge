@@ -27,7 +27,7 @@
       <div v-else class="flex flex-col items-center justify-center">
         <PhotoIcon class="w-12 h-12" :class="isDark ? 'text-gray-600' : 'text-gray-400'" />
         <span :class="['text-xs mt-1', isDark ? 'text-gray-500' : 'text-gray-500']">
-          {{ exampleCount > 0 ? '点击查看' : '无示例图' }}
+          {{ exampleCount > 0 ? '点击查看' : '无立绘' }}
         </span>
       </div>
     </div>
@@ -62,7 +62,7 @@
         <div class="flex items-center gap-1">
           <PhotoIcon class="w-4 h-4" :class="isDark ? 'text-blue-400' : 'text-blue-600'" />
           <span :class="isDark ? 'text-gray-400' : 'text-gray-600'">
-            {{ exampleCount }} 张示例图
+            {{ exampleCount }} 张立绘
           </span>
         </div>
         <div class="flex items-center gap-1">
@@ -78,7 +78,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useThemeStore } from '../../stores/theme'
+import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { PhotoIcon, TagIcon } from '@heroicons/vue/24/outline'
 
@@ -111,12 +111,21 @@ const exampleCount = computed(() => props.actor.examples?.length || 0)
 const tagCount = computed(() => Object.keys(props.actor.tags || {}).length)
 
 const firstExampleImage = computed(() => {
-  if (exampleCount.value === 0) return null
+  if (!props.actor.examples || exampleCount.value === 0) return null
   const firstExample = props.actor.examples[0]
   if (!firstExample?.image_path) return null
   
   const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7864'
-  return `${baseURL}/file/image/${props.actor.project_id}/${firstExample.image_path}`
+  // 注意：image_path 可能是相对路径，需要根据实际情况处理
+  // 如果是相对路径，需要通过 /file/actor-example 端点获取
+  // 这里暂时保持原样，因为 image_path 可能已经是完整路径
+  if (firstExample.image_path.startsWith('http://') || firstExample.image_path.startsWith('https://')) {
+    return firstExample.image_path
+  }
+  // 如果是相对路径，需要通过actor-example端点
+  // 但这里我们不知道example_index，所以暂时返回null
+  // 实际上应该通过 /file/actor-example?actor_id=...&example_index=0 获取
+  return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=0`
 })
 
 const handleImageError = () => {

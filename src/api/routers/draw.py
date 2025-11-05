@@ -1,18 +1,20 @@
 """
 绘图管理的路由。
 
-简化设计：直接代理 SD-Forge API，所有接口添加 project_id 参数。
+专注于绘图功能：创建绘图任务、接受结果、管理绘图任务。
 """
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pathlib import Path
 import httpx
+from loguru import logger
 
 from api.services.db import JobService, BatchJobService
 from api.schemas.draw import Job, BatchJob, DrawArgs
 from api.services.draw.sd_forge import SdForgeDrawService, sd_forge_draw_service
 from api.utils.path import project_home
+from api.settings import app_settings
 
 
 router = APIRouter(
@@ -22,101 +24,62 @@ router = APIRouter(
 )
 
 
-# ==================== SD-Forge API 代理 ====================
+# ==================== SD-Forge 可用模型查询 ====================
+# 注意：这些API仅在使用SD-Forge后端时有效，返回的是当前可用的模型列表
 
-@router.get("/loras", summary="获取 LoRA 模型列表")
-async def get_loras(project_id: str) -> Dict[str, Any]:
+@router.get("/checkpoint", summary="获取 SD-Forge 可用 Checkpoint 模型列表")
+async def get_checkpoints() -> List[Dict[str, Any]]:
     """
-    获取 LoRA 模型列表。
+    获取 SD-Forge 后端当前可用的 Checkpoint 模型列表。
     
-    Args:
-        project_id: 项目ID
+    注意：此API仅在使用SD-Forge后端时有效。
+    如果需要获取所有模型元数据（包括不可用的），请使用 /model-meta/checkpoint。
+    
+    Returns:
+        Checkpoint 模型列表（来自 sd-forge /sdapi/v1/sd-models）
+    """
+    try:
+        models_data = SdForgeDrawService._get_sd_models()  # pylint: disable=protected-access
+        # SD-Forge 返回的是列表格式
+        if isinstance(models_data, list):
+            return models_data
+        # 如果是字典，转换为列表
+        return [models_data] if models_data else []
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"SD-Forge 连接失败: {e}") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取模型列表失败: {e}") from e
+
+
+@router.get("/loras", summary="获取 SD-Forge 可用 LoRA 模型列表")
+async def get_loras() -> List[Dict[str, Any]]:
+    """
+    获取 SD-Forge 后端当前可用的 LoRA 模型列表。
+    
+    注意：此API仅在使用SD-Forge后端时有效。
+    如果需要获取所有LoRA元数据（包括不可用的），请使用 /model-meta/loras。
     
     Returns:
         LoRA 模型列表（来自 sd-forge /sdapi/v1/loras）
-    
-    实现要点：
-    - 直接调用 sd_forge_service.get_loras()
     """
     try:
-        return SdForgeDrawService._get_loras()  # pylint: disable=protected-access
+        loras_data = SdForgeDrawService._get_loras()  # pylint: disable=protected-access
+        # SD-Forge 返回的是列表格式
+        if isinstance(loras_data, list):
+            return loras_data
+        # 如果是字典，转换为列表
+        return [loras_data] if loras_data else []
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"SD-Forge 连接失败: {e}") from e
-
-
-@router.get("/sd-models", summary="获取 SD 模型列表")
-async def get_sd_models(project_id: str) -> Dict[str, Any]:
-    """
-    获取 SD 模型列表。
-    
-    Args:
-        project_id: 项目ID
-    
-    Returns:
-        SD 模型列表（来自 sd-forge /sdapi/v1/sd-models）
-    
-    实现要点：
-    - 直接调用 sd_forge_service.get_sd_models()
-    """
-    try:
-        return SdForgeDrawService._get_sd_models()  # pylint: disable=protected-access
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"SD-Forge 连接失败: {e}") from e
-
-
-@router.get("/options", summary="获取 SD 选项")
-async def get_options(project_id: str) -> Dict[str, Any]:
-    """
-    获取 SD 选项配置。
-    
-    Args:
-        project_id: 项目ID
-    
-    Returns:
-        SD 选项配置（来自 sd-forge /sdapi/v1/options）
-    
-    实现要点：
-    - 直接调用 sd_forge_service.get_options()
-    """
-    try:
-        return SdForgeDrawService._get_options()  # pylint: disable=protected-access
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"SD-Forge 连接失败: {e}") from e
-
-
-@router.post("/options", summary="设置 SD 选项")
-async def set_options(
-    project_id: str,
-    sd_model_checkpoint: Optional[str] = None,
-    sd_vae: Optional[str] = None
-) -> dict:
-    """
-    设置 SD 选项（切换模型）。
-    
-    Args:
-        project_id: 项目ID
-        sd_model_checkpoint: 模型检查点（来自 /sdapi/v1/sd-models 的 title 字段）
-        sd_vae: VAE 模型
-    
-    Returns:
-        设置结果
-    
-    实现要点：
-    - 直接调用 sd_forge_service.set_options()
-    """
-    try:
-        SdForgeDrawService._set_options(sd_model_checkpoint=sd_model_checkpoint, sd_vae=sd_vae)  # pylint: disable=protected-access
-        return {"ok": True}
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"SD-Forge 连接失败: {e}") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取 LoRA 列表失败: {e}") from e
 
 
 # ==================== 图像生成 ====================
 
-@router.post("/generate", summary="文生图")
-async def generate(
+@router.post("", summary="创建绘图任务（文生图）")
+async def create_draw_job(
     project_id: str,
-    batch_id: str,
     model: str,
     prompt: str,
     negative_prompt: str = "",
@@ -130,35 +93,35 @@ async def generate(
     height: int = 1024,
     clip_skip: Optional[int] = None,
     vae: Optional[str] = None,
-    save_images: bool = True,
-) -> Dict[str, Any]:
+) -> Dict[str, str]:
     """
-    文生图。
+    创建绘图任务（文生图），返回 job_id。
+    
+    注意：如果使用的是SD-Forge后端，会自动检查并设置model和vae选项。
     
     Args:
-        project_id: 项目ID
-        batch_id: 批次ID（用于标识这次生成）
-        prompt: 正向提示词
-        negative_prompt: 负向提示词
-        loras: LoRA 配置 {name: weight}
-        styles: 样式预设列表
-        seed: 随机种子（-1 表示随机）
-        sampler_name: 采样器名称
-        batch_size: 批量大小
-        n_iter: 迭代次数
-        steps: 采样步数
-        cfg_scale: CFG Scale
-        width: 图像宽度
-        height: 图像高度
-        save_images: 是否在服务端保存图像
+        project_id: 项目ID（查询参数）
+        model: SD模型名称（查询参数）
+        prompt: 正向提示词（查询参数）
+        negative_prompt: 负向提示词（查询参数）
+        loras: LoRA 配置 {name: weight}（查询参数）
+        styles: 样式预设列表（查询参数）
+        seed: 随机种子（-1 表示随机，查询参数）
+        sampler_name: 采样器名称（查询参数）
+        steps: 采样步数（查询参数）
+        cfg_scale: CFG Scale（查询参数）
+        width: 图像宽度（查询参数）
+        height: 图像高度（查询参数）
+        clip_skip: CLIP skip（查询参数）
+        vae: VAE 模型（查询参数）
     
     Returns:
-        生成结果（包含 base64 图像列表、info、parameters）
+        包含 job_id 的字典
     
     实现要点：
-    - 调用 sd_forge_service.create_text2image()
-    - 保存图像到 storage/sessions/{project_id}/batches/{batch_id}/
-    - 图像命名：0.png, 1.png, ...（根据 batch_size）
+    - 调用 sd_forge_service.draw()
+    - 如果使用SD-Forge后端，会自动检查当前加载的model和vae，如果不同则自动设置
+    - 创建 Job 记录到数据库
     """
     try:
         args = DrawArgs(
@@ -176,22 +139,60 @@ async def generate(
             loras=loras or {},
         )
         job_id = sd_forge_draw_service.draw(args)
-        result_dir: Path = project_home / project_id / "batches" / batch_id
-        result_dir.mkdir(parents=True, exist_ok=True)
-        if save_images:
-            out_path = result_dir / "0.png"
-            sd_forge_draw_service.save_image(job_id, out_path)
-        return {
-            "job_id": job_id,
-            "project_id": project_id,
-            "batch_id": batch_id,
-            "saved": bool(save_images),
-            "path": str(result_dir / "0.png") if save_images else None,
-        }
+        
+        # 创建 Job 记录到数据库
+        from datetime import datetime
+        job = Job(
+            job_id=job_id,
+            created_at=datetime.now()
+        )
+        JobService.create(job)
+        
+        return {"job_id": job_id}
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"SD-Forge 连接失败: {e}") from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("", summary="获取绘图任务信息")
+async def get_draw_job(job_id: str) -> Job:
+    """
+    获取单个绘图任务信息。
+    
+    Args:
+        job_id: 任务ID（查询参数）
+    
+    Returns:
+        任务对象
+    
+    Raises:
+        HTTPException: 任务不存在时返回 404
+    """
+    job = JobService.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
+    return job
+
+
+@router.delete("", summary="删除绘图任务")
+async def delete_draw_job(job_id: str) -> dict:
+    """
+    删除单个绘图任务。
+    
+    Args:
+        job_id: 任务ID（查询参数）
+    
+    Returns:
+        删除的任务ID（job_id）
+    
+    Raises:
+        HTTPException: 任务不存在时返回 404
+    """
+    success = JobService.delete(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
+    return {"job_id": job_id}
 
 
 @router.get("/image", response_class=FileResponse, summary="获取生成的图像")
@@ -222,118 +223,116 @@ async def get_image(
     return FileResponse(path=str(file_path), media_type="image/png")
 
 
-# ==================== Job 管理 ====================
+# ==================== Batch 管理 ====================
 
-@router.post("/jobs", summary="创建绘图任务", response_model=Job)
-async def create_job(job_id: str) -> Job:
+@router.post("/batch", summary="创建批量绘图任务")
+async def create_batch(
+    project_id: str,
+    batch_size: int,
+    model: str,
+    prompt: str,
+    negative_prompt: str = "",
+    loras: Optional[Dict[str, float]] = None,
+    styles: Optional[List[str]] = None,
+    seed: int = -1,
+    sampler_name: str = "DPM++ 2M Karras",
+    steps: int = 30,
+    cfg_scale: float = 7.0,
+    width: int = 1024,
+    height: int = 1024,
+    clip_skip: Optional[int] = None,
+    vae: Optional[str] = None,
+) -> Dict[str, Any]:
     """
-    创建单个绘图任务。
+    创建批量绘图任务，返回 batch_id。
     
     Args:
-        job_id: 任务ID
+        project_id: 项目ID（查询参数）
+        batch_size: 批量大小（查询参数）
+        model: SD模型名称（查询参数）
+        prompt: 正向提示词（查询参数）
+        negative_prompt: 负向提示词（查询参数）
+        loras: LoRA 配置 {name: weight}（查询参数）
+        styles: 样式预设列表（查询参数）
+        seed: 随机种子（-1 表示随机，查询参数）
+        sampler_name: 采样器名称（查询参数）
+        steps: 采样步数（查询参数）
+        cfg_scale: CFG Scale（查询参数）
+        width: 图像宽度（查询参数）
+        height: 图像高度（查询参数）
+        clip_skip: CLIP skip（查询参数）
+        vae: VAE 模型（查询参数）
     
     Returns:
-        创建后的任务对象
+        包含 batch_id 和 job_ids 列表的字典
+    
+    实现要点：
+    - 创建 batch_size 个绘图任务
+    - 将所有 job_id 添加到 BatchJob
     """
-    from datetime import datetime
-    job = Job(
-        job_id=job_id,
-        created_at=datetime.now()
-    )
-    return JobService.create(job)
+    try:
+        import uuid
+        from datetime import datetime
+        
+        args = DrawArgs(
+            model=model,
+            prompt=prompt,
+            negative_prompt=negative_prompt or "",
+            steps=steps,
+            cfg_scale=cfg_scale,
+            sampler=sampler_name,
+            seed=seed,
+            width=width,
+            height=height,
+            clip_skip=clip_skip,
+            vae=vae,
+            loras=loras or {},
+        )
+        
+        # 生成 batch_id
+        batch_id = str(uuid.uuid4())
+        job_ids = []
+        
+        # 创建多个任务
+        for i in range(batch_size):
+            job_id = sd_forge_draw_service.draw(args)
+            job_ids.append(job_id)
+            
+            # 创建 Job 记录到数据库
+            job = Job(
+                job_id=job_id,
+                created_at=datetime.now()
+            )
+            JobService.create(job)
+        
+        # 创建 BatchJob 记录
+        batch_job = BatchJob(
+            batch_id=batch_id,
+            job_ids=job_ids,
+            created_at=datetime.now()
+        )
+        BatchJobService.create(batch_job)
+        
+        return {
+            "batch_id": batch_id,
+            "job_ids": job_ids
+        }
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"SD-Forge 连接失败: {e}") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/jobs/{job_id}", summary="获取绘图任务", response_model=Job)
-async def get_job(job_id: str) -> Job:
+@router.get("/batch", summary="获取批量绘图任务信息")
+async def get_batch(batch_id: str) -> List[Job]:
     """
-    获取单个绘图任务。
+    获取批量绘图任务的所有 job 信息。
     
     Args:
-        job_id: 任务ID
+        batch_id: 批次ID（查询参数）
     
     Returns:
-        任务对象
-    
-    Raises:
-        HTTPException: 任务不存在时返回 404
-    """
-    job = JobService.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
-    return job
-
-
-@router.get("/jobs", summary="获取绘图任务列表", response_model=List[Job])
-async def list_jobs(
-    limit: Optional[int] = None,
-    offset: int = 0
-) -> List[Job]:
-    """
-    获取绘图任务列表。
-    
-    Args:
-        limit: 返回数量限制（None 表示无限制）
-        offset: 跳过的记录数
-    
-    Returns:
-        任务列表
-    """
-    return JobService.list(limit=limit, offset=offset)
-
-
-@router.delete("/jobs/{job_id}", summary="删除绘图任务")
-async def delete_job(job_id: str) -> Dict[str, Any]:
-    """
-    删除单个绘图任务。
-    
-    Args:
-        job_id: 任务ID
-    
-    Returns:
-        删除结果
-    
-    Raises:
-        HTTPException: 任务不存在时返回 404
-    """
-    success = JobService.delete(job_id)
-    if not success:
-        raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
-    return {"message": "任务删除成功", "job_id": job_id}
-
-
-# ==================== BatchJob 管理 ====================
-
-@router.post("/batch-jobs", summary="创建批次任务", response_model=BatchJob)
-async def create_batch_job(batch_id: str, job_ids: Optional[List[str]] = None) -> BatchJob:
-    """
-    创建批次任务。
-    
-    Args:
-        batch_id: 批次ID
-        job_ids: 任务ID列表（可选）
-    
-    Returns:
-        创建后的批次任务对象
-    """
-    from datetime import datetime
-    batch_job = BatchJob(
-        batch_id=batch_id,
-        job_ids=job_ids or [],
-        created_at=datetime.now()
-    )
-    return BatchJobService.create(batch_job)
-
-
-@router.get("/batch-jobs/{batch_id}", summary="获取批次任务", response_model=BatchJob)
-async def get_batch_job(batch_id: str) -> BatchJob:
-    """
-    获取批次任务。
-    
-    Args:
-        batch_id: 批次ID
-    
-    Returns:
-        批次任务对象
+        Job 列表
     
     Raises:
         HTTPException: 批次任务不存在时返回 404
@@ -341,105 +340,42 @@ async def get_batch_job(batch_id: str) -> BatchJob:
     batch_job = BatchJobService.get(batch_id)
     if not batch_job:
         raise HTTPException(status_code=404, detail=f"批次任务不存在: {batch_id}")
-    return batch_job
+    
+    # 获取所有 job
+    jobs = []
+    for job_id in batch_job.job_ids:
+        job = JobService.get(job_id)
+        if job:
+            jobs.append(job)
+    
+    return jobs
 
 
-@router.get("/batch-jobs", summary="获取批次任务列表", response_model=List[BatchJob])
-async def list_batch_jobs(
-    limit: Optional[int] = None,
-    offset: int = 0
-) -> List[BatchJob]:
+@router.delete("/batch", summary="删除批量绘图任务")
+async def delete_batch(batch_id: str) -> dict:
     """
-    获取批次任务列表。
+    删除批量绘图任务及其所有 job。
     
     Args:
-        limit: 返回数量限制（None 表示无限制）
-        offset: 跳过的记录数
+        batch_id: 批次ID（查询参数）
     
     Returns:
-        批次任务列表
-    """
-    return BatchJobService.list(limit=limit, offset=offset)
-
-
-@router.put("/batch-jobs/{batch_id}", summary="更新批次任务", response_model=BatchJob)
-async def update_batch_job(batch_id: str, **kwargs) -> BatchJob:
-    """
-    更新批次任务。
-    
-    Args:
-        batch_id: 批次ID
-        **kwargs: 要更新的字段
-    
-    Returns:
-        更新后的批次任务对象
+        删除的批次ID（batch_id）
     
     Raises:
         HTTPException: 批次任务不存在时返回 404
     """
-    batch_job = BatchJobService.update(batch_id, **kwargs)
+    batch_job = BatchJobService.get(batch_id)
     if not batch_job:
         raise HTTPException(status_code=404, detail=f"批次任务不存在: {batch_id}")
-    return batch_job
-
-
-@router.post("/batch-jobs/{batch_id}/jobs/{job_id}", summary="添加任务到批次")
-async def add_job_to_batch(batch_id: str, job_id: str) -> BatchJob:
-    """
-    向批次任务添加任务。
     
-    Args:
-        batch_id: 批次ID
-        job_id: 任务ID
+    # 删除所有 job
+    for job_id in batch_job.job_ids:
+        JobService.delete(job_id)
     
-    Returns:
-        更新后的批次任务对象
-    
-    Raises:
-        HTTPException: 批次任务不存在时返回 404
-    """
-    batch_job = BatchJobService.add_job(batch_id, job_id)
-    if not batch_job:
-        raise HTTPException(status_code=404, detail=f"批次任务不存在: {batch_id}")
-    return batch_job
-
-
-@router.delete("/batch-jobs/{batch_id}/jobs/{job_id}", summary="从批次移除任务")
-async def remove_job_from_batch(batch_id: str, job_id: str) -> BatchJob:
-    """
-    从批次任务移除任务。
-    
-    Args:
-        batch_id: 批次ID
-        job_id: 任务ID
-    
-    Returns:
-        更新后的批次任务对象
-    
-    Raises:
-        HTTPException: 批次任务不存在时返回 404
-    """
-    batch_job = BatchJobService.remove_job(batch_id, job_id)
-    if not batch_job:
-        raise HTTPException(status_code=404, detail=f"批次任务不存在: {batch_id}")
-    return batch_job
-
-
-@router.delete("/batch-jobs/{batch_id}", summary="删除批次任务")
-async def delete_batch_job(batch_id: str) -> Dict[str, Any]:
-    """
-    删除批次任务。
-    
-    Args:
-        batch_id: 批次ID
-    
-    Returns:
-        删除结果
-    
-    Raises:
-        HTTPException: 批次任务不存在时返回 404
-    """
+    # 删除 batch
     success = BatchJobService.delete(batch_id)
     if not success:
         raise HTTPException(status_code=404, detail=f"批次任务不存在: {batch_id}")
-    return {"message": "批次任务删除成功", "batch_id": batch_id}
+    
+    return {"batch_id": batch_id}

@@ -1,17 +1,40 @@
 <template>
   <div class="flex flex-col fixed inset-0 overflow-hidden" :style="{ top: '0', left: `${navigationWidth}px`, right: '0', bottom: '0' }">
-    <!-- 顶部：固定清空按钮 -->
+    <!-- 顶部：项目标题和清空按钮 -->
     <div 
       :class="[
-        'flex items-center justify-end gap-4 p-4 border-b flex-shrink-0',
+        'flex items-center justify-between gap-4 p-4 border-b flex-shrink-0',
         isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
       ]"
     >
+      <!-- 左侧：项目标题 -->
+      <div class="flex items-center gap-3 min-w-0">
+        <h1 
+          :class="[
+            'text-lg font-semibold truncate',
+            isDark ? 'text-gray-100' : 'text-gray-900'
+          ]"
+          :title="selectedProject?.title || '未选择项目'"
+        >
+          {{ selectedProject?.title || '未选择项目' }}
+        </h1>
+        <span 
+          v-if="selectedProject"
+          :class="[
+            'text-xs px-2 py-1 rounded-full',
+            isDark ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-100 text-blue-700'
+          ]"
+        >
+          {{ messages.length }} 条消息
+        </span>
+      </div>
+
+      <!-- 右侧：清空按钮 -->
       <button
         @click="showClearHistoryDialog = true"
         :disabled="!selectedProjectId || loadingHistory"
         :class="[
-          'px-4 py-2 rounded-lg transition-colors text-sm',
+          'px-4 py-2 rounded-lg transition-colors text-sm flex-shrink-0',
           selectedProjectId && !loadingHistory
             ? isDark
               ? 'bg-gray-700 hover:bg-gray-600 text-white'
@@ -204,18 +227,27 @@
                       <div class="flex items-center justify-between mb-1">
                         <span :class="['text-xs font-semibold', isDark ? 'text-gray-300' : 'text-gray-700']">参数</span>
                         <div class="flex items-center gap-2">
+                          <!-- Switch 开关：渲染/原始 -->
                           <button
                             @click.stop="toggleToolDisplayMode(message.message_id, index, 'args')"
                             :class="[
-                              'text-xs px-2 py-0.5 rounded transition-colors',
-                              isDark 
-                                ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700' 
-                                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                              'relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none',
+                              getToolDisplayMode(message.message_id, index, 'args') === 'rendered'
+                                ? isDark ? 'bg-blue-600' : 'bg-blue-500'
+                                : isDark ? 'bg-gray-600' : 'bg-gray-300'
                             ]"
-                            :title="getToolDisplayMode(message.message_id, index, 'args') === 'rendered' ? '切换到原始文本' : '切换到渲染视图'"
+                            :title="getToolDisplayMode(message.message_id, index, 'args') === 'rendered' ? '渲染模式（点击切换到原始）' : '原始模式（点击切换到渲染）'"
                           >
-                            {{ getToolDisplayMode(message.message_id, index, 'args') === 'rendered' ? '原始' : '渲染' }}
+                            <span
+                              :class="[
+                                'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                                getToolDisplayMode(message.message_id, index, 'args') === 'rendered' ? 'translate-x-4' : 'translate-x-0.5'
+                              ]"
+                            />
                           </button>
+                          <span :class="['text-xs', isDark ? 'text-gray-400' : 'text-gray-600']">
+                            {{ getToolDisplayMode(message.message_id, index, 'args') === 'rendered' ? '渲染' : '原始' }}
+                          </span>
                           <button
                             @click.stop="copyToClipboard(JSON.stringify(tool.args, null, 2), `tool-args-${message.message_id}-${index}`)"
                             :class="[
@@ -279,18 +311,27 @@
                       <div class="flex items-center justify-between mb-1">
                         <span :class="['text-xs font-semibold', isDark ? 'text-gray-300' : 'text-gray-700']">结果</span>
                         <div class="flex items-center gap-2">
+                          <!-- Switch 开关：渲染/原始 -->
                           <button
                             @click.stop="toggleToolDisplayMode(message.message_id, index, 'result')"
                             :class="[
-                              'text-xs px-2 py-0.5 rounded transition-colors',
-                              isDark 
-                                ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700' 
-                                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                              'relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none',
+                              getToolDisplayMode(message.message_id, index, 'result') === 'rendered'
+                                ? isDark ? 'bg-blue-600' : 'bg-blue-500'
+                                : isDark ? 'bg-gray-600' : 'bg-gray-300'
                             ]"
-                            :title="getToolDisplayMode(message.message_id, index, 'result') === 'rendered' ? '切换到原始文本' : '切换到渲染视图'"
+                            :title="getToolDisplayMode(message.message_id, index, 'result') === 'rendered' ? '渲染模式（点击切换到原始）' : '原始模式（点击切换到渲染）'"
                           >
-                            {{ getToolDisplayMode(message.message_id, index, 'result') === 'rendered' ? '原始' : '渲染' }}
+                            <span
+                              :class="[
+                                'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                                getToolDisplayMode(message.message_id, index, 'result') === 'rendered' ? 'translate-x-4' : 'translate-x-0.5'
+                              ]"
+                            />
                           </button>
+                          <span :class="['text-xs', isDark ? 'text-gray-400' : 'text-gray-600']">
+                            {{ getToolDisplayMode(message.message_id, index, 'result') === 'rendered' ? '渲染' : '原始' }}
+                          </span>
                           <button
                             @click.stop="copyToClipboard(typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result, null, 2), `tool-result-${message.message_id}-${index}`)"
                             :class="[
@@ -922,7 +963,7 @@ const getToolColorCategory = (toolName: string): string => {
     return 'actor'
   }
   // Reader 工具
-  if (['get_line', 'get_chapter_lines', 'get_lines_range', 'get_chapters', 'get_chapter', 'get_chapter_summary', 'put_chapter_summary', 'get_stats', 'start_iteration'].some(prefix => toolName.startsWith(prefix))) {
+  if (['get_line', 'get_chapter_lines', 'get_lines_range', 'get_chapters', 'get_chapter', 'put_chapter', 'get_stats', 'start_iteration'].some(prefix => toolName.startsWith(prefix))) {
     return 'reader'
   }
   // Novel 内容管理工具
@@ -930,7 +971,7 @@ const getToolColorCategory = (toolName: string): string => {
     return 'novel'
   }
   // Draw 工具
-  if (['get_loras', 'get_sd_models', 'get_options', 'set_options', 'generate', 'get_image'].some(prefix => toolName.startsWith(prefix))) {
+  if (['get_loras', 'get_sd_models', 'generate', 'get_image'].some(prefix => toolName.startsWith(prefix))) {
     return 'draw'
   }
   // LLM 辅助工具
@@ -1183,9 +1224,7 @@ const confirmRestart = async () => {
     const messagesToDelete = messages.value.slice(messageIndex)
     for (const msg of messagesToDelete) {
       try {
-        await api.delete(`/history/${msg.message_id}`, {
-          params: { project_id: selectedProjectId.value }
-        })
+        await api.delete(`/history/${msg.message_id}`)
       } catch (e) {
         console.error(`删除消息 ${msg.message_id} 失败:`, e)
       }
@@ -1362,11 +1401,20 @@ const handleClickOutside = (e: MouseEvent) => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 初始化 store（从 localStorage 恢复项目ID）
+  projectStore.init()
+  
   // 确保项目列表已加载
   if (projectStore.projects.length === 0) {
-    projectStore.loadProjects()
+    await projectStore.loadProjects()
+  } else {
+    // 如果项目列表已存在但 currentProject 为空，重新加载当前项目
+    if (projectStore.selectedProjectId && !projectStore.currentProject) {
+      await projectStore.loadCurrentProject()
+    }
   }
+  
   // 加载历史记录
   loadHistory()
   

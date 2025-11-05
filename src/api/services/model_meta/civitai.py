@@ -137,7 +137,7 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         logger.info("建议使用 get_by_hash, get_by_path 或 get_by_id")
         return None
     
-    def get_by_path(self, path: Path) -> Optional[ModelMeta]:
+    async def get_by_path(self, path: Path) -> Optional[ModelMeta]:
         """
         通过模型文件路径获取模型元数据。
         
@@ -159,9 +159,9 @@ class CivitaiModelMetaService(AbstractModelMetaService):
             return None
         
         # 通过哈希获取元数据
-        return self.get_by_hash(file_hash)
+        return await self.get_by_hash(file_hash)
     
-    def get_by_hash(self, file_hash: str) -> Optional[ModelMeta]:
+    async def get_by_hash(self, file_hash: str) -> Optional[ModelMeta]:
         """
         通过模型文件哈希值获取模型元数据。
         
@@ -171,8 +171,8 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         url = f"{CIVITAI_BASE_URL}/api/v1/model-versions/by-hash/{file_hash}"
         
         try:
-            with httpx.Client(timeout=app_settings.civitai.timeout) as client:
-                resp = client.get(url)
+            async with httpx.AsyncClient(timeout=app_settings.civitai.timeout) as client:
+                resp = await client.get(url)
                 if resp.status_code != 200:
                     logger.warning(f"未找到哈希为 {file_hash} 的模型 (status: {resp.status_code})")
                     return None
@@ -192,7 +192,7 @@ class CivitaiModelMetaService(AbstractModelMetaService):
             logger.exception(f"从 Civitai 获取模型元数据失败: {e}")
             return None
     
-    def get_by_id(self, version_id: int) -> Optional[ModelMeta]:
+    async def get_by_id(self, version_id: int) -> Optional[ModelMeta]:
         """
         通过 Civitai 模型版本 ID 获取模型元数据。
         
@@ -205,8 +205,8 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         url = f"{CIVITAI_BASE_URL}/api/v1/model-versions/{version_id}"
         
         try:
-            with httpx.Client(timeout=app_settings.civitai.timeout) as client:
-                resp = client.get(url)
+            async with httpx.AsyncClient(timeout=app_settings.civitai.timeout) as client:
+                resp = await client.get(url)
                 if resp.status_code != 200:
                     logger.warning(f"未找到版本 ID 为 {version_id} 的模型 (status: {resp.status_code})")
                     return None
@@ -297,7 +297,7 @@ class CivitaiModelMetaService(AbstractModelMetaService):
             
             # 从 Civitai 获取元数据
             logger.debug(f"从 Civitai 获取元数据: {file_hash}")
-            model_meta = self.get_by_hash(file_hash)
+            model_meta = await self.get_by_hash(file_hash)
             
             if model_meta is None:
                 logger.warning(f"未找到元数据: {safetensor_file.name}")

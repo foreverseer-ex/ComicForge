@@ -175,16 +175,24 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         return True
     
     @staticmethod
-    def _save_meta_to_disk(meta: ModelMeta):
+    async def _save_meta_to_disk(meta: ModelMeta):
         """
-        将模型元数据序列化到磁盘（内部方法）。
+        将模型元数据序列化到磁盘（内部方法，异步版本）。
         
         :param meta: 模型元数据（必须包含 type 字段）
         """
+        import aiofiles
+        
         home = checkpoint_meta_home if meta.type == ModelType.CHECKPOINT else lora_meta_home
         meta_file = home / Path(meta.filename).stem / 'metadata.json'
-        meta_file.parent.mkdir(parents=True, exist_ok=True)
-        meta_file.write_text(meta.model_dump_json(indent=2), encoding='utf-8')
+        
+        # 异步创建目录（使用 asyncio.to_thread 包装同步操作）
+        import asyncio
+        await asyncio.to_thread(meta_file.parent.mkdir, parents=True, exist_ok=True)
+        
+        # 异步写入文件
+        async with aiofiles.open(meta_file, 'w', encoding='utf-8') as f:
+            await f.write(meta.model_dump_json(indent=2))
     
     async def save(self, model_meta: ModelMeta) -> ModelMeta:
         """
@@ -212,9 +220,8 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         base_path = home / Path(model_meta.filename).stem
         base_path.mkdir(parents=True, exist_ok=True)
         
-        # 处理示例图片
+        # 处理示例图片（串行下载）
         localized_examples: list[Example] = []
-        download_tasks = []
         
         for example in model_meta.examples:
             if is_local_url(example.url):
@@ -222,39 +229,27 @@ class LocalModelModelMetaService(AbstractModelMetaService):
                 localized_examples.append(example)
                 logger.debug(f"示例图片已是本地: {example.filename}")
             else:
-                # 远程 URL，需要下载
+                # 远程 URL，需要下载（串行下载）
                 save_path = base_path / example.filename
-                download_tasks.append((example, save_path))
-        
-        # 并发下载所有远程图片
-        if download_tasks:
-            logger.info(f"开始下载 {len(download_tasks)} 张示例图片...")
-            download_results = await asyncio.gather(
-                *[download_file(ex.url, path, app_settings.civitai.timeout) 
-                  for ex, path in download_tasks]
-            )
-            
-            success_count = sum(download_results)
-            fail_count = len(download_results) - success_count
-            
-            if fail_count > 0:
-                logger.warning(f"下载示例图片: 成功 {success_count}, 失败 {fail_count}")
-            else:
-                logger.success(f"成功下载 {success_count} 张示例图片")
-            
-            # 更新 URL 为本地 file:// URL
-            for (example, save_path), success in zip(download_tasks, download_results):
-                example:Example
-                if success:
-                    # 创建新的 Example，替换 URL 为本地 file:// URL
-                    local_example = Example(
-                        url=save_path.as_uri(),  # 转换为 file:// URL
-                        args=example.args
-                    )
-                    localized_examples.append(local_example)
-                else:
-                    # 下载失败，保留原 URL（或跳过）
-                    logger.warning(f"跳过下载失败的示例图片: {example.filename}")
+                logger.debug(f"下载示例图片: {example.filename}")
+                
+                try:
+                    success = await download_file(example.url, save_path, app_settings.civitai.timeout)
+                    if success:
+                        # 创建新的 Example，替换 URL 为本地 file:// URL
+                        local_example = Example(
+                            url=save_path.as_uri(),  # 转换为 file:// URL
+                            args=example.args
+                        )
+                        localized_examples.append(local_example)
+                        logger.debug(f"成功下载示例图片: {example.filename}")
+                    else:
+                        # 下载失败，保留原 URL（或跳过）
+                        logger.warning(f"下载失败，跳过示例图片: {example.filename}")
+                except Exception as e:
+                    logger.exception(f"下载示例图片失败 ({example.filename}): {e}")
+                    # 下载失败，跳过这张图片
+                    continue
         
         # 创建本地化的 ModelMeta
         localized_meta = ModelMeta(
@@ -276,7 +271,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         )
         
         # 保存元数据到本地
-        self._save_meta_to_disk(localized_meta)
+        await self._save_meta_to_disk(localized_meta)
         logger.success(f"已保存模型元数据: {model_meta.name} ({model_meta.type})")
         
         return localized_meta

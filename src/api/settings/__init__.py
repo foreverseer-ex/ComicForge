@@ -12,6 +12,7 @@ from .civitai_setting import CivitaiSettings
 from .sd_forge_setting import SdForgeSettings
 from .llm_setting import LlmSettings
 from .draw_setting import DrawSettings
+from .frontend_setting import FrontendSettings
 
 
 class AppSettings(BaseModel):
@@ -23,6 +24,7 @@ class AppSettings(BaseModel):
     sd_forge: SdForgeSettings = SdForgeSettings()
     llm: LlmSettings = LlmSettings()
     draw: DrawSettings = DrawSettings()
+    frontend: FrontendSettings = FrontendSettings()
     
     @classmethod
     def load(cls, config_path: Optional[Path] = None) -> "AppSettings":
@@ -107,4 +109,5 @@ __all__ = [
     'SdForgeSettings',
     'LlmSettings',
     'DrawSettings',
+    'FrontendSettings',
 ]

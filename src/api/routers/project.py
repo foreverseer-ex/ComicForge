@@ -24,11 +24,11 @@ router = APIRouter(
 
 # ==================== 项目管理 ====================
 
-@router.post("/create", response_model=Project, summary="创建新项目")
+@router.post("/create", summary="创建新项目")
 async def create_project(
     title: str,
     novel_path: Optional[str] = None
-) -> Project:
+) -> dict:
     """
     创建新的小说转漫画项目。
     
@@ -37,7 +37,7 @@ async def create_project(
         novel_path: 小说文件路径（可选）
     
     Returns:
-        创建的项目对象，包含生成的 project_id
+        创建的项目ID（project_id）
     
     实现要点：
     - 生成唯一 project_id（UUID）
@@ -63,10 +63,10 @@ async def create_project(
     )
     
     # 保存到数据库
-    created_project = ProjectService.create(project)
+    ProjectService.create(project)
     logger.info(f"创建项目: {project_id}, 标题: {title}")
     
-    return created_project
+    return {"project_id": project_id}
 
 
 @router.get("/list", response_model=List[Project], summary="列出所有项目")
@@ -171,10 +171,13 @@ async def delete_project(project_id: str) -> dict:
     删除项目及其所有相关数据。
 
     Args:
-        project_id: 项目ID
+        project_id: 项目ID（路径参数）
     
     Returns:
-        删除操作结果
+        删除的项目ID
+    
+    Raises:
+        404: 项目不存在
     
     实现要点：
     - 删除项目记录
@@ -186,38 +189,7 @@ async def delete_project(project_id: str) -> dict:
         raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
     
     logger.info(f"删除项目: {project_id}")
-    return {"message": "项目删除成功", "project_id": project_id}
+    return {"project_id": project_id}
 
 
-@router.put("/{project_id}/progress", response_model=Project, summary="更新处理进度")
-async def update_progress(
-    project_id: str,
-    current_line: int,
-    current_chapter: int
-) -> Project:
-    """
-    更新小说处理进度。
-    
-    Args:
-        project_id: 项目ID
-        current_line: 当前处理行
-        current_chapter: 当前处理章节
-    
-    Returns:
-        更新后的项目对象
-    
-    用途：
-    - 快速更新处理进度
-    - 进度百分比可以通过 current_line / total_lines 计算
-    """
-    updated_project = ProjectService.update(
-        project_id,
-        current_line=current_line,
-        current_chapter=current_chapter,
-        updated_at=datetime.now()
-    )
-    if not updated_project:
-        raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
-    
-    return updated_project
 

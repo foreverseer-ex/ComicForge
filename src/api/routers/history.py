@@ -29,7 +29,7 @@ def create_chat_message(
         data: dict | None = None,
         index: int = -1,
         project_id: str | None = None,
-) -> str:
+) -> dict:
     """
     创建聊天消息。
 
@@ -43,7 +43,7 @@ def create_chat_message(
         project_id: 项目唯一标识，默认值为当前设置的项目ID
     
     Returns:
-        消息唯一标识
+        创建的消息ID（message_id）
     """
     if project_id is None:
         raise HTTPException(status_code=400, detail="project_id 是必需的参数")
@@ -67,7 +67,7 @@ def create_chat_message(
     )
     message = HistoryService.create(message)
     logger.info(f"创建聊天消息: {message_id} (project: {project_id}, index: {index})")
-    return message.message_id
+    return {"message_id": message_id}
 
 
 # ==================== 查询操作（固定路径必须放在动态路径之前） ====================
@@ -107,19 +107,28 @@ def get_chat_message_by_index(
 
 @router.get("/list", response_model=List[ChatMessage], summary="列出项目的所有消息")
 def list_chat_messages(
-    project_id: str
+    project_id: str,
+    limit: Optional[int] = None,
+    offset: int = 0
 ) -> List[ChatMessage]:
     """
-    根据项目ID获取聊天消息列表。
+    根据项目ID获取聊天消息列表，支持分页。
     
     Args:
-        project_id: 项目ID
+        project_id: 项目ID（查询参数）
+        limit: 返回数量限制（可选，None表示无限制）
+        offset: 偏移量（默认0）
     
     Returns:
         聊天消息列表（按索引排序）
     """
     messages = HistoryService.list(project_id)
-    return list(messages)
+    messages_list = list(messages)
+    
+    # 应用分页
+    if limit is not None:
+        return messages_list[offset:offset + limit]
+    return messages_list[offset:]
 
 
 @router.get("/ids", summary="列出项目的所有消息ID")
@@ -156,26 +165,25 @@ def get_chat_message_count(
     return count
 
 
+# ==================== 基于ID的CRUD操作 ====================
+# 注意：ID参数通过路径参数传递，权限验证在服务层进行
+
 @router.get("/{message_id}", response_model=ChatMessage, summary="获取聊天消息")
-def get_chat_message(
-    project_id: str,
-    message_id: str
-) -> ChatMessage:
+def get_chat_message(message_id: str) -> ChatMessage:
     """
     根据消息ID获取聊天消息。
     
     Args:
-        project_id: 项目ID（用于权限校验）
-        message_id: 消息ID
+        message_id: 消息ID（路径参数）
     
     Returns:
         聊天消息对象
     
     Raises:
-        404: 消息不存在或不属于该项目
+        404: 消息不存在
     """
     message = HistoryService.get(message_id)
-    if not message or message.project_id != project_id:
+    if not message:
         raise HTTPException(status_code=404, detail=f"聊天消息不存在: {message_id}")
     
     return message
@@ -256,7 +264,6 @@ def remove_chat_message_by_index(
 
 @router.put("/{message_id}", response_model=ChatMessage, summary="更新聊天消息")
 def update_chat_message(
-    project_id: str,
     message_id: str,
     status: Optional[str] = None,
     message_type: Optional[str] = None,
@@ -269,8 +276,7 @@ def update_chat_message(
     更新聊天消息。
     
     Args:
-        project_id: 项目ID（用于权限校验）
-        message_id: 消息ID
+        message_id: 消息ID（路径参数）
         status: 消息状态（可选）
         message_type: 消息类型（可选）
         role: 消息角色（可选）
@@ -282,11 +288,11 @@ def update_chat_message(
         更新后的聊天消息对象
     
     Raises:
-        404: 消息不存在或不属于该项目
+        404: 消息不存在
     """
-    # 先检查消息是否存在且属于该项目
+    # 检查消息是否存在
     message = HistoryService.get(message_id)
-    if not message or message.project_id != project_id:
+    if not message:
         raise HTTPException(status_code=404, detail=f"聊天消息不存在: {message_id}")
     
     # 更新字段
@@ -305,34 +311,30 @@ def update_chat_message(
     
     # 保存更新
     updated_message = HistoryService.update(message)
-    logger.info(f"更新聊天消息: {message_id} (session: {project_id})")
+    logger.info(f"更新聊天消息: {message_id} (project: {updated_message.project_id})")
     return updated_message
 
 
 @router.delete("/{message_id}", summary="删除聊天消息")
-def remove_chat_message(
-    project_id: str,
-    message_id: str
-) -> dict:
+def remove_chat_message(message_id: str) -> dict:
     """
     根据消息ID删除聊天消息。
     
     Args:
-        project_id: 项目ID（用于权限校验）
-        message_id: 消息ID
+        message_id: 消息ID（路径参数）
     
     Returns:
-        删除结果
+        删除的消息ID
     
     Raises:
-        404: 消息不存在或不属于该项目
+        404: 消息不存在
     """
-    # 先检查消息是否存在且属于该项目
+    # 检查消息是否存在
     message = HistoryService.get(message_id)
-    if not message or message.project_id != project_id:
+    if not message:
         raise HTTPException(status_code=404, detail=f"聊天消息不存在: {message_id}")
     
     # 删除消息
     HistoryService.remove(message_id)
-    logger.info(f"删除聊天消息: {message_id} (session: {project_id})")
-    return {"message": "聊天消息删除成功", "message_id": message_id}
+    logger.info(f"删除聊天消息: {message_id} (project: {message.project_id})")
+    return {"message_id": message_id}

@@ -31,3 +31,4 @@ resources/
 *__pycache__/
 */config.json
 storage/
+config.json

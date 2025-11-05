@@ -96,7 +96,7 @@ class ToolRouterColor:
         
         # Reader 工具
         if any(tool_name.startswith(prefix) for prefix in ['get_line', 'get_chapter_lines', 'get_chapters', 
-                                                             'get_chapter', 'get_chapter_summary', 'put_chapter_summary', 
+                                                             'get_chapter', 'put_chapter', 
                                                              'get_stats']):
             return cls.READER
         
@@ -106,8 +106,7 @@ class ToolRouterColor:
             return cls.NOVEL
         
         # Draw 工具
-        if any(tool_name.startswith(prefix) for prefix in ['get_loras', 'get_sd_models', 'get_options', 
-                                                             'set_options', 'generate', 'get_image']):
+        if any(tool_name.startswith(prefix) for prefix in ['get_loras', 'get_sd_models', 'generate', 'get_image']):
             return cls.DRAW
         
         # LLM 辅助工具
