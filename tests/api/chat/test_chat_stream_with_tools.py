@@ -40,7 +40,7 @@ class TestStreamChatWithTools:
             
             async def collect_with_tracking():
                 nonlocal chunks, tool_call_detected
-                async for chunk in llm_service.chat(message, test_project.project_id):
+                async for chunk in llm_service.chat_text_only(message, test_project.project_id):
                     chunks.append(chunk)
             
             import asyncio
@@ -105,7 +105,7 @@ class TestStreamChatWithTools:
             
             async def collect_with_checks():
                 check_count = 0
-                async for chunk in llm_service.chat(message, test_project.project_id):
+                async for chunk in llm_service.chat_text_only(message, test_project.project_id):
                     check_count += 1
                     # 每收到一些块后检查一次数据库
                     if check_count % 10 == 0:
@@ -166,7 +166,7 @@ class TestStreamChatWithTools:
             
             async def collect_response():
                 nonlocal full_response
-                async for chunk in llm_service.chat(message, test_project.project_id):
+                async for chunk in llm_service.chat_text_only(message, test_project.project_id):
                     full_response += chunk
             
             import asyncio

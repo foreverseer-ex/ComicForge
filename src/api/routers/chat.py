@@ -74,7 +74,7 @@ async def chat_invoke(request: ChatRequest):
     try:
         # 收集完整响应
         full_response = ""
-        async for chunk in llm_service.chat(request.message, request.project_id):
+        async for chunk in llm_service.chat_text_only(request.message, request.project_id):
             full_response += chunk
         
         # 等待数据库更新完成
@@ -165,7 +165,7 @@ async def chat_stream(request: ChatRequest):
             last_suggests = []
             
             # 使用改进的流式生成器，它会yield不同的事件类型
-            async for event in llm_service.chat_stream_enhanced(request.message, request.project_id):
+            async for event in llm_service.chat_streamed(request.message, request.project_id):
                 event_type = event.get('type')
                 
                 if event_type == 'content':

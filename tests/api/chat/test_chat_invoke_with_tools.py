@@ -42,7 +42,7 @@ class TestInvokeChatWithTools:
             
             async def collect_response():
                 nonlocal full_response, tool_calls_count
-                async for chunk in llm_service.chat(message, test_project.project_id):
+                async for chunk in llm_service.chat_text_only(message, test_project.project_id):
                     full_response += chunk
             
             import asyncio
@@ -96,7 +96,7 @@ class TestInvokeChatWithTools:
             
             async def collect_response():
                 nonlocal full_response
-                async for chunk in llm_service.chat(message, test_project.project_id):
+                async for chunk in llm_service.chat_text_only(message, test_project.project_id):
                     full_response += chunk
             
             import asyncio
@@ -144,7 +144,7 @@ class TestInvokeChatWithTools:
             
             async def collect_response():
                 nonlocal full_response
-                async for chunk in llm_service.chat(message, test_project.project_id):
+                async for chunk in llm_service.chat_text_only(message, test_project.project_id):
                     full_response += chunk
             
             import asyncio

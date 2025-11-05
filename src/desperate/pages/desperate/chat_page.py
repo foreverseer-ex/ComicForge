@@ -453,7 +453,7 @@ class ChatPage(ft.Container):
         async def get_ai_response():
             try:
                 # 流式获取响应（后端会自动写入数据库）
-                async for chunk in self.llm_service.chat(message, self.project_id):
+                async for chunk in self.llm_service.chat_text_only(message, self.project_id):
                     pass  # 响应已写入数据库，轮询会自动更新UI
                 
                 # 检查是否需要执行迭代模式
@@ -723,7 +723,7 @@ class ChatPage(ft.Container):
             
             try:
                 # 流式获取响应
-                async for chunk in self.llm_service.chat(message, self.project_id):
+                async for chunk in self.llm_service.chat_text_only(message, self.project_id):
                     response_text += chunk
                     
                     # 在主线程更新 UI（限流，避免过于频繁的更新）

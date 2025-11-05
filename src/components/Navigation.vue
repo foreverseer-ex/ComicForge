@@ -1,27 +1,43 @@
 <template>
   <aside 
     :class="[
-      'fixed left-0 top-0 h-full w-56 transition-all duration-300 z-30',
+      'fixed left-0 top-0 h-full transition-all duration-300 z-30',
+      isCollapsed ? 'w-16' : 'w-48',
       isDark ? 'bg-gray-900 border-r border-gray-700' : 'bg-white border-r border-gray-200'
     ]"
   >
     <!-- Logo 区域 -->
-    <div class="flex items-center justify-between h-16 px-4 border-b" 
-         :class="isDark ? 'border-gray-700' : 'border-gray-200'">
-      <h1 :class="['text-lg font-bold', isDark ? 'text-white' : 'text-gray-900']">
+    <div class="flex items-center justify-between h-16 border-b" 
+         :class="[
+           isCollapsed ? 'px-2' : 'px-4',
+           isDark ? 'border-gray-700' : 'border-gray-200'
+         ]">
+      <h1 v-if="!isCollapsed" :class="['text-lg font-bold', isDark ? 'text-white' : 'text-gray-900']">
         ComicForge
       </h1>
+      <button
+        @click="toggleCollapseFn"
+        :class="[
+          'p-1.5 rounded-lg transition-colors',
+          isDark ? 'hover:bg-gray-800 text-gray-400 hover:text-white' : 'hover:bg-gray-100 text-gray-600 hover:text-gray-900'
+        ]"
+        :title="isCollapsed ? '展开导航栏' : '折叠导航栏'"
+      >
+        <component :is="isCollapsed ? ChevronRightIcon : ChevronLeftIcon" class="w-5 h-5" />
+      </button>
     </div>
 
     <!-- 导航菜单 -->
-    <nav class="flex-1 overflow-y-auto py-4">
-      <div class="px-2 space-y-1">
+    <nav class="flex-1 overflow-y-auto py-4" :class="isCollapsed ? 'overflow-x-hidden' : ''">
+      <div :class="isCollapsed ? 'px-1 space-y-1' : 'px-2 space-y-1'">
         <router-link
           v-for="item in navigation"
           :key="item.name"
           :to="item.path"
           :class="[
-            'group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap',
+            'group relative flex items-center py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap',
+            isCollapsed ? 'justify-center px-2' : 'px-3',
+            !isConnected ? 'opacity-50 cursor-not-allowed pointer-events-none' : '',
             isActive(item.path)
               ? isDark 
                 ? 'bg-blue-600 text-white' 
@@ -34,41 +50,71 @@
           <component 
             :is="item.icon" 
             :class="[
-              'w-5 h-5 mr-2 flex-shrink-0',
+              'w-5 h-5 flex-shrink-0',
+              isCollapsed ? '' : 'mr-2',
               isActive(item.path) 
                 ? '' 
                 : isDark ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-400 group-hover:text-gray-500'
             ]" 
           />
-          <span class="text-sm">{{ item.name }}</span>
+          <span v-if="!isCollapsed" class="text-sm">{{ item.name }}</span>
+          <span v-if="isCollapsed" class="absolute left-full ml-2 px-2 py-1 text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 whitespace-nowrap"
+                :class="isDark ? 'bg-gray-800 text-white' : 'bg-white text-gray-900 shadow-lg'">
+            {{ item.name }}
+          </span>
         </router-link>
       </div>
     </nav>
 
-    <!-- 主题切换按钮 -->
-    <div class="p-3 border-t" :class="isDark ? 'border-gray-700' : 'border-gray-200'">
-      <button
-        @click="toggleTheme"
-        :class="[
-          'w-full flex items-center justify-center px-3 py-2 rounded-lg transition-colors text-sm',
-          isDark
-            ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-        ]"
-      >
-        <component 
-          :is="isDark ? SunIcon : MoonIcon" 
-          class="w-4 h-4 mr-2" 
-        />
-        <span class="text-xs">{{ isDark ? '浅色模式' : '夜间模式' }}</span>
-      </button>
+    <!-- 底部操作区域 -->
+    <div class="border-t" :class="isDark ? 'border-gray-700' : 'border-gray-200'">
+      <!-- 主题切换按钮 -->
+      <div :class="isCollapsed ? 'px-2 pt-3 pb-1' : 'px-3 pt-3 pb-1'">
+        <button
+          @click="toggleTheme"
+          :class="[
+            'w-full flex items-center justify-center py-2 rounded-lg transition-colors text-sm',
+            isCollapsed ? 'px-2' : 'px-3',
+            isDark
+              ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          ]"
+        >
+          <component 
+            :is="isDark ? SunIcon : MoonIcon" 
+            :class="['w-4 h-4', isCollapsed ? '' : 'mr-2']" 
+          />
+          <span v-if="!isCollapsed" class="text-xs">{{ isDark ? '浅色模式' : '夜间模式' }}</span>
+        </button>
+      </div>
+      
+      <!-- 服务端连接状态 -->
+      <div :class="isCollapsed ? 'px-2 pt-1 pb-3' : 'px-3 pt-1 pb-3'">
+        <div class="flex items-center justify-center py-1.5 rounded-lg text-xs"
+             :class="[
+               isCollapsed ? 'px-1 gap-1' : 'px-2 gap-2',
+               isConnected 
+                 ? isDark ? 'text-green-400' : 'text-green-700'
+                 : isDark ? 'bg-red-900/30 text-red-400' : 'bg-red-50 text-red-700'
+             ]">
+          <div class="w-2 h-2 rounded-full flex-shrink-0" 
+               :class="isConnected 
+                 ? isDark ? 'bg-green-400' : 'bg-green-600'
+                 : isDark ? 'bg-red-400' : 'bg-red-600'">
+          </div>
+          <span v-if="!isCollapsed">{{ isConnected ? '服务端已连接' : '服务端未连接' }}</span>
+        </div>
+      </div>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useThemeStore } from '../stores/theme'
+import { useConnectionStore } from '../stores/connection'
+import { useNavigationStore } from '../stores/navigation'
 import { storeToRefs } from 'pinia'
 import type { Component } from 'vue'
 import {
@@ -85,11 +131,31 @@ import {
   MoonIcon,
   SunIcon
 } from '@heroicons/vue/24/solid'
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon
+} from '@heroicons/vue/24/outline'
 
 const route = useRoute()
 const themeStore = useThemeStore()
 const { isDark } = storeToRefs(themeStore)
 const { toggleTheme } = themeStore
+
+const connectionStore = useConnectionStore()
+const { isConnected } = storeToRefs(connectionStore)
+const { startChecking, stopChecking } = connectionStore
+
+const navigationStore = useNavigationStore()
+const { isCollapsed } = storeToRefs(navigationStore)
+const { toggleCollapse: toggleCollapseFn } = navigationStore
+
+onMounted(() => {
+  startChecking()
+})
+
+onUnmounted(() => {
+  stopChecking()
+})
 
 interface NavigationItem {
   name: string

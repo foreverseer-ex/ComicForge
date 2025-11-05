@@ -110,7 +110,7 @@ class TestStreamChat:
             full_response = ""
             async def collect_response():
                 nonlocal full_response
-                async for chunk in llm_service.chat(message, test_project.project_id):
+                async for chunk in llm_service.chat_text_only(message, test_project.project_id):
                     full_response += chunk
             
             import asyncio

@@ -3,18 +3,18 @@ LLM 服务基础抽象类。
 
 定义所有 LLM 服务的统一接口。
 """
-import asyncio
 import functools
 import json
 import uuid
 from abc import ABC, abstractmethod
-from typing import Optional, List, AsyncGenerator, Any
+from typing import Optional, List, AsyncGenerator
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool, BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
+from pydantic_core import to_jsonable_python
 
 from api.constants.llm import (
     DEVELOP_MODE_PROMPTS, MCP_TOOLS_GUIDE,
@@ -53,7 +53,7 @@ from api.routers.reader import (
     get_line, get_chapter_lines, get_lines_range, get_chapters,
     get_chapter, get_chapter_summary, put_chapter_summary, get_stats,
 )
-from api.schemas.chat import ChatMessage, ChatIteration, ToolCall
+from api.schemas.chat import ChatMessage, ChatIteration
 from api.services.db import MemoryService, HistoryService
 from api.settings import app_settings
 
@@ -65,19 +65,12 @@ def tool_wrapper(func):
     async def async_wrapper(*args, **kwargs):
         try:
             result = await func(*args, **kwargs)
-            # 如果返回值是空列表，转换为描述性字符串
-            if isinstance(result, list) and len(result) == 0:
-                return "无结果"
-            # 如果返回值是列表，转换为 JSON 字符串
-            elif isinstance(result, list):
-                # 使用 Pydantic 的 model_dump(mode='json') 来正确处理 datetime 等特殊类型
-                serialized_items = []
-                for item in result:
-                    if hasattr(item, 'model_dump'):
-                        serialized_items.append(item.model_dump(mode='json'))
-                    else:
-                        serialized_items.append(item)
-                return json.dumps(serialized_items, ensure_ascii=False, indent=2)
+            result = to_jsonable_python(result)
+            if not isinstance(result, (list, dict)):
+                # 基本类型，比如字符串
+                return [result]
+            if len(result) == 0:
+                return ['无结果']
             return result
         except Exception as e:
             # 捕获工具调用中的异常，返回友好的错误消息
@@ -116,67 +109,7 @@ def tool_wrapper(func):
             logger.exception(f"❌ 工具调用失败（工具: {func.__name__}）: {e}")
             return ERROR_TOOL_CALL_FAILED.format(error=str(e))
 
-    @functools.wraps(func)
-    def sync_wrapper(*args, **kwargs):
-        try:
-            result = func(*args, **kwargs)
-            # 如果返回值是空列表，转换为描述性字符串
-            if isinstance(result, list) and len(result) == 0:
-                return "无结果"
-            # 如果返回值是列表，转换为 JSON 字符串
-            elif isinstance(result, list):
-                # 使用 Pydantic 的 model_dump(mode='json') 来正确处理 datetime 等特殊类型
-                serialized_items = []
-                for item in result:
-                    if hasattr(item, 'model_dump'):
-                        serialized_items.append(item.model_dump(mode='json'))
-                    else:
-                        serialized_items.append(item)
-                return json.dumps(serialized_items, ensure_ascii=False, indent=2)
-            return result
-        except Exception as e:
-            # 捕获工具调用中的异常，返回友好的错误消息
-            error_str = str(e).lower()
-            error_type = type(e).__name__
-
-            # 检查是否是SD-Forge连接错误
-            is_sd_forge_error = (
-                    "sd-forge" in error_str or
-                    "502" in error_str or
-                    "bad gateway" in error_str or
-                    "502 bad gateway" in error_str or
-                    error_type == "HTTPException" and "502" in str(e)
-            )
-
-            if is_sd_forge_error:
-                logger.warning(f"⚠️ SD-Forge 连接失败（工具: {func.__name__}）: {e}")
-                return ERROR_SD_FORGE_CONNECTION
-
-            # 检查是否是网络连接错误
-            is_connection_error = (
-                    "connection" in error_str or
-                    "connect" in error_str or
-                    "连接" in error_str or
-                    "network" in error_str or
-                    "网络" in error_str or
-                    error_type in ("APIConnectionError", "ConnectError", "ConnectTimeout", "ReadTimeout",
-                                   "HTTPException")
-            )
-
-            if is_connection_error:
-                logger.warning(f"⚠️ 工具调用连接失败（工具: {func.__name__}）: {e}")
-                return ERROR_CONNECTION_FAILED.format(error=str(e))
-
-            # 其他错误
-            logger.exception(f"❌ 工具调用失败（工具: {func.__name__}）: {e}")
-            return ERROR_TOOL_CALL_FAILED.format(error=str(e))
-
-    # 检查函数是否是异步的
-
-    if asyncio.iscoroutinefunction(func):
-        return async_wrapper
-    else:
-        return sync_wrapper
+    return async_wrapper
 
 
 class AbstractLlmService(ABC):
@@ -388,7 +321,7 @@ class AbstractLlmService(ABC):
             except Exception as e:
                 logger.exception(f"生成聊天摘要失败: {e}")
 
-    async def chat_stream_enhanced(self, message: str, project_id: str) -> AsyncGenerator[dict, None]:
+    async def chat_streamed(self, message: str, project_id: str) -> AsyncGenerator[dict, None]:
         """
         增强的流式对话方法，返回结构化事件。
         
@@ -499,25 +432,15 @@ class AbstractLlmService(ABC):
 
                 # 处理工具调用开始事件
                 elif event_type == "on_tool_start":
-                    tool_name = chunk.get("name", "")
-                    tool_input = chunk.get("data", {}).get("input", {})
-                    logger.info(f"✅ 工具调用: {tool_name}, 参数: {tool_input}")
-                    args = tool_input if isinstance(tool_input, dict) else {}
-                    if 'request' in args and len(args) == 1:
-                        args = args['request']
-                    # 添加工具调用到列表（结果暂时为空）
-                    tool_call = {
-                        "name": tool_name,
-                        "args": args,
-                        "result": None
-                    }
-                    assistant_tools.append(tool_call)
+                    self._process_tool_start_event(chunk, assistant_tools)
 
                     # 更新数据库
                     assistant_message.tools = assistant_tools.copy()
                     HistoryService.update(assistant_message)
 
                     # 发送工具调用开始事件
+                    tool_name = chunk.get("name", "")
+                    tool_input = chunk.get("data", {}).get("input", {})
                     yield {
                         'type': 'tool_start',
                         'name': tool_name,
@@ -528,23 +451,18 @@ class AbstractLlmService(ABC):
 
                 # 处理工具调用结束事件
                 elif event_type == "on_tool_end":
-                    tool_name = chunk.get("name", "")
                     tool_output: ToolMessage = chunk.get("data", {}).get("output")
-
                     logger.info(
-                        f"✅ 工具调用完成: {tool_name}, 结果长度={len(str(tool_output.content)) if tool_output.content else 0}")
+                        f"✅ 工具调用完成: {chunk.get('name', '')}, 结果长度={len(str(tool_output.content)) if tool_output.content else 0}")
 
-                    # 更新最后一个工具调用的结果和 tool_call_id
-                    if assistant_tools:
-                        assistant_tools[-1]["result"] = tool_output.content
-                        assistant_tools[-1]["status"] = tool_output.status
-                        assistant_tools[-1]["tool_call_id"] = tool_output.tool_call_id
+                    self._process_tool_end_event(chunk, assistant_tools)
 
                     # 更新数据库
                     assistant_message.tools = assistant_tools.copy()
                     HistoryService.update(assistant_message)
 
                     # 发送工具调用结束事件
+                    tool_name = chunk.get("name", "")
                     yield {
                         'type': 'tool_end',
                         'name': tool_name,
@@ -620,287 +538,23 @@ class AbstractLlmService(ABC):
             yield {'type': 'status', 'status': 'error'}
             yield {'type': 'error', 'error': error_msg}
 
-    async def chat(self, message: str, project_id: str) -> AsyncGenerator[str, None]:
+    async def chat_text_only(self, message: str, project_id: str) -> AsyncGenerator[str, None]:
         """
         与 LLM 进行标准对话（流式返回）。
         
-        完全基于数据库操作：
-        - 用户消息写入数据库
-        - 助手消息实时更新到数据库
-        - 工具调用记录到数据库的 tools 字段
-        - 建议记录到数据库的 suggests 字段
+        这是 `chat_streamed` 的包装器，只返回文本内容片段，保持向后兼容。
+        内部调用 `chat_streamed` 并提取 `content` 事件。
         
         :param message: 用户消息
         :param project_id: 项目 ID
-        :yield: LLM 响应的文本片段（SSE 格式）
+        :yield: LLM 响应的文本片段
         """
-        logger.info(f"👤 用户消息: {message[:200]}{'...' if len(message) > 200 else ''}")
-
-        if not self.is_ready():
-            logger.error("LLM 服务未就绪")
-            error_msg = ChatMessage(
-                message_id=str(uuid.uuid4()),
-                project_id=project_id,
-                role="assistant",
-                context="错误：LLM 服务未就绪，请先初始化 LLM",
-                status="error",
-                message_type="normal"
-            )
-            HistoryService.create(error_msg)
-            yield "错误：LLM 服务未就绪，请先初始化 LLM"
-            return
-
-        # 创建助手消息的 ID（提前创建，用于实时更新）
-        assistant_message_id = str(uuid.uuid4())
-        assistant_context = ""
-        assistant_tools: list[dict] = []
-
-        try:
-            # 1. 构建系统消息和历史消息
-            messages = self.build_system_messages(project_id)
-            self.summary_history(project_id)
-            chat_summary_memory = MemoryService.get_summary(project_id)
-
-            # 2. 创建用户消息并写入数据库
-            user_message = ChatMessage(
-                message_id=str(uuid.uuid4()),
-                project_id=project_id,
-                role="user",
-                context=message,
-                status="ready",
-                message_type="normal"
-            )
-            HistoryService.create(user_message)
-
-            # 3. 获取历史消息（用于上下文）
-            start_index = max(0, HistoryService.count(project_id) - app_settings.llm.summary_epoch)
-            messages_to_include = HistoryService.list(project_id, start_index=start_index)
-
-            # 4. 如果有聊天摘要，添加到系统消息
-            if chat_summary_memory and chat_summary_memory.data:
-                summary_message = SUMMARY_MESSAGE_TEMPLATE.format(
-                    previous_rounds=start_index,
-                    summary_value=chat_summary_memory.data,
-                    recent_rounds=len(messages_to_include),
-                )
-                messages.append(("system", summary_message))
-
-            # 5. 添加历史消息到 langchain 消息列表
-            for msg in messages_to_include:
-                if msg.role == "user":
-                    messages.append(("human", msg.context))
-                elif msg.role == "assistant":
-                    messages.append(("ai", msg.context))
-
-            # 6. 创建初始助手消息（状态为 thinking）
-            assistant_message = ChatMessage(
-                message_id=assistant_message_id,
-                project_id=project_id,
-                role="assistant",
-                context="",
-                status="thinking",
-                message_type="normal",
-                tools=[],
-                suggests=[]
-            )
-            HistoryService.create(assistant_message)
-
-            # 7. 实现流式对话逻辑
-            logger.info(f"开始流式对话，使用 {len(self.tools)} 个工具")
-            config = {"recursion_limit": app_settings.llm.recursion_limit}
-
-            async for chunk in self.agent.astream_events(
-                    {"messages": messages},
-                    version="v2",
-                    config=config
-            ):
-                event_type = chunk.get("event")
-
-                # 处理文本流事件
-                if event_type == "on_chat_model_stream":
-                    message_chunk = chunk.get("data", {}).get("chunk")
-                    if message_chunk and hasattr(message_chunk, "content") and message_chunk.content:
-                        content = message_chunk.content
-                        assistant_context += content
-
-                        # 实时更新数据库中的助手消息
-                        assistant_message.context = assistant_context
-                        assistant_message.tools = assistant_tools.copy()
-                        HistoryService.update(assistant_message)
-
-                        yield content
-
-                # 处理工具调用开始事件
-                elif event_type == "on_tool_start":
-                    tool_name = chunk.get("name", "")
-                    tool_input = chunk.get("data", {}).get("input", {})
-                    logger.info(f"✅ 工具调用: {tool_name}, 参数: {tool_input}")
-                    args = tool_input if isinstance(tool_input, dict) else {}
-                    if 'request' in args and len(args) == 1:
-                        args = args['request']
-                    # 添加工具调用到列表（结果暂时为空）
-                    tool_call = {
-                        "name": tool_name,
-                        "args": args,
-                        "result": None
-                    }
-                    assistant_tools.append(tool_call)
-
-                    # 更新数据库
-                    assistant_message.tools = assistant_tools.copy()
-                    HistoryService.update(assistant_message)
-
-                # 处理工具调用结束事件
-                elif event_type == "on_tool_end":
-                    tool_name = chunk.get("name", "")
-                    tool_output: ToolMessage = chunk.get("data", {}).get("output")
-
-                    logger.info(
-                        f", 结果长度={len(str(tool_output.content)) if tool_output.content else 0}")
-
-                    # 更新最后一个工具调用的结果和 tool_call_id
-                    if assistant_tools:
-                        assistant_tools[-1]["result"] = tool_output.content
-                        assistant_tools[-1]["status"] = tool_output.status
-                        assistant_tools[-1]["tool_call_id"] = tool_output.tool_call_id
-
-                    # 更新数据库
-                    assistant_message.tools = assistant_tools.copy()
-                    HistoryService.update(assistant_message)
-
-                    # 特殊处理：如果工具是 add_choices，更新 suggests
-                    if tool_name == "add_choices":
-                        from api.routers.llm import _session_choices
-                        choices = _session_choices.get(project_id, [])
-                        suggests = []
-                        for choice in choices:
-                            if isinstance(choice, dict):
-                                if choice.get("type") == "image":
-                                    suggests.append(f"image:{choice.get('url', '')}")
-                                elif choice.get("type") == "text":
-                                    suggests.append(choice.get("text", ""))
-                            elif isinstance(choice, str):
-                                suggests.append(choice)
-                        assistant_message.suggests = suggests
-                        HistoryService.update(assistant_message)
-
-            # 8. 对话完成，更新助手消息状态为 ready
-            assistant_message.status = "ready"
-            assistant_message.context = assistant_context
-            assistant_message.tools = assistant_tools.copy()
-            HistoryService.update(assistant_message)
-
-            logger.info(f"✅ 对话完成: {len(assistant_context)} 字符, {len(assistant_tools)} 个工具调用")
-
-        except Exception as e:
-            logger.exception(f"对话失败: {e}")
-
-            # 检查是否是网络连接错误或超时错误
-            error_type = type(e).__name__
-            error_str = str(e).lower()
-
-            is_connection_error = (
-                    "connection" in error_str or
-                    "connect" in error_str or
-                    "连接" in error_str or
-                    "network" in error_str or
-                    "网络" in error_str or
-                    error_type in ("APIConnectionError", "ConnectError", "ConnectTimeout", "ReadTimeout")
-            )
-
-            is_timeout_error = (
-                    "timeout" in error_str or
-                    "超时" in error_str or
-                    error_type in ("TimeoutError", "ConnectTimeout", "ReadTimeout")
-            )
-
-            if is_connection_error or is_timeout_error:
-                if is_timeout_error:
-                    error_msg = ERROR_TIMEOUT_TEMPLATE.format(timeout=app_settings.llm.timeout)
-                else:
-                    error_msg = ERROR_CONNECTION_TEMPLATE
-            else:
-                error_msg = f"错误：{e}"
-
-            # 更新助手消息为错误状态
-            assistant_message.status = "error"
-            assistant_message.context = error_msg
-            HistoryService.update(assistant_message)
-
-            yield error_msg
-
-    async def simple_chat(self, message: str) -> str:
-        """
-        简单对话（非流式）。
-        
-        支持开发者模式和自定义系统提示词：
-        - 如果启用开发者模式，会在消息前添加开发者模式提示词
-        - 如果配置了系统提示词，会在开发者模式提示词之后添加
-        
-        :param message: 用户消息
-        :return: LLM 完整响应
-        """
-        if not self.is_ready():
-            logger.error("LLM 服务未就绪")
-            return "错误：LLM 服务未就绪"
-
-        try:
-            # 构建消息列表
-            messages = []
-
-            # 1. 如果启用开发者模式，添加开发者模式提示词
-            if app_settings.llm.developer_mode:
-                messages.append(("system", DEVELOP_MODE_PROMPTS))
-                logger.debug("已启用开发者模式")
-
-            # 2. 如果配置了系统提示词（非空），添加系统提示词
-            if app_settings.llm.system_prompt and app_settings.llm.system_prompt.strip():
-                messages.append(("system", app_settings.llm.system_prompt))
-                logger.debug("已启用系统提示词")
-
-            # 3. 添加用户消息
-            messages.append(("human", message))
-
-            response = await self.llm.ainvoke(messages)
-            return response.content
-        except Exception as e:
-            logger.exception(f"对话失败: {e}")
-
-            # 检查是否是网络连接错误或超时错误
-            error_type = type(e).__name__
-            error_str = str(e).lower()
-
-            # 检查是否是连接错误或超时错误
-            is_connection_error = (
-                    "connection" in error_str or
-                    "connect" in error_str or
-                    "连接" in error_str or
-                    "network" in error_str or
-                    "网络" in error_str or
-                    error_type in ("APIConnectionError", "ConnectError", "ConnectTimeout", "ReadTimeout")
-            )
-
-            is_timeout_error = (
-                    "timeout" in error_str or
-                    "超时" in error_str or
-                    error_type in ("TimeoutError", "ConnectTimeout", "ReadTimeout")
-            )
-
-            if is_connection_error or is_timeout_error:
-                if is_timeout_error:
-                    return ERROR_TIMEOUT_TEMPLATE.format(timeout=app_settings.llm.timeout)
-                else:
-                    return ERROR_CONNECTION_TEMPLATE
-            else:
-                return f"错误：{e}"
-
-    def get_tool_list(self) -> List[str]:
-        """
-        获取可用工具列表。
-        
-        :return: 工具名称列表
-        """
-        return [tool.name for tool in self.tools]
+        async for event in self.chat_streamed(message, project_id):
+            if event.get('type') == 'content':
+                yield event.get('content', '')
+            elif event.get('type') == 'error':
+                yield event.get('error', '错误：未知错误')
+                return
 
     async def chat_iteration(self, iteration_data: dict, project_id: str) -> AsyncGenerator[str, None]:
         """
@@ -1066,6 +720,53 @@ class AbstractLlmService(ABC):
 
         # 迭代过程中的工具调用不需要记录（用户要求）
 
+    def _process_tool_start_event(self, chunk: dict, tools_list: list, log_prefix: str = "") -> None:
+        """
+        处理工具调用开始事件的通用方法。
+        
+        :param chunk: 事件 chunk
+        :param tools_list: 工具调用列表（会被更新）
+        :param log_prefix: 日志前缀（可选）
+        """
+        tool_name = chunk.get("name", "")
+        tool_input = chunk.get("data", {}).get("input", {})
+        prefix = f"[{log_prefix}] " if log_prefix else ""
+        logger.info(f"✅ {prefix}工具调用: {tool_name}, 参数: {tool_input}")
+
+        args = tool_input if isinstance(tool_input, dict) else {}
+        if 'request' in args and len(args) == 1:
+            args = args['request']
+
+        tool_call = {
+            "name": tool_name,
+            "args": args,
+            "result": None
+        }
+        tools_list.append(tool_call)
+
+    def _process_tool_end_event(self, chunk: dict, tools_list: list, log_prefix: str = "") -> None:
+        """
+        处理工具调用结束事件的通用方法。
+        
+        :param chunk: 事件 chunk
+        :param tools_list: 工具调用列表（会被更新）
+        :param log_prefix: 日志前缀（可选）
+        """
+        tool_name = chunk.get("name", "")
+        tool_output: ToolMessage = chunk.get("data", {}).get("output")
+        prefix = f"[{log_prefix}] " if log_prefix else ""
+        logger.info(f"✅ {prefix}工具调用完成: {tool_name}")
+
+        if tools_list:
+            try:
+                result = json.loads(tool_output.content)
+            except (json.JSONDecodeError, TypeError):
+                # 可能是基本类型，比如字符串
+                result = tool_output.content
+            tools_list[-1]["result"] = result
+            tools_list[-1]["status"] = tool_output.status
+            tools_list[-1]["tool_call_id"] = tool_output.tool_call_id
+
     async def _call_llm_final_operation(
             self,
             prompt: str,
@@ -1074,14 +775,16 @@ class AbstractLlmService(ABC):
             context_ref: list
     ) -> AsyncGenerator[str, None]:
         """
-        调用LLM执行最终操作（允许所有工具，记录到数据库）。
+        调用LLM执行最终操作（允许所有工具，记录到传入的列表）。
+        
+        这是 `chat_streamed` 的简化版本，使用自定义消息列表，不写入数据库。
         
         :param prompt: 提示词
         :param project_id: 项目ID
         :param tools_list: 工具调用列表（会被实时更新）
         :param context_ref: 上下文内容的引用（列表，用于修改字符串）
         """
-        # 构建消息列表
+        # 构建自定义消息列表（不包含历史消息和聊天摘要）
         messages = []
 
         # 添加系统提示词
@@ -1105,7 +808,7 @@ class AbstractLlmService(ABC):
         # 配置递归限制
         config = {"recursion_limit": app_settings.llm.recursion_limit}
 
-        # 调用LLM
+        # 调用LLM并处理事件
         async for chunk in self.agent.astream_events({"messages": messages}, version="v2", config=config):
             event_type = chunk.get("event")
 
@@ -1117,26 +820,7 @@ class AbstractLlmService(ABC):
                     yield content
 
             elif event_type == "on_tool_start":
-                tool_name = chunk.get("name", "")
-                tool_input = chunk.get("data", {}).get("input", {})
-                logger.info(f"✅ [最终操作] 工具调用：{tool_name}")
-                args = tool_input if isinstance(tool_input, dict) else {}
-                if 'request' in args and len(args) == 1:
-                    args = args['request']
-                tool_call = {
-                    "name": tool_name,
-                    "args": args,
-                    "result": None
-                }
-                tools_list.append(tool_call)
+                self._process_tool_start_event(chunk, tools_list, "最终操作")
 
             elif event_type == "on_tool_end":
-                tool_name = chunk.get("name", "")
-                tool_output: ToolMessage = chunk.get("data", {}).get("output")
-
-                logger.info(f"✅ [最终操作] 工具调用完成：{tool_name}")
-
-                if tools_list:
-                    tools_list[-1]["result"] = tool_output.content
-                    tools_list[-1]["status"] = tool_output.status
-                    tools_list[-1]["tool_call_id"] = tool_output.tool_call_id
+                self._process_tool_end_event(chunk, tools_list, "最终操作")

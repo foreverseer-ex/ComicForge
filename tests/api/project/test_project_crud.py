@@ -93,7 +93,7 @@ class TestProjectCRUD:
             )
         
         # 列出项目
-        response = client.get("/project/", params={"limit": 50, "offset": 0})
+        response = client.get("/project/list", params={"limit": 50, "offset": 0})
         
         assert response.status_code == 200
         projects = response.json()
@@ -105,7 +105,7 @@ class TestProjectCRUD:
         print(f"  项目数量: {len(projects)}")
         
         # 测试分页
-        response_page = client.get("/project/", params={"limit": 2, "offset": 0})
+        response_page = client.get("/project/list", params={"limit": 2, "offset": 0})
         assert response_page.status_code == 200
         projects_page = response_page.json()
         assert len(projects_page) <= 2

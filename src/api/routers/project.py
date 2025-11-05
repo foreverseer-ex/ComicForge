@@ -69,28 +69,7 @@ async def create_project(
     return created_project
 
 
-@router.get("/{project_id}", response_model=Project, summary="获取项目信息")
-async def get_project(project_id: str) -> Project:
-    """
-    获取指定项目的详细信息。
-    
-    Args:
-        project_id: 项目唯一标识
-    
-    Returns:
-        完整的项目对象
-    
-    Raises:
-        NotFoundError: 项目不存在
-    """
-    project = ProjectService.get(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
-    
-    return project
-
-
-@router.get("/", response_model=List[Project], summary="列出所有项目")
+@router.get("/list", response_model=List[Project], summary="列出所有项目")
 async def list_projects(
     limit: int = 50,
     offset: int = 0,
@@ -112,6 +91,27 @@ async def list_projects(
 
     
     return projects
+
+
+@router.get("/{project_id}", response_model=Project, summary="获取项目信息")
+async def get_project(project_id: str) -> Project:
+    """
+    获取指定项目的详细信息。
+    
+    Args:
+        project_id: 项目唯一标识
+    
+    Returns:
+        完整的项目对象
+    
+    Raises:
+        NotFoundError: 项目不存在
+    """
+    project = ProjectService.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"项目不存在: {project_id}")
+    
+    return project
 
 
 @router.put("/{project_id}", response_model=Project, summary="更新项目")

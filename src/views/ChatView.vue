@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col fixed inset-0 overflow-hidden" style="top: 0; left: 224px; right: 0; bottom: 0;">
+  <div class="flex flex-col fixed inset-0 overflow-hidden" :style="{ top: '0', left: `${navigationWidth}px`, right: '0', bottom: '0' }">
     <!-- 顶部：固定清空按钮 -->
     <div 
       :class="[
@@ -246,22 +246,19 @@
                           >
                             <div 
                               class="font-semibold text-xs flex-shrink-0 pt-0.5"
-                              :class="isDark ? 'text-gray-400' : 'text-gray-600'"
+                              :class="isDark ? 'text-cyan-400' : 'text-cyan-600'"
                               style="min-width: 100px;"
                             >
                               {{ key }}:
                             </div>
                             <div 
                               class="text-xs flex-1 break-words"
-                              :class="isDark ? 'text-gray-200' : 'text-gray-800'"
+                              :class="isDark ? 'text-cyan-300' : 'text-cyan-700'"
                             >
-                              <span v-if="typeof value === 'object' && value !== null" class="font-mono">
+                              <span v-if="typeof value === 'object' && value !== null" class="font-mono" :class="isDark ? 'text-purple-400' : 'text-purple-600'">
                                 {{ JSON.stringify(value, null, 2) }}
                               </span>
-                              <span v-else-if="typeof value === 'string'" class="text-blue-400">
-                                "{{ value }}"
-                              </span>
-                              <span v-else class="font-mono text-purple-400">
+                              <span v-else>
                                 {{ value }}
                               </span>
                             </div>
@@ -295,7 +292,7 @@
                             {{ getToolDisplayMode(message.message_id, index, 'result') === 'rendered' ? '原始' : '渲染' }}
                           </button>
                           <button
-                            @click.stop="copyToClipboard(tool.result, `tool-result-${message.message_id}-${index}`)"
+                            @click.stop="copyToClipboard(typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result, null, 2), `tool-result-${message.message_id}-${index}`)"
                             :class="[
                               'text-xs px-2 py-0.5 rounded transition-colors flex items-center gap-1',
                               isDark 
@@ -317,43 +314,47 @@
                       >
                         <!-- 渲染视图 -->
                         <div v-if="getToolDisplayMode(message.message_id, index, 'result') === 'rendered'">
-                          <!-- 如果是 JSON 格式，解析后展示 -->
-                          <div v-if="isJSONResult(tool.result)" class="divide-y" :class="isDark ? 'divide-gray-700' : 'divide-gray-200'">
+                          <!-- 将结果统一转换为 list 格式进行渲染 -->
+                          <template v-for="(item, itemIndex) in normalizeResultToList(tool.result)" :key="itemIndex">
                             <div 
-                              v-for="(value, key) in parseJSONResult(tool.result)" 
-                              :key="key"
-                              class="px-3 py-2 flex items-start gap-3"
+                              class="border-t first:border-t-0 divide-y"
+                              :class="isDark ? 'border-gray-700 divide-gray-700' : 'border-gray-200 divide-gray-200'"
                             >
-                              <div 
-                                class="font-semibold text-xs flex-shrink-0 pt-0.5"
-                                :class="isDark ? 'text-gray-400' : 'text-gray-600'"
-                                style="min-width: 100px;"
-                              >
-                                {{ key }}:
+                              <!-- 每个卡片 -->
+                              <div v-if="isDict(item)" class="px-3 py-2">
+                                <!-- 如果项是 dict，渲染为 key: value 格式 -->
+                                <div 
+                                  v-for="(value, key) in item" 
+                                  :key="key"
+                                  class="flex items-start gap-3 py-1 first:pt-0 last:pb-0"
+                                >
+                                  <div 
+                                    class="font-semibold text-xs flex-shrink-0 pt-0.5"
+                                    :class="isDark ? 'text-emerald-400' : 'text-emerald-600'"
+                                    style="min-width: 100px;"
+                                  >
+                                    {{ key }}:
+                                  </div>
+                                  <div 
+                                    class="text-xs flex-1 break-words"
+                                    :class="isDark ? 'text-emerald-300' : 'text-emerald-700'"
+                                  >
+                                    {{ value }}
+                                  </div>
+                                </div>
                               </div>
-                              <div 
-                                class="text-xs flex-1 break-words"
-                                :class="isDark ? 'text-gray-200' : 'text-gray-800'"
-                              >
-                                <span v-if="typeof value === 'object' && value !== null" class="font-mono">
-                                  {{ JSON.stringify(value, null, 2) }}
-                                </span>
-                                <span v-else-if="typeof value === 'string'" class="text-blue-400">
-                                  "{{ value }}"
-                                </span>
-                                <span v-else class="font-mono text-purple-400">
-                                  {{ value }}
-                                </span>
+                              <!-- 如果项是基本类型，直接显示值 -->
+                              <div v-else class="px-3 py-2">
+                                <div class="text-xs break-words" :class="isDark ? 'text-emerald-300' : 'text-emerald-700'">
+                                  {{ item }}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <!-- 其他格式，直接显示 -->
-                          <div v-else class="px-3 py-2">
-                            <div 
-                              class="text-xs font-mono whitespace-pre-wrap break-words"
-                              :class="isDark ? 'text-gray-200' : 'text-gray-800'"
-                            >
-                              {{ tool.result }}
+                          </template>
+                          <!-- 如果结果为空 -->
+                          <div v-if="normalizeResultToList(tool.result).length === 0" class="px-3 py-2">
+                            <div class="text-xs" :class="isDark ? 'text-gray-400' : 'text-gray-500'">
+                              无结果
                             </div>
                           </div>
                         </div>
@@ -362,7 +363,7 @@
                           <pre 
                             class="text-xs font-mono whitespace-pre-wrap break-words overflow-x-auto"
                             :class="isDark ? 'text-gray-200' : 'text-gray-800'"
-                          >{{ formatToolResult(tool.result) }}</pre>
+                          >{{ typeof tool.result === 'string' ? formatToolResult(tool.result) : JSON.stringify(tool.result, null, 2) }}</pre>
                         </div>
                       </div>
                     </div>
@@ -514,6 +515,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
+import { useNavigationStore } from '../stores/navigation'
 import { storeToRefs } from 'pinia'
 import api from '../api'
 import { marked } from 'marked'
@@ -544,6 +546,10 @@ interface ToolCall {
 // 主题
 const themeStore = useThemeStore()
 const { isDark } = storeToRefs(themeStore)
+
+// 导航栏相关（用于响应式布局）
+const navigationStore = useNavigationStore()
+const { width: navigationWidth } = storeToRefs(navigationStore)
 
 // 项目相关（使用全局 store）
 const projectStore = useProjectStore()
@@ -1041,13 +1047,50 @@ const isJSONResult = (result: string | null): boolean => {
 }
 
 // 解析 JSON 结果
-const parseJSONResult = (result: string | null): Record<string, any> => {
-  if (!result || typeof result !== 'string') return {}
+const parseJSONResult = (result: string | null): any => {
+  if (!result || typeof result !== 'string') return null
   try {
     return JSON.parse(result)
   } catch {
-    return {}
+    return null
   }
+}
+
+// 将结果标准化为 list 格式（dict 转换为只有一个 dict 项的 list）
+const normalizeResultToList = (result: any): any[] => {
+  // 如果结果已经是对象或数组，直接处理
+  if (typeof result === 'object' && result !== null) {
+    // 如果是数组，直接返回
+    if (Array.isArray(result)) {
+      return result
+    }
+    // 如果是对象（dict），转换为只有一个对象的数组
+    return [result]
+  }
+  
+  // 如果是字符串，尝试解析为 JSON
+  if (typeof result === 'string') {
+    const parsed = parseJSONResult(result)
+    if (parsed === null) {
+      // 如果解析失败，作为基本类型处理
+      return [result]
+    }
+    
+    // 解析成功，递归处理
+    return normalizeResultToList(parsed)
+  }
+  
+  // 如果是基本类型，转换为数组
+  if (result === null || result === undefined) {
+    return []
+  }
+  
+  return [result]
+}
+
+// 判断是否是字典类型
+const isDict = (value: any): boolean => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 // 格式化工具结果（完整内容）
