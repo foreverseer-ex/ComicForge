@@ -292,25 +292,27 @@ class SdForgeDrawService(AbstractDrawService):
         """
         raise NotImplementedError("SD-Forge 批量绘图功能暂未实现")
 
-    def get_job_status(self, job_id: str) -> bool:
+    async def get_job_status(self, job_id: str) -> bool:
         """
-        获取任务状态。
+        获取任务状态（异步）。
         
         :param job_id: 任务 ID
         :return: 是否完成
         """
+        # SD-Forge 的状态检查是内存操作，不需要异步，但为了接口一致性使用 async
         job = self._jobs.get(job_id)
         if not job:
             raise ValueError(f"任务不存在: {job_id}")
         return job.get("completed", False)
 
-    def get_image(self, job_id: str) -> Image.Image:
+    async def get_image(self, job_id: str) -> Image.Image:
         """
-        获取生成的图片。
+        获取生成的图片（异步）。
         
         :param job_id: 任务 ID
         :return: PIL Image 对象
         """
+        # SD-Forge 的图片获取是内存操作，不需要异步，但为了接口一致性使用 async
         job = self._jobs.get(job_id)
         if not job:
             raise ValueError(f"任务不存在: {job_id}")
@@ -331,17 +333,27 @@ class SdForgeDrawService(AbstractDrawService):
         
         return img
 
-    def save_image(self, job_id: str, save_path: str | Path) -> None:
+    async def save_image(self, job_id: str, save_path: str | Path) -> None:
         """
-        保存生成的图片到文件。
+        保存生成的图片到文件（异步）。
         
         :param job_id: 任务 ID
         :param save_path: 保存路径
         """
-        img = self.get_image(job_id)
+        import aiofiles
+        
+        img = await self.get_image(job_id)
         save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        img.save(save_path)
+        
+        # 使用 aiofiles 异步保存图片
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        async with aiofiles.open(save_path, 'wb') as f:
+            await f.write(img_bytes.read())
+        
         logger.info(f"图片已保存: {save_path}")
 
 

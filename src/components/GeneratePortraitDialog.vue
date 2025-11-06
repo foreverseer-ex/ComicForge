@@ -43,15 +43,15 @@ const taskName = computed(() => {
 const taskDesc = computed(() => {
   const parts: string[] = []
   if (props.actorDesc) {
-    parts.push(props.actorDesc)
+    parts.push(`角色描述：${props.actorDesc}`)
   }
   if (props.actorTags && Object.keys(props.actorTags).length > 0) {
     const tagStr = Object.entries(props.actorTags)
       .map(([key, value]) => `${key}: ${value}`)
       .join(', ')
-    parts.push(tagStr)
+    parts.push(`标签：${tagStr}`)
   }
-  return parts.join('\n')
+  return parts.join('。')
 })
 
 // 提交表单

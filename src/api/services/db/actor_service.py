@@ -170,6 +170,40 @@ class ActorService:
                 return None
     
     @classmethod
+    def swap_examples(cls, actor_id: str, index1: int, index2: int) -> Optional[Actor]:
+        """
+        交换两个示例图的位置。
+        
+        :param actor_id: Actor ID
+        :param index1: 第一个示例图的索引
+        :param index2: 第二个示例图的索引
+        :return: 更新后的 Actor 对象，如果不存在则返回 None
+        """
+        with DatabaseSession() as db:
+            actor = db.get(Actor, actor_id)
+            if not actor:
+                logger.warning(f"Actor 不存在，无法交换示例: {actor_id}")
+                return None
+            
+            if index1 == index2:
+                # 如果两个索引相同，不需要交换
+                logger.debug(f"示例图索引相同，无需交换: {actor_id}, index={index1}")
+                return actor
+            
+            if not (0 <= index1 < len(actor.examples) and 0 <= index2 < len(actor.examples)):
+                logger.warning(f"示例图索引越界: {actor_id}, index1={index1}, index2={index2}")
+                return None
+            
+            # 交换两个示例图
+            actor.examples[index1], actor.examples[index2] = actor.examples[index2], actor.examples[index1]
+            db.add(actor)
+            db.flush()
+            db.refresh(actor)
+            db.expunge(actor)
+            logger.info(f"交换 Actor 示例: {actor_id}, index1={index1}, index2={index2}")
+            return actor
+    
+    @classmethod
     def update_example(cls, actor_id: str, example_index: int, example: ActorExample) -> Optional[Actor]:
         """
         更新 Actor 的指定示例图。

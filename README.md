@@ -102,8 +102,9 @@ ComicForge/
 │   │   │   │   ├── memory_service.py    # 记忆管理
 │   │   │   │   ├── novel_service.py     # 小说内容
 │   │   │   │   ├── draw_service.py      # 绘图服务
-│   │   │   │   ├── history_service.py   # 历史记录
-│   │   │   │   └── summary_service.py   # 摘要服务
+│   │   │   │   ├── history_service.py   # 历史记录（包含聊天消息管理）
+│   │   │   │   ├── summary_service.py   # 摘要服务
+│   │   │   │   └── desperate/            # 旧版聊天服务（已废弃）
 │   │   │   ├── llm/           # LLM 服务
 │   │   │   │   ├── base.py    # 抽象基类
 │   │   │   │   ├── openai.py  # OpenAI 兼容（xAI/OpenAI/Anthropic/Google）
@@ -116,9 +117,9 @@ ComicForge/
 │   │   │   │   ├── base.py    # 元数据服务基类
 │   │   │   │   ├── local.py   # 本地模型扫描
 │   │   │   │   └── civitai.py # Civitai 元数据获取
-│   │   │   ├── chat.py        # 聊天服务
 │   │   │   ├── novel_parser.py # 小说解析器
 │   │   │   └── transform.py   # 数据转换工具
+│   │   │   # 注意：聊天服务功能在 history_service.py 中实现
 │   │   ├── schemas/           # Pydantic 数据模型
 │   │   │   ├── project.py
 │   │   │   ├── actor.py
@@ -191,9 +192,13 @@ ComicForge/
 │   ├── styles/                # 样式文件
 │   │   └── highlight.css      # 代码高亮样式
 │   ├── utils/                 # 前端工具函数
+│   │   ├── apiConfig.ts       # API 配置（基础URL管理）
+│   │   ├── device.ts          # 设备检测工具
 │   │   ├── imageCache.ts      # 图片缓存管理
 │   │   ├── imageUtils.ts      # 图片工具函数（file:// URL 处理）
 │   │   └── toast.ts           # Toast 通知工具
+│   ├── api/                   # 前端 API 客户端
+│   │   └── index.ts           # Axios 实例配置（请求/响应拦截器）
 │   ├── assets/                # 静态资源
 │   │   └── vue.svg
 │   ├── desperate/             # 旧版 Flet UI（已废弃）
@@ -203,8 +208,7 @@ ComicForge/
 │
 ├── storage/                   # 数据存储目录
 │   └── data/
-│       ├── database.db        # SQLite 数据库
-│       ├── chat_history/      # 聊天历史（JSON）
+│       ├── database.db        # SQLite 数据库（包含聊天历史）
 │       ├── model_meta/        # 模型元数据缓存
 │       └── projects/          # 项目数据（图像等）
 │
@@ -309,6 +313,10 @@ pnpm preview
 
 **注意**：需要同时运行前端和后端服务才能正常使用应用。
 
+**开发环境代理**：
+- 前端开发服务器（Vite）会自动将 `/api` 开头的请求代理到后端 `http://127.0.0.1:7864`
+- 前端代码中使用 `getApiBaseURL()` 获取基础URL，开发环境返回 `/api`，生产环境使用环境变量或默认值
+
 ### 配置
 
 #### 方式一：环境变量（推荐）
@@ -406,10 +414,12 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 
 ### API 客户端配置
 
-前端 API 客户端支持环境变量配置：
-- `VITE_API_BASE_URL` - API 基础URL（默认：`http://127.0.0.1:7864`）
-- 支持请求/响应拦截器
-- 自动处理 FormData 上传
+前端 API 客户端（`src/api/index.ts`）使用 Axios 实现：
+- **开发环境**：通过 Vite 代理，使用 `/api` 路径（自动转发到 `http://127.0.0.1:7864`）
+- **生产环境**：使用环境变量 `VITE_API_BASE_URL`（默认：`http://127.0.0.1:7864`）
+- **配置管理**：`src/utils/apiConfig.ts` 提供 `getApiBaseURL()` 函数统一管理基础URL
+- **请求拦截器**：自动处理 FormData（不设置 Content-Type，让浏览器自动设置）
+- **响应拦截器**：统一错误处理，自动提取 `response.data`
 
 ### 主要路由
 
@@ -485,16 +495,18 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 ### 技术栈
 
 #### 前端
-- **构建工具**: Vite (rolldown-vite)
+- **构建工具**: Vite (rolldown-vite) - 使用 rolldown 引擎提升构建性能
 - **框架**: Vue 3 + TypeScript
 - **UI 框架**: Tailwind CSS + Headless UI + Heroicons
 - **状态管理**: Pinia
 - **路由**: Vue Router
-- **HTTP 客户端**: Axios（支持环境变量配置基础URL）
+- **HTTP 客户端**: Axios（`src/api/index.ts`，支持开发环境代理和生产环境配置）
+- **API 配置**: `src/utils/apiConfig.ts` - 统一管理 API 基础URL（开发环境使用代理，生产环境使用环境变量）
 - **Markdown 渲染**: marked + highlight.js（代码高亮）
-- **图片缓存**: 前端图片缓存机制（imageCache.ts，支持配置缓存数量）
-- **Toast 通知**: 自定义 Toast 通知系统（toast.ts）
-- **图片工具**: 图片 URL 处理工具（imageUtils.ts，支持 file:// URL 转换）
+- **图片缓存**: 前端图片缓存机制（`src/utils/imageCache.ts`，支持配置缓存数量，持久化到 localStorage）
+- **Toast 通知**: 自定义 Toast 通知系统（`src/utils/toast.ts`）
+- **图片工具**: 图片 URL 处理工具（`src/utils/imageUtils.ts`，支持 file:// URL 转换和缓存集成）
+- **设备检测**: 设备检测工具（`src/utils/device.ts`）
 - **类型系统**: TypeScript
 
 #### 后端
@@ -653,19 +665,20 @@ def test_your_endpoint(client):
 - ✅ 图片缓存系统（自动缓存、过期管理、可配置缓存数量）
 - ✅ Toast 通知系统（成功/错误/信息提示）
 - ✅ 图片工具函数（file:// URL 处理、图片缓存集成）
-- ✅ API 客户端（Axios 配置、请求/响应拦截器）
+- ✅ API 客户端（Axios 配置、请求/响应拦截器、开发环境代理支持）
 
 #### 工具与服务
 - ✅ MCP 工具系统（43+ 工具函数，基于 LangChain tool 机制，所有工具通过路由层暴露）
 - ✅ 数据库服务（SQLite + SQLModel，自动初始化）
-- ✅ 聊天服务（LangGraph 状态图管理、流式处理、工具调用解析、自动总结）
+- ✅ 聊天服务（LangGraph 状态图管理、流式处理、工具调用解析、自动总结，聊天消息管理在 `HistoryService` 中）
 - ✅ LLM 服务（抽象基类设计，支持多提供商扩展）
 - ✅ 小说解析器（章节识别、摘要生成）
 - ✅ 数据转换工具（格式转换、数据映射）
 - ✅ 章节摘要服务（章节摘要的 CRUD 操作）
-- ✅ 图片缓存系统（前端自动缓存，提升性能）
+- ✅ 图片缓存系统（前端自动缓存，提升性能，持久化到 localStorage）
 - ✅ Toast 通知系统（前端消息提示）
 - ✅ 图片工具函数（file:// URL 转换、缓存集成）
+- ✅ API 配置系统（统一管理 API 基础URL，支持开发环境代理和生产环境配置）
 
 #### 开发工具
 - ✅ 开发服务器脚本（优化重载速度）
@@ -694,6 +707,7 @@ def test_your_endpoint(client):
 
 - ❌ **desperate/** 目录 - 旧版 Flet UI 实现（已迁移到 Vue 3）
   - 注意：部分遗留代码仍在 `src/api/schemas/desperate/` 和 `src/api/services/db/desperate/` 中，但不影响新版本功能
+  - `src/desperate/` - 旧版 Flet UI 页面和组件（已废弃）
 
 ## 📄 许可证
 

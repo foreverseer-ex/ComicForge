@@ -293,22 +293,15 @@
               当前图片
             </h3>
 
-            <div v-if="currentImageUrl" class="flex justify-center">
-              <img 
-                :src="currentImageUrl" 
-                alt="当前段落生成的图片"
-                class="max-w-full h-auto rounded-lg shadow-lg"
-                @error="handleImageError"
-              />
-            </div>
-            <div v-else 
-                 :class="[
-                   'flex flex-col items-center justify-center py-12 text-center',
-                   isDark ? 'text-gray-500' : 'text-gray-400'
-                 ]"
+            <div 
+              :class="[
+                'flex flex-col items-center justify-center py-12 text-center',
+                isDark ? 'text-gray-500' : 'text-gray-400'
+              ]"
             >
               <PhotoIcon class="w-16 h-16 mb-2 opacity-50" />
-              <p class="text-sm">暂无图片</p>
+              <p class="text-sm">功能尚未实现</p>
+              <p class="text-xs mt-1 opacity-75">当前图片功能开发中...</p>
             </div>
           </div>
         </div>
@@ -816,12 +809,9 @@ const loadCurrentParagraph = async () => {
       // 立即更新内容，不等待图片加载
       currentParagraph.value = content
       
-      // 加载对应的图片（使用当前行的行号）
-      const baseURL = getApiBaseURL()
-      // 图片路径：/file/image?project_id=...&line=...
-      const imageUrl = `${baseURL}/file/image?project_id=${currentProject.value.project_id}&line=${line}`
-      // 先设置URL，如果图片不存在会在handleImageError中处理
-      currentImageUrl.value = imageUrl
+      // 暂时禁用图片加载功能（功能尚未实现）
+      // TODO: 实现当前图片功能
+      currentImageUrl.value = null
     } catch (error: any) {
       // 如果段落不存在，清空显示
       if (error.response?.status === 404) {
@@ -1129,20 +1119,27 @@ const processFile = async (file: File) => {
 const uploadFile = async (file: File) => {
   isUploading.value = true
   try {
-    // 注意：文件上传功能已被移除，直接使用本地文件路径
-    // 如果用户选择文件，我们直接使用 File 对象的路径
-    // 但浏览器出于安全考虑，不能直接访问文件路径
-    // 所以这里我们提示用户：文件上传功能暂不可用
-    alert('文件上传功能暂不可用，请直接提供文件路径')
-    projectForm.value.novel_path = ''
-    selectedFile.value = null
-    selectedFileName.value = ''
+    // 创建 FormData
+    const formData = new FormData()
+    formData.append('file', file)
+    
+    // 上传文件到后端（FormData 会自动设置正确的 Content-Type）
+    const response = await api.post('/file/upload', formData)
+    
+    // 保存文件路径到表单
+    if (response.file_path) {
+      projectForm.value.novel_path = response.file_path
+      console.log('文件上传成功:', response.file_path)
+    } else {
+      throw new Error('服务器未返回文件路径')
+    }
   } catch (error: any) {
-    console.error('文件处理失败:', error)
-    alert('文件处理失败，请检查文件是否有效')
+    console.error('文件上传失败:', error)
+    const errorMessage = error.response?.data?.detail || error.message || '文件上传失败，请检查文件是否有效'
+    alert(errorMessage)
+    projectForm.value.novel_path = ''
     selectedFile.value = null
     selectedFileName.value = ''
-    projectForm.value.novel_path = ''
   } finally {
     isUploading.value = false
   }

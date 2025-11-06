@@ -196,11 +196,33 @@ class CivitaiDrawService(AbstractDrawService):
         except Exception as e:
             # 捕获并记录所有异常，包括 HTTPException
             logger.exception(f"Civitai API 调用失败: {e}")
-            # 检查是否是 civitai 库的 HTTPException
+            
+            # 检查异常类型，提供更友好的错误消息
             error_msg = str(e)
-            if hasattr(e, 'status_code'):
+            error_type = type(e).__name__
+            error_type_module = type(e).__module__
+            
+            # 检查是否是连接超时错误（包括 httpcore.ConnectTimeout）
+            if isinstance(e, (httpx.ConnectTimeout, httpx.TimeoutException)) or \
+               error_type == "ConnectTimeout" or \
+               "ConnectTimeout" in error_type or \
+               "timeout" in error_msg.lower():
+                error_msg = "连接 Civitai API 超时。请检查网络连接和代理设置（当前代理: http://127.0.0.1:7890）。"
+            elif isinstance(e, httpx.ConnectError) or \
+                 error_type == "ConnectError" or \
+                 "ConnectError" in error_type or \
+                 ("connect" in error_msg.lower() and "error" in error_msg.lower()):
+                error_msg = f"无法连接到 Civitai API。请检查网络连接和代理设置（当前代理: http://127.0.0.1:7890）。错误: {error_msg}"
+            elif isinstance(e, httpx.HTTPStatusError):
+                status_code = e.response.status_code
+                error_msg = f"Civitai API 错误 ({status_code}): {error_msg}"
+            elif hasattr(e, 'status_code'):
                 status_code = e.status_code
                 error_msg = f"Civitai API 错误 ({status_code}): {error_msg}"
+            elif not error_msg or error_msg.strip() == "":
+                # 如果错误消息为空，提供默认消息
+                error_msg = f"Civitai API 调用失败 ({error_type})。请检查网络连接和配置（当前代理: http://127.0.0.1:7890）。"
+            
             raise RuntimeError(error_msg) from e
         
         # 返回示例：{'token': '...'}
@@ -270,14 +292,45 @@ class CivitaiDrawService(AbstractDrawService):
                         loop.close()
                 else:
                     resp = asyncio.run(coro_or_task)
-        except httpx.ReadTimeout as e:
-            logger.warning(f"civitai.jobs.get 超时: {e}")
+        except (httpx.ReadTimeout, httpx.TimeoutException) as e:
+            # 超时异常向上传播，由调用者处理（get_job_status 会捕获并返回 False）
+            logger.debug(f"civitai.jobs.get 超时: {e}")
             raise
         except Exception as e:
             logger.exception(f"civitai.jobs.get 调用失败: {e}")
             raise
         
         return resp
+
+    async def _get_job_async(self, token: str) -> Dict[str, Any]:
+        """
+        查询任务状态（异步版本）。
+        
+        :param token: 任务 token
+        :return: Civitai 的完整响应
+        """
+        try:
+            # 在异步上下文中，直接调用 civitai.jobs.get
+            coro_or_task = civitai.jobs.get(token=token)
+            
+            # 检查返回值类型
+            if isinstance(coro_or_task, dict):
+                # 如果直接返回字典，直接返回
+                return coro_or_task
+            elif isinstance(coro_or_task, asyncio.Task):
+                # 如果是 Task，直接 await
+                return await coro_or_task
+            else:
+                # 如果是协程，直接 await
+                return await coro_or_task
+                
+        except (httpx.ReadTimeout, httpx.TimeoutException) as e:
+            # 超时异常向上传播，由调用者处理
+            logger.debug(f"civitai.jobs.get 超时: {e}")
+            raise
+        except Exception as e:
+            logger.exception(f"civitai.jobs.get 调用失败: {e}")
+            raise
 
     # ========== 实现抽象接口 ==========
 
@@ -374,7 +427,7 @@ class CivitaiDrawService(AbstractDrawService):
         """
         raise NotImplementedError("Civitai 批量绘图功能暂未实现")
 
-    def get_job_status(self, job_id: str) -> bool:
+    async def get_job_status(self, job_id: str) -> bool:
         """
         获取任务状态。
         
@@ -382,7 +435,8 @@ class CivitaiDrawService(AbstractDrawService):
         :return: 是否完成
         """
         try:
-            resp = self._get_job(job_id)
+            # 在异步上下文中调用 _get_job
+            resp = await self._get_job_async(job_id)
             jobs = resp.get("jobs", [])
 
             if not jobs:
@@ -406,18 +460,22 @@ class CivitaiDrawService(AbstractDrawService):
             available = result.get("available", False)
             return available
 
+        except (httpx.ReadTimeout, httpx.TimeoutException) as e:
+            # 超时不算错误，只是任务还没完成，返回 False 继续等待
+            logger.debug(f"查询 Civitai 任务状态超时（任务可能还在处理中）: {job_id}")
+            return False
         except Exception as e:
             logger.exception(f"查询 Civitai 任务状态失败: {e}")
             return False
 
-    def get_image(self, job_id: str) -> Image.Image:
+    async def get_image(self, job_id: str) -> Image.Image:
         """
-        获取生成的图片。
+        获取生成的图片（异步）。
         
         :param job_id: 任务 ID（对于 Civitai 来说是 token）
         :return: PIL Image 对象
         """
-        resp = self._get_job(job_id)
+        resp = await self._get_job_async(job_id)
         jobs = resp.get("jobs", [])
 
         if not jobs:
@@ -444,25 +502,36 @@ class CivitaiDrawService(AbstractDrawService):
         if not blob_url:
             raise RuntimeError(f"任务无图片 URL: {job_id}")
 
-        # 下载图片
-        with httpx.Client(timeout=app_settings.civitai.timeout) as client:
-            resp = client.get(blob_url)
+        # 使用异步 HTTP 客户端下载图片
+        async with httpx.AsyncClient(timeout=app_settings.civitai.timeout) as client:
+            resp = await client.get(blob_url)
             resp.raise_for_status()
             img = Image.open(io.BytesIO(resp.content))
 
         return img
 
-    def save_image(self, job_id: str, save_path: str | Path) -> None:
+    async def save_image(self, job_id: str, save_path: str | Path) -> None:
         """
-        保存生成的图片到文件。
+        保存生成的图片到文件（异步）。
         
         :param job_id: 任务 ID（对于 Civitai 来说是 token）
         :param save_path: 保存路径
         """
-        img = self.get_image(job_id)
+        import aiofiles
+        
+        img = await self.get_image(job_id)
         save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        img.save(save_path)
+        
+        # 使用 aiofiles 异步保存图片
+        # PIL Image.save() 是同步的，但我们可以将图片数据先保存到内存，然后异步写入
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        async with aiofiles.open(save_path, 'wb') as f:
+            await f.write(img_bytes.read())
+        
         logger.info(f"图片已保存: {save_path}")
 
 

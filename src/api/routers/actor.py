@@ -17,7 +17,7 @@ from api.schemas.actor import Actor, ActorExample
 from api.schemas.draw import DrawArgs, Job
 from api.constants.actor import character_tags_description
 from api.services.db import ActorService
-from api.utils.path import project_home
+from api.utils.path import project_home, jobs_home
 
 router = APIRouter(
     prefix="/actor",
@@ -227,6 +227,23 @@ async def remove_actor(actor_id: str) -> dict:
     if not actor:
         raise HTTPException(status_code=404, detail=f"Actor 不存在: {actor_id}")
     
+    # 在删除数据库记录前，先删除所有示例图的图片文件
+    if actor.examples:
+        for example in actor.examples:
+            image_path = example.get('image_path')
+            if image_path:
+                try:
+                    # 图片文件路径：projects/{project_id}/actor/{filename}
+                    image_file_path = project_home / actor.project_id / "actor" / image_path
+                    if image_file_path.exists():
+                        image_file_path.unlink()
+                        logger.info(f"已删除角色示例图文件: {image_file_path}")
+                    else:
+                        logger.warning(f"角色示例图文件不存在: {image_file_path}")
+                except Exception as e:
+                    logger.exception(f"删除角色示例图文件失败: {image_file_path}, 错误: {e}")
+                    # 即使删除文件失败，也继续删除数据库记录
+    
     # 删除 Actor
     success = ActorService.delete(actor_id)
     if not success:
@@ -355,12 +372,83 @@ async def remove_example(
     if project_id and actor.project_id != project_id:
         raise HTTPException(status_code=403, detail=f"Actor 不属于该项目: {project_id}")
     
-    # 删除示例
+    # 在删除数据库记录前，先删除图片文件
+    if 0 <= example_index < len(actor.examples):
+        example = actor.examples[example_index]
+        image_path = example.get('image_path')
+        
+        # 如果存在图片文件，删除它
+        if image_path:
+            try:
+                # 图片文件路径：projects/{project_id}/actor/{filename}
+                image_file_path = project_home / actor.project_id / "actor" / image_path
+                if image_file_path.exists():
+                    image_file_path.unlink()
+                    logger.info(f"已删除示例图文件: {image_file_path}")
+                else:
+                    logger.warning(f"示例图文件不存在: {image_file_path}")
+            except Exception as e:
+                logger.exception(f"删除示例图文件失败: {image_file_path}, 错误: {e}")
+                # 即使删除文件失败，也继续删除数据库记录
+    
+    # 删除数据库记录
     updated = ActorService.remove_example(actor_id, example_index)
     if not updated:
         raise HTTPException(status_code=500, detail=f"删除示例失败: {actor_id}, index={example_index}")
     
     logger.success(f"删除 Actor 示例成功: {actor_id}, index={example_index}")
+    return updated
+
+
+@router.post("/{actor_id}/example/swap", response_model=Actor, summary="交换示例图位置")
+async def swap_examples(
+    actor_id: str,
+    index1: int,
+    index2: int,
+    project_id: Optional[str] = None
+) -> Actor:
+    """
+    交换两个示例图的位置。
+    
+    Args:
+        actor_id: Actor ID（路径参数）
+        index1: 第一个示例图索引（查询参数）
+        index2: 第二个示例图索引（查询参数）
+        project_id: 项目ID（查询参数，可选，用于权限校验）
+    
+    Returns:
+        更新后的 Actor 对象
+    
+    Raises:
+        404: Actor 不存在
+        403: Actor 不属于该项目（如果提供了project_id）
+        400: 索引无效
+    """
+    # 权限校验
+    actor = ActorService.get(actor_id)
+    if not actor:
+        raise HTTPException(status_code=404, detail=f"Actor 不存在: {actor_id}")
+    if project_id and actor.project_id != project_id:
+        raise HTTPException(status_code=403, detail=f"Actor 不属于该项目: {project_id}")
+    
+    # 验证索引
+    if index1 == index2:
+        # 如果两个索引相同，直接返回，不需要交换
+        logger.debug(f"示例图索引相同，无需交换: {actor_id}, index={index1}")
+        return actor
+    
+    if not (0 <= index1 < len(actor.examples) and 0 <= index2 < len(actor.examples)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"示例图索引越界: index1={index1}, index2={index2}, 总数={len(actor.examples)}"
+        )
+    
+    # 交换示例图
+    updated = ActorService.swap_examples(actor_id, index1, index2)
+    if not updated:
+        raise HTTPException(status_code=500, detail=f"交换示例失败: {actor_id}, index1={index1}, index2={index2}")
+    
+    logger.success(f"交换 Actor 示例成功: {actor_id}, index1={index1}, index2={index2}")
     return updated
 
 
@@ -376,16 +464,15 @@ async def _monitor_job_and_add_portrait(
     example_index: int
 ):
     """
-    监控 job 状态，完成后更新 ActorExample 的 image_path。
+    监控 job 状态，完成后从 jobs 文件夹复制图片到 actor 文件夹并更新 ActorExample。
     
     这是一个后台任务函数，会轮询检查 job 状态，直到完成或超时。
     如果超时或失败，会删除之前创建的 ActorExample。
     """
-    from api.services.draw import get_current_draw_service
+    from api.services.db import JobService
     from api.settings import app_settings
-    
-    # 获取当前绘图服务
-    draw_service = get_current_draw_service()
+    from datetime import datetime
+    import shutil
     
     # 根据后端类型设置超时时间
     backend = app_settings.draw.backend
@@ -402,16 +489,18 @@ async def _monitor_job_and_add_portrait(
     
     while attempt < max_attempts:
         try:
-            # 检查 job 状态
-            if draw_service.get_job_status(job_id):
-                # Job 已完成，设置完成时间（如果未设置）
-                from api.services.db import JobService
+            # 检查 jobs 文件夹中是否存在图片文件（说明任务已完成）
+            job_image_path = jobs_home / f"{job_id}.png"
+            
+            if job_image_path.exists():
+                # 图片已缓存，可以复制到 actor 文件夹
+                
+                # 设置完成时间（如果未设置）
                 job = JobService.get(job_id)
                 if job and job.completed_at is None:
-                    from datetime import datetime
                     JobService.update(job_id, completed_at=datetime.now())
                 
-                # 保存图片并更新 ActorExample
+                # 检查 Actor 是否存在
                 actor = ActorService.get(actor_id)
                 if not actor:
                     logger.error(f"监控任务失败: Actor 不存在 {actor_id}")
@@ -424,8 +513,8 @@ async def _monitor_job_and_add_portrait(
                     logger.error(f"监控任务失败: 示例索引越界 {actor_id}, index={example_index}")
                     return
                 
-                # 保存图片到 projects/{project_id}/actors/{actor_id}/{title}.png
-                out_dir: Path = project_home / project_id / "actors" / actor_id
+                # 复制图片到 projects/{project_id}/actor/{filename}.png
+                out_dir: Path = project_home / project_id / "actor"
                 out_dir.mkdir(parents=True, exist_ok=True)
                 
                 # 确保文件名安全（移除特殊字符）
@@ -441,28 +530,29 @@ async def _monitor_job_and_add_portrait(
                     filename = f"{safe_title}-{ts}.png"
                     out_path = out_dir / filename
                 
-                # 保存图片
-                draw_service.save_image(job_id, out_path)
+                # 从 jobs 文件夹复制图片到 actor 文件夹
+                shutil.copy2(job_image_path, out_path)
+                logger.info(f"已复制任务图像: {job_image_path} -> {out_path}")
                 
-                # 生成相对路径（相对 projects 根）
-                rel_path = out_path.relative_to(project_home).as_posix()
+                # image_path 只保存文件名（不包含路径）
+                # 实际文件保存在 projects/{project_id}/actor/{filename}
                 
-                # 更新 ActorExample 的 image_path
+                # 更新 ActorExample 的 image_path（只保存文件名）
                 example = ActorExample(
                     title=title,
                     desc=desc,
                     draw_args=draw_args,
-                    image_path=rel_path,
+                    image_path=filename,  # 只保存文件名
                 )
                 
                 updated = ActorService.update_example(actor_id, example_index, example)
                 if updated:
-                    logger.success(f"监控任务完成: 为 Actor {actor.name} 更新立绘成功, title={title}, file={rel_path}")
+                    logger.success(f"监控任务完成: 为 Actor {actor.name} 更新立绘成功, title={title}, file={filename}")
                 else:
                     logger.error(f"监控任务失败: 更新立绘示例失败 {actor_id}")
                 return
             
-            # Job 未完成，等待 1 秒后重试
+            # 图片文件不存在，等待 1 秒后重试
             await asyncio.sleep(1)
             attempt += 1
             

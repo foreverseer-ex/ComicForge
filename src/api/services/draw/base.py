@@ -48,9 +48,9 @@ class AbstractDrawService(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def get_job_status(self, job_id: str) -> bool:
+    async def get_job_status(self, job_id: str) -> bool:
         """
-        获取任务状态。
+        获取任务状态（异步）。
         
         :param job_id: 任务 ID
         :return: 是否完成
@@ -58,9 +58,9 @@ class AbstractDrawService(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def get_image(self, job_id: str) -> Image.Image:
+    async def get_image(self, job_id: str) -> Image.Image:
         """
-        获取生成的图片。
+        获取生成的图片（异步）。
         
         :param job_id: 任务 ID
         :return: PIL Image 对象
@@ -68,9 +68,9 @@ class AbstractDrawService(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def save_image(self, job_id: str, save_path: str | Path) -> None:
+    async def save_image(self, job_id: str, save_path: str | Path) -> None:
         """
-        保存生成的图片到文件。
+        保存生成的图片到文件（异步）。
         
         :param job_id: 任务 ID
         :param save_path: 保存路径

@@ -4,17 +4,18 @@
 专注于绘图功能：创建绘图任务、接受结果、管理绘图任务。
 """
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from pathlib import Path
 import httpx
+import asyncio
 from loguru import logger
 
 from api.services.db import JobService, BatchJobService
 from api.schemas.draw import Job, BatchJob, DrawArgs
 from api.services.draw import get_current_draw_service
 from api.services.draw.sd_forge import SdForgeDrawService
-from api.utils.path import project_home
+from api.utils.path import project_home, jobs_home
 from api.settings import app_settings
 
 
@@ -78,6 +79,63 @@ async def get_loras() -> List[Dict[str, Any]]:
 
 # ==================== 图像生成 ====================
 
+async def _monitor_job_and_save_image(job_id: str):
+    """
+    监控 job 状态，完成后保存图片到 jobs/{job_id}.png。
+    
+    这是一个后台任务函数，会轮询检查 job 状态，直到完成或超时。
+    """
+    from api.services.draw import get_current_draw_service
+    from api.settings import app_settings
+    from api.services.db import JobService
+    from datetime import datetime
+    
+    # 获取当前绘图服务
+    draw_service = get_current_draw_service()
+    
+    # 根据后端类型设置超时时间
+    backend = app_settings.draw.backend
+    if backend == "civitai":
+        # Civitai 超时时间（秒），从配置中读取
+        timeout_seconds = app_settings.civitai.draw_timeout
+        max_attempts = int(timeout_seconds)  # 每秒检查一次
+    else:
+        # SD-Forge 默认超时时间：5分钟
+        max_attempts = 300
+    
+    attempt = 0
+    last_error = None
+    
+    while attempt < max_attempts:
+        try:
+            # 检查 job 状态（异步）
+            if await draw_service.get_job_status(job_id):
+                # Job 已完成，设置完成时间（如果未设置）
+                job = JobService.get(job_id)
+                if job and job.completed_at is None:
+                    JobService.update(job_id, completed_at=datetime.now())
+                
+                # 保存图片到 jobs/{job_id}.png
+                job_image_path = jobs_home / f"{job_id}.png"
+                await draw_service.save_image(job_id, job_image_path)
+                
+                logger.success(f"任务图像已保存: {job_id} -> {job_image_path}")
+                return
+            
+            # Job 未完成，等待 1 秒后重试
+            await asyncio.sleep(1)
+            attempt += 1
+            
+        except Exception as e:
+            logger.exception(f"监控任务出错 (attempt {attempt}): {e}")
+            last_error = e
+            await asyncio.sleep(1)
+            attempt += 1
+    
+    # 超时或失败
+    logger.error(f"监控任务超时/失败: job_id={job_id}, attempt={attempt}, error={last_error}")
+
+
 @router.post("", summary="创建绘图任务（文生图）")
 async def create_draw_job(
     model: str,
@@ -94,6 +152,7 @@ async def create_draw_job(
     vae: Optional[str] = None,
     name: Optional[str] = None,
     desc: Optional[str] = None,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ) -> Dict[str, str]:
     """
     创建绘图任务（文生图），返回 job_id。
@@ -198,6 +257,9 @@ async def create_draw_job(
             draw_args=args.model_dump(exclude_none=True)  # 保存 DrawArgs 到 Job，排除 None 值
         )
         JobService.create(job)
+        
+        # 启动后台任务监控 job 状态并保存图片到 jobs/{job_id}.png
+        background_tasks.add_task(_monitor_job_and_save_image, job_id=job_id)
         
         return {"job_id": job_id}
     except httpx.HTTPError as e:
@@ -346,7 +408,7 @@ async def check_job_status(job_id: str) -> dict:
     # 获取当前绘图服务并检查状态
     try:
         draw_service = get_current_draw_service()
-        is_complete = draw_service.get_job_status(job_id)
+        is_complete = await draw_service.get_job_status(job_id)
         
         # 如果任务已完成且 completed_at 未设置，更新它
         if is_complete and job.completed_at is None:
@@ -364,7 +426,7 @@ async def get_job_image(job_id: str) -> FileResponse:
     """
     获取任务生成的图像文件。
     
-    通过 job_id 从绘图服务获取图像并返回。
+    从 jobs/{job_id}.png 读取图像文件并返回。
     
     Args:
         job_id: 任务ID
@@ -373,7 +435,7 @@ async def get_job_image(job_id: str) -> FileResponse:
         图像文件
     
     Raises:
-        HTTPException: 任务不存在、未完成或图像获取失败时返回相应错误
+        HTTPException: 任务不存在、未完成或图像文件不存在时返回相应错误
     """
     try:
         # 检查任务是否存在
@@ -381,36 +443,24 @@ async def get_job_image(job_id: str) -> FileResponse:
         if not job:
             raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
         
-        # 获取当前绘图服务
-        draw_service = get_current_draw_service()
-        
         # 检查任务是否完成
-        is_complete = draw_service.get_job_status(job_id)
-        if not is_complete:
-            raise HTTPException(status_code=400, detail=f"任务未完成: {job_id}")
-        
-        # 如果任务已完成且 completed_at 未设置，更新它
         if job.completed_at is None:
-            from datetime import datetime
-            JobService.update(job_id, completed_at=datetime.now())
+            # 检查任务状态
+            draw_service = get_current_draw_service()
+            is_complete = await draw_service.get_job_status(job_id)
+            if not is_complete:
+                raise HTTPException(status_code=400, detail=f"任务未完成: {job_id}")
         
-        # 获取图像（PIL Image）
-        img = draw_service.get_image(job_id)
+        # 从 jobs 文件夹读取图像文件
+        job_image_path = jobs_home / f"{job_id}.png"
         
-        # 转换为字节流
-        import io
-        img_bytes = io.BytesIO()
-        img.save(img_bytes, format='PNG')
-        img_bytes.seek(0)
+        if not job_image_path.exists():
+            raise HTTPException(status_code=404, detail=f"任务图像文件不存在: {job_id}")
         
-        # 返回文件响应
-        from fastapi.responses import Response
-        return Response(
-            content=img_bytes.getvalue(),
+        return FileResponse(
+            path=str(job_image_path),
             media_type="image/png",
-            headers={
-                "Content-Disposition": f"attachment; filename=job_{job_id}.png"
-            }
+            filename=f"job_{job_id}.png"
         )
     except HTTPException:
         raise
