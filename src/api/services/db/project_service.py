@@ -155,7 +155,7 @@ class ProjectService:
             return project
     
     @classmethod
-    def list(cls, limit: Optional[int] = None, offset: int = 0) -> list[Project]:
+    def get_all(cls, limit: Optional[int] = None, offset: int = 0) -> list[Project]:
         """
         获取项目列表。
         

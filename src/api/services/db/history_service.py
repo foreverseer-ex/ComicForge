@@ -65,7 +65,7 @@ class HistoryService:
             return message
 
     @classmethod
-    def list(cls, project_id: str, start_index: int = 0, end_index: int = -1) -> list[ChatMessage]:
+    def get_all(cls, project_id: str, start_index: int = 0, end_index: int = -1) -> list[ChatMessage]:
         """
         根据项目ID获取聊天消息列表。
 

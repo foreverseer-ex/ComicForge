@@ -69,8 +69,8 @@ async def create_project(
     return {"project_id": project_id}
 
 
-@router.get("/list", response_model=List[Project], summary="列出所有项目")
-async def list_projects(
+@router.get("/all", response_model=List[Project], summary="列出所有项目")
+async def get_all_projects(
     limit: int = 50,
     offset: int = 0,
 
@@ -86,7 +86,7 @@ async def list_projects(
         项目列表
     """
     # 获取所有项目
-    projects = ProjectService.list(limit=limit, offset=offset)
+    projects = ProjectService.get_all(limit=limit, offset=offset)
     
 
     

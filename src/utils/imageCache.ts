@@ -3,7 +3,6 @@
  * 
  * 实现 LRU（最近最少使用）缓存策略，加速图片显示
  */
-import api from '../api'
 
 interface ImageCacheEntry {
   url: string
@@ -68,9 +67,10 @@ class ImageCache {
   private async fetchImage(imageUrl: string): Promise<string> {
     // 使用原始的 axios 实例，绕过响应拦截器
     const axios = (await import('axios')).default
+    const { getApiBaseURL } = await import('./apiConfig')
     
     const response = await axios.get('/model-meta/image', {
-      baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7864',
+      baseURL: getApiBaseURL(), // 使用统一的 API baseURL（开发环境是 /api，生产环境是完整 URL）
       params: { image_url: imageUrl },
       responseType: 'blob'
     })
@@ -137,18 +137,21 @@ class ImageCache {
 // 全局图片缓存实例
 export const imageCache = new ImageCache(100)
 
-// 初始化：从设置加载缓存大小
-export async function initImageCache() {
-  try {
-    const settings = await api.get('/settings/frontend')
-    imageCache.setMaxSize(settings.image_cache_size || 100)
-  } catch (error) {
-    console.warn('加载图片缓存设置失败，使用默认值:', error)
+// 初始化：从 localStorage 加载缓存大小
+export function initImageCache() {
+  const saved = localStorage.getItem('imageCacheSize')
+  if (saved !== null) {
+    const value = parseInt(saved)
+    if (!isNaN(value) && value >= 10 && value <= 1000) {
+      imageCache.setMaxSize(value)
+    }
   }
+  // 如果没有保存的值，使用默认值 100
 }
 
 // 监听设置变化
-export async function updateImageCacheSize(size: number) {
+export function updateImageCacheSize(size: number) {
   imageCache.setMaxSize(size)
+  localStorage.setItem('imageCacheSize', String(size))
 }
 

@@ -8,6 +8,7 @@
       <div
         :class="[
           'w-full max-w-4xl max-h-[90vh] rounded-lg shadow-xl flex flex-col',
+          'mx-4 md:mx-0', // 移动端添加左右边距
           isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
         ]"
         @click.stop
@@ -15,34 +16,53 @@
         <!-- 标题栏 -->
         <div 
           :class="[
-            'flex items-center justify-between p-4 border-b',
+            'flex items-center justify-between border-b',
+            'p-3 md:p-4', // 移动端使用更小的内边距
             isDark ? 'border-gray-700' : 'border-gray-200'
           ]"
         >
           <h2 
             :class="[
-              'text-xl font-bold',
+              'text-lg md:text-xl font-bold', // 移动端使用更小的字体
               isDark ? 'text-white' : 'text-gray-900'
             ]"
           >
             {{ versionName }}
           </h2>
-          <button
-            @click="close"
-            :class="[
-              'p-2 rounded-lg transition-colors',
-              isDark
-                ? 'hover:bg-gray-700 text-gray-300'
-                : 'hover:bg-gray-100 text-gray-600'
-            ]"
-            title="关闭"
-          >
-            <XMarkIcon class="w-5 h-5" />
-          </button>
+          <div class="flex items-center gap-2">
+            <!-- 隐私模式开关 -->
+            <button
+              @click.stop="togglePrivacyMode"
+              :class="[
+                'p-2 rounded-lg transition-colors',
+                privacyMode
+                  ? isDark ? 'text-blue-400' : 'text-blue-600'
+                  : isDark ? 'text-gray-400' : 'text-gray-500',
+                isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
+              ]"
+              :title="privacyMode ? '隐私模式：已启用（点击关闭）' : '隐私模式：已关闭（点击启用）'"
+            >
+              <EyeSlashIcon v-if="privacyMode" class="w-5 h-5" />
+              <EyeIcon v-else class="w-5 h-5" />
+            </button>
+            <!-- 关闭按钮 -->
+            <button
+              @click="close"
+              :class="[
+                'p-2 rounded-lg transition-colors',
+                isDark
+                  ? 'hover:bg-gray-700 text-gray-300'
+                  : 'hover:bg-gray-100 text-gray-600'
+              ]"
+              title="关闭"
+            >
+              <XMarkIcon class="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <!-- 内容区域 -->
-        <div class="flex-1 overflow-y-auto p-6">
+        <div class="flex-1 overflow-y-auto p-4 md:p-6">
           <div class="space-y-6">
             <!-- 预览图展示区域 -->
             <div class="relative">
@@ -83,23 +103,41 @@
                 </button>
               </div>
               
-              <!-- 查看生成参数按钮 -->
-              <button
+              <!-- 生成参数按钮组 -->
+              <div 
                 v-if="currentExample && currentExample.args"
-                @click="showParamsDialog = true"
-                :class="[
-                  'absolute top-2 right-2 z-10 p-2 rounded-lg transition-colors',
-                  isDark
-                    ? 'bg-gray-800 bg-opacity-80 text-white hover:bg-opacity-100'
-                    : 'bg-white bg-opacity-80 text-gray-900 hover:bg-opacity-100'
-                ]"
-                title="查看生成参数"
+                class="absolute top-2 right-2 z-10 flex gap-2"
               >
-                <InformationCircleIcon class="w-5 h-5" />
-              </button>
+                <!-- 复制生成参数按钮 -->
+                <button
+                  @click.stop="copyParams"
+                  :class="[
+                    'p-2 rounded-lg transition-colors',
+                    isDark
+                      ? 'bg-gray-800 bg-opacity-80 text-white hover:bg-opacity-100'
+                      : 'bg-white bg-opacity-80 text-gray-900 hover:bg-opacity-100'
+                  ]"
+                  title="复制生成参数"
+                >
+                  <ClipboardIcon class="w-5 h-5" />
+                </button>
+                <!-- 查看生成参数按钮 -->
+                <button
+                  @click.stop="showParamsDialog = true"
+                  :class="[
+                    'p-2 rounded-lg transition-colors',
+                    isDark
+                      ? 'bg-gray-800 bg-opacity-80 text-white hover:bg-opacity-100'
+                      : 'bg-white bg-opacity-80 text-gray-900 hover:bg-opacity-100'
+                  ]"
+                  title="查看生成参数"
+                >
+                  <InformationCircleIcon class="w-5 h-5" />
+                </button>
+              </div>
               
               <div 
-                v-if="previewImageUrl && !imageLoading"
+                v-if="previewImageUrl && !imageLoading && !privacyMode"
                 :class="[
                   'w-full h-96 rounded-lg overflow-hidden border flex items-center justify-center cursor-pointer',
                   isDark ? 'border-gray-600 bg-gray-900' : 'border-gray-200 bg-gray-50'
@@ -114,7 +152,7 @@
                 />
               </div>
               <div 
-                v-else-if="imageLoading"
+                v-else-if="imageLoading && !privacyMode"
                 :class="[
                   'w-full h-96 rounded-lg border flex flex-col items-center justify-center',
                   isDark ? 'border-gray-600 bg-gray-900' : 'border-gray-200 bg-gray-50'
@@ -134,7 +172,9 @@
                 ]"
               >
                 <PhotoIcon class="w-16 h-16 mb-2" :class="isDark ? 'text-gray-600' : 'text-gray-400'" />
-                <span :class="['text-sm', isDark ? 'text-gray-500' : 'text-gray-500']">暂无预览图</span>
+                <span :class="['text-sm', isDark ? 'text-gray-500' : 'text-gray-500']">
+                  {{ privacyMode ? '隐私模式已启用' : '暂无预览图' }}
+                </span>
               </div>
             </div>
 
@@ -317,9 +357,13 @@ import {
   PencilIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  InformationCircleIcon
+  InformationCircleIcon,
+  ClipboardIcon,
+  EyeIcon,
+  EyeSlashIcon
 } from '@heroicons/vue/24/outline'
 import { getImageUrl } from '../utils/imageUtils'
+import { showToast } from '../utils/toast'
 import ModelParamsDialog from './ModelParamsDialog.vue'
 import ImageGalleryDialog from './ImageGalleryDialog.vue'
 
@@ -342,12 +386,16 @@ interface ModelMeta {
 
 interface Props {
   model: ModelMeta | null
+  privacyMode?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  privacyMode: false
+})
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'toggle-privacy-mode'): void
 }>()
 
 const themeStore = useThemeStore()
@@ -463,6 +511,63 @@ const openImageGallery = () => {
   }
 }
 
+// 复制生成参数到剪贴板
+const copyParams = async () => {
+  if (!currentExample.value?.args) return
+  
+  try {
+    const params = currentExample.value.args
+    
+    // 构建符合 API 端点格式的参数对象
+    // 参考: POST /draw/generate
+    // 不包括 project_id, batch_id, save_images
+    const apiParams: Record<string, any> = {}
+    
+    // 必填字段
+    if (params.model) apiParams.model = params.model
+    if (params.prompt) apiParams.prompt = params.prompt
+    
+    // 可选字段（只包含有值的）
+    if (params.negative_prompt) apiParams.negative_prompt = params.negative_prompt
+    else apiParams.negative_prompt = ""
+    
+    // 统一采样器字段名（API 使用 sampler_name）
+    if (params.sampler) apiParams.sampler_name = params.sampler
+    else if (params.sampler_name) apiParams.sampler_name = params.sampler_name
+    else apiParams.sampler_name = "DPM++ 2M Karras"  // 默认值
+    
+    if (params.steps !== undefined) apiParams.steps = params.steps
+    else apiParams.steps = 30  // 默认值
+    
+    if (params.cfg_scale !== undefined) apiParams.cfg_scale = params.cfg_scale
+    else apiParams.cfg_scale = 7.0  // 默认值
+    
+    if (params.seed !== undefined) apiParams.seed = params.seed
+    else apiParams.seed = -1  // 默认值
+    
+    if (params.width !== undefined) apiParams.width = params.width
+    else apiParams.width = 1024  // 默认值
+    
+    if (params.height !== undefined) apiParams.height = params.height
+    else apiParams.height = 1024  // 默认值
+    
+    if (params.clip_skip !== undefined) apiParams.clip_skip = params.clip_skip
+    if (params.vae) apiParams.vae = params.vae
+    if (params.loras && Object.keys(params.loras).length > 0) {
+      apiParams.loras = params.loras
+    }
+    
+    const jsonString = JSON.stringify(apiParams, null, 2)
+    await navigator.clipboard.writeText(jsonString)
+    
+    // 使用 toast 显示成功提示
+    showToast('参数已复制到剪贴板', 'success')
+  } catch (error) {
+    console.error('复制失败:', error)
+    showToast('复制失败，请重试', 'error')
+  }
+}
+
 // 编辑说明功能
 const editingDesc = ref('')
 const isEditingDesc = ref(false)
@@ -533,6 +638,11 @@ onUnmounted(() => {
 const close = () => {
   showParamsDialog.value = false  // 关闭时重置生成参数对话框状态
   emit('close')
+}
+
+// 切换隐私模式
+const togglePrivacyMode = () => {
+  emit('toggle-privacy-mode')
 }
 </script>
 

@@ -168,4 +168,32 @@ class ActorService:
             else:
                 logger.warning(f"示例图索引越界: {actor_id}, index={example_index}")
                 return None
+    
+    @classmethod
+    def update_example(cls, actor_id: str, example_index: int, example: ActorExample) -> Optional[Actor]:
+        """
+        更新 Actor 的指定示例图。
+        
+        :param actor_id: Actor ID
+        :param example_index: 示例图索引
+        :param example: 新的 ActorExample 对象
+        :return: 更新后的 Actor 对象，如果不存在则返回 None
+        """
+        with DatabaseSession() as db:
+            actor = db.get(Actor, actor_id)
+            if not actor:
+                logger.warning(f"Actor 不存在，无法更新示例: {actor_id}")
+                return None
+            
+            if 0 <= example_index < len(actor.examples):
+                actor.examples[example_index] = example.model_dump()
+                db.add(actor)
+                db.flush()
+                db.refresh(actor)
+                db.expunge(actor)
+                logger.info(f"更新 Actor 示例: {actor_id}, index={example_index}, title={example.title}")
+                return actor
+            else:
+                logger.warning(f"示例图索引越界: {actor_id}, index={example_index}")
+                return None
 

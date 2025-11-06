@@ -681,7 +681,7 @@ class HomePage(ft.Column):
     def _load_sessions(self):
         """加载项目列表"""
         try:
-            self.projects = ProjectService.list()
+            self.projects = ProjectService.get_all()
             logger.info(f"加载了 {len(self.projects)} 个项目")
             
             # 更新下拉列表选项

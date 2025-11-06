@@ -157,11 +157,14 @@ class SdForgeDrawService(AbstractDrawService):
         执行单次绘图。
         
         注意：如果指定了model和vae，会自动检查当前选项，如果不同则设置。
+        model 和 vae 参数应该是 version_name，需要通过模型元数据服务查找对应的 SD-Forge title。
         
-        :param args: 绘图参数
+        :param args: 绘图参数（model 和 vae 是 version_name）
         :return: job_id
         """
         import uuid
+        from api.services.model_meta import local_model_meta_service
+        
         job_id = str(uuid.uuid4())
         
         try:
@@ -171,20 +174,54 @@ class SdForgeDrawService(AbstractDrawService):
                 need_update = False
                 update_kwargs = {}
                 
-                # 检查 model
+                # 检查 model（通过 version_name 查找模型元数据，然后获取 filename，再匹配 SD-Forge 的 title）
                 if args.model:
+                    model_meta = local_model_meta_service.get_by_version_name(args.model)
+                    if not model_meta:
+                        raise RuntimeError(f"未找到模型元数据: {args.model}")
+                    
+                    # 获取 SD-Forge 的模型列表，找到匹配的 title
+                    sd_models = self._get_sd_models()
+                    sd_model_title = None
+                    for sd_model in sd_models:
+                        # SD-Forge 返回的 title 通常是 filename（不含扩展名）或类似的格式
+                        # 尝试匹配 filename stem
+                        from pathlib import Path
+                        sd_model_filename_stem = Path(sd_model.get('title', '')).stem
+                        if Path(model_meta.filename).stem == sd_model_filename_stem:
+                            sd_model_title = sd_model.get('title')
+                            break
+                    
+                    if not sd_model_title:
+                        raise RuntimeError(f"未在 SD-Forge 中找到模型: {args.model} (filename: {model_meta.filename})")
+                    
                     current_model = current_options.get("sd_model_checkpoint", "")
-                    if current_model != args.model:
-                        logger.debug(f"当前模型 {current_model} 与请求模型 {args.model} 不同，需要切换")
-                        update_kwargs["sd_model_checkpoint"] = args.model
+                    if current_model != sd_model_title:
+                        logger.debug(f"当前模型 {current_model} 与请求模型 {sd_model_title} 不同，需要切换")
+                        update_kwargs["sd_model_checkpoint"] = sd_model_title
                         need_update = True
                 
-                # 检查 vae
+                # 检查 vae（通过 version_name 查找模型元数据）
                 if args.vae:
+                    vae_meta = local_model_meta_service.get_by_version_name(args.vae)
+                    if not vae_meta:
+                        raise RuntimeError(f"未找到 VAE 元数据: {args.vae}")
+                    
+                    # SD-Forge 的 VAE 选项来自 options，通常直接使用 filename（不含扩展名）
+                    # 获取当前可用的 VAE 列表（从 options 中）
+                    # 注意：SD-Forge 的 VAE 选项通常是文件名，我们需要匹配
+                    from pathlib import Path
+                    vae_filename_stem = Path(vae_meta.filename).stem
+                    # SD-Forge 的 sd_vae 选项通常就是文件名（不含扩展名）
+                    # 如果 options 中有对应的 VAE，则使用它
                     current_vae = current_options.get("sd_vae", "")
-                    if current_vae != args.vae:
-                        logger.debug(f"当前VAE {current_vae} 与请求VAE {args.vae} 不同，需要切换")
-                        update_kwargs["sd_vae"] = args.vae
+                    # 尝试匹配：如果当前 VAE 的 stem 与请求的 VAE stem 相同，则不需要切换
+                    # 否则，尝试设置新的 VAE（使用 filename stem）
+                    if current_vae != vae_filename_stem:
+                        # 注意：SD-Forge 的 VAE 选项可能包含扩展名，也可能不包含
+                        # 这里我们尝试使用 stem，如果失败，SD-Forge 会使用默认 VAE
+                        logger.debug(f"当前VAE {current_vae} 与请求VAE {vae_filename_stem} 不同，尝试切换")
+                        update_kwargs["sd_vae"] = vae_filename_stem
                         need_update = True
                 
                 # 如果需要更新，则设置选项
@@ -192,11 +229,24 @@ class SdForgeDrawService(AbstractDrawService):
                     logger.info(f"切换SD选项: {update_kwargs}")
                     self._set_options(**update_kwargs)
             
+            # 转换 LoRAs：将 version_name 转换为 SD-Forge 使用的文件名（不含扩展名）
+            loras_for_sd_forge: Dict[str, float] = {}
+            if args.loras:
+                for lora_version_name, strength in args.loras.items():
+                    lora_meta = local_model_meta_service.get_by_version_name(lora_version_name)
+                    if not lora_meta:
+                        logger.warning(f"未找到 LoRA 元数据: {lora_version_name}，跳过")
+                        continue
+                    # SD-Forge 使用文件名（不含扩展名）作为 LoRA 标识符
+                    from pathlib import Path
+                    lora_filename_stem = Path(lora_meta.filename).stem
+                    loras_for_sd_forge[lora_filename_stem] = strength
+            
             # 调用 SD-Forge API
             result = self._create_text2image(
                 prompt=args.prompt,
                 negative_prompt=args.negative_prompt,
-                loras=args.loras or {},
+                loras=loras_for_sd_forge,
                 seed=args.seed,
                 sampler=args.sampler,
                 steps=args.steps,

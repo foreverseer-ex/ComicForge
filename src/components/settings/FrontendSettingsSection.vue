@@ -53,26 +53,39 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { updateImageCacheSize } from '../../utils/imageCache'
 
 const props = defineProps<{
-  settings: any
   isDark: boolean
 }>()
 
-const emit = defineEmits<{
-  update: [updates: any]
-}>()
+// 图片缓存数量 - 从 localStorage 读取
+const localImageCacheSize = ref('100')
 
-const localImageCacheSize = ref(String(props.settings?.image_cache_size || 100))
-
-// 监听 settings 变化，同步本地状态
-watch(() => props.settings, (newSettings) => {
-  if (newSettings) {
-    localImageCacheSize.value = String(newSettings.image_cache_size || 100)
+// 初始化图片缓存数量（从 localStorage 读取）
+const initImageCacheSize = () => {
+  const saved = localStorage.getItem('imageCacheSize')
+  if (saved !== null) {
+    const value = parseInt(saved)
+    if (!isNaN(value) && value >= 10 && value <= 1000) {
+      localImageCacheSize.value = String(value)
+      updateImageCacheSize(value)
+    }
+  } else {
+    // 使用默认值
+    updateImageCacheSize(100)
   }
-}, { immediate: true, deep: true })
+}
+
+// 监听图片缓存数量变化，保存到 localStorage
+watch(localImageCacheSize, (newVal) => {
+  const value = parseInt(newVal)
+  if (!isNaN(value) && value >= 10 && value <= 1000) {
+    localStorage.setItem('imageCacheSize', String(value))
+    updateImageCacheSize(value)
+  }
+})
 
 // 处理图片缓存数量
 const handleImageCacheSizeBlur = (event: Event) => {
@@ -80,12 +93,16 @@ const handleImageCacheSizeBlur = (event: Event) => {
   const value = parseInt(target.value)
   if (!isNaN(value) && value >= 10 && value <= 1000) {
     localImageCacheSize.value = String(value)
-    emit('update', { image_cache_size: value })
-    // 更新图片缓存大小
+    localStorage.setItem('imageCacheSize', String(value))
     updateImageCacheSize(value)
   } else {
     target.value = localImageCacheSize.value // 恢复原值
   }
 }
+
+// 组件挂载时初始化
+onMounted(() => {
+  initImageCacheSize()
+})
 </script>
 

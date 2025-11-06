@@ -105,8 +105,8 @@ def get_chat_message_by_index(
     return message
 
 
-@router.get("/list", response_model=List[ChatMessage], summary="列出项目的所有消息")
-def list_chat_messages(
+@router.get("/all", response_model=List[ChatMessage], summary="列出项目的所有消息")
+def get_all_chat_messages(
     project_id: str,
     limit: Optional[int] = None,
     offset: int = 0
@@ -122,7 +122,7 @@ def list_chat_messages(
     Returns:
         聊天消息列表（按索引排序）
     """
-    messages = HistoryService.list(project_id)
+    messages = HistoryService.get_all(project_id)
     messages_list = list(messages)
     
     # 应用分页

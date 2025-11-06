@@ -8,6 +8,7 @@
       <div
         :class="[
           'w-full max-w-2xl max-h-[90vh] rounded-lg shadow-xl flex flex-col',
+          'mx-4 md:mx-0', // 移动端添加左右边距
           isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
         ]"
         @click.stop
@@ -15,13 +16,14 @@
         <!-- 标题栏 -->
         <div
           :class="[
-            'flex items-center justify-between p-4 border-b',
+            'flex items-center justify-between border-b',
+            'p-3 md:p-4', // 移动端使用更小的内边距
             isDark ? 'border-gray-700' : 'border-gray-200'
           ]"
         >
           <h2
             :class="[
-              'text-xl font-bold',
+              'text-lg md:text-xl font-bold', // 移动端使用更小的字体
               isDark ? 'text-white' : 'text-gray-900'
             ]"
           >
@@ -58,7 +60,7 @@
         </div>
 
         <!-- 内容区域 -->
-        <div class="flex-1 overflow-y-auto p-6">
+        <div class="flex-1 overflow-y-auto p-4 md:p-6">
           <div class="space-y-4">
             <!-- 基础模型 -->
             <div>

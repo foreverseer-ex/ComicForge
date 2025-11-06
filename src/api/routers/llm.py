@@ -4,12 +4,14 @@ LLM 相关的路由。
 提供 LLM 交互过程中需要的辅助功能，如添加选项等。
 """
 from typing import List, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
+from pydantic import BaseModel
 from loguru import logger
 
 
 from api.schemas.desperate.chat import IterationChatMessage, Choice, ImageChoice, TextChoice
 from api.services.db.project_service import ProjectService
+from api.services.llm import get_current_llm_service
 from api.settings import app_settings
 
 
@@ -126,6 +128,219 @@ async def clear_choices(project_id: str) -> Dict[str, Any]:
         "project_id": project_id,
         "message": f"已清除项目 {project_id} 的选项"
     }
+
+
+@router.post("/invoke", summary="调用 LLM（非流式，用于工具）")
+async def chat_invoke(
+    message: str,
+    project_id: str | None = None,
+    output_schema: Dict[str, Any] | None = None
+) -> Dict[str, Any]:
+    """
+    调用 LLM 并返回结果（非流式，用于工具调用）。
+    
+    与 chat_streamed 相比：
+    - project_id 是可选的（可以不关联特定项目）
+    - 不产生任何 ChatMessage，不读取历史消息或摘要
+    - 可以使用工具（但某些工具需要 project_id）
+    - 非流式，运行完成后返回结果
+    - 可以指定输出 schemas（默认返回文本）
+    
+    Args:
+        message: 用户消息
+        project_id: 项目 ID（可选）
+        output_schema: 输出模式（可选，JSON Schema 格式，默认返回文本）
+    
+    Returns:
+        包含 LLM 回复内容的字典
+        
+    示例:
+        ```python
+        # 基本调用
+        chat_invoke(message="请分析这个文本：...")
+        
+        # 关联项目的调用
+        chat_invoke(message="请分析项目的角色", project_id="xxx")
+        
+        # 指定输出格式
+        chat_invoke(
+            message="提取关键信息",
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "key_points": {"type": "array", "items": {"type": "string"}},
+                    "summary": {"type": "string"}
+                }
+            }
+        )
+        ```
+    """
+    try:
+        llm_service = get_current_llm_service()
+        if not llm_service:
+            raise HTTPException(status_code=503, detail="LLM 服务未初始化")
+        
+        # 调用 chat_invoke（异步）
+        # output_schema 目前暂不支持，传递 None
+        # TODO: 实现结构化输出支持
+        result = await llm_service.chat_invoke(
+            message=message,
+            project_id=project_id,
+            output_schema=None  # 暂时不支持结构化输出
+        )
+        
+        return {
+            "success": True,
+            "content": result,
+            "project_id": project_id,
+            "message": "LLM 调用成功"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"调用 LLM 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"调用 LLM 失败: {str(e)}")
+
+
+class GenerateDrawParamsRequest(BaseModel):
+    """生成绘图参数的请求模型"""
+    name: str
+    desc: str | None = None
+
+
+@router.post("/generate-draw-params", summary="文生图参数生成（使用 LLM）")
+async def generate_draw_params(
+    request: GenerateDrawParamsRequest
+) -> Dict[str, Any]:
+    """
+    使用 LLM 生成文生图参数。
+    
+    根据任务名称和描述，使用 LLM 生成合适的绘图参数（包括 prompt、negative_prompt、
+    model、sampler、steps、cfg_scale、width、height、seed、loras 等）。
+    
+    LLM 会先查看可用的模型和 LoRA，学习示例图像的生成参数，然后根据任务需求生成参数。
+    
+    Args:
+        name: 任务名称（图像名称）
+        desc: 任务描述（可选）
+    
+    Returns:
+        生成的绘图参数字典，格式与 DrawArgs 一致
+    """
+    try:
+        llm_service = get_current_llm_service()
+        if not llm_service:
+            raise HTTPException(status_code=503, detail="LLM 服务未初始化")
+        
+        # 构建 LLM 提示消息
+        # 注意：DrawArgs 的生成规范已定义在 MCP_TOOLS_GUIDE 中，这里只需要引用
+        prompt = f"""请根据以下信息生成文生图参数：
+
+任务名称：{request.name}
+{"任务描述：" + request.desc if request.desc else "无任务描述"}
+
+请按照 MCP 工具使用指南中"DrawArgs 生成规范"的要求生成参数：
+1. 先调用 `get_checkpoints()` 和 `get_loras()` 了解可用的模型和 LoRA
+2. 查看模型的示例图像（examples）和生成参数（args），学习最佳实践
+3. 根据任务名称和描述，选择合适的模型、LoRA、prompt、negative_prompt 等参数
+4. 返回符合 DrawArgs 格式的 JSON 对象（注意：必须使用 `version_name` 作为模型和 LoRA 名称，使用 `sampler` 字段而不是 `sampler_name`）
+
+请仔细分析任务需求，学习示例图像的参数风格，然后生成合适的参数。"""
+        
+        # 导入 DrawArgs 模型
+        from api.schemas.draw import DrawArgs
+        
+        # 调用 LLM（异步），使用结构化输出
+        result = await llm_service.chat_invoke(
+            message=prompt,
+            project_id=None,  # 生成参数不需要项目上下文
+            output_schema=DrawArgs  # 使用 DrawArgs 作为输出 schema
+        )
+        
+        # 打印原始返回内容用于调试
+        logger.info(f"LLM 返回的原始内容（前1000字符）: {result[:1000] if result else '(空)'}")
+        logger.info(f"LLM 返回内容长度: {len(result) if result else 0}")
+        
+        # 检查是否是错误消息
+        if not result or len(result.strip()) == 0:
+            logger.error("LLM 返回空内容")
+            raise HTTPException(status_code=500, detail="LLM 返回空内容，无法生成参数")
+        
+        if result.startswith("错误：") or result.startswith("错误:"):
+            logger.error(f"LLM 返回错误: {result}")
+            raise HTTPException(status_code=500, detail=result)
+        
+        # 解析 JSON 结果（结构化输出应该直接返回 JSON）
+        import json
+        import re
+        
+        # 尝试提取 JSON 部分（可能 LLM 返回了包含其他文本的内容）
+        json_match = re.search(r'\{[\s\S]*\}', result)
+        if json_match:
+            json_str = json_match.group(0)
+            try:
+                params = json.loads(json_str)
+            except json.JSONDecodeError as e:
+                logger.error(f"解析提取的 JSON 失败: {e}, JSON字符串: {json_str[:500]}")
+                raise HTTPException(status_code=500, detail=f"解析 LLM 返回的 JSON 失败: {str(e)}")
+        else:
+            # 如果没有找到 JSON，尝试直接解析整个结果
+            try:
+                params = json.loads(result)
+            except json.JSONDecodeError as e:
+                logger.error(f"解析 LLM 返回的 JSON 失败: {e}, 原始结果: {result[:500]}")
+                raise HTTPException(status_code=500, detail=f"LLM 返回的内容不包含有效的 JSON。LLM 返回: {result[:200]}")
+        
+        # 处理字段名不一致：DrawArgs 使用 sampler，但 API 使用 sampler_name
+        if "sampler_name" in params and "sampler" not in params:
+            params["sampler"] = params.pop("sampler_name")
+        elif "sampler" in params and "sampler_name" not in params:
+            params["sampler_name"] = params["sampler"]
+        
+        # 验证参数是否符合 DrawArgs 格式
+        try:
+            draw_args = DrawArgs(**params)
+            params = draw_args.model_dump() if hasattr(draw_args, 'model_dump') else draw_args.dict()
+        except Exception as e:
+            logger.warning(f"参数验证失败，使用原始参数: {e}")
+            # 如果验证失败，继续使用原始参数
+        
+        # 验证并补充缺失的参数（注意：API 使用 sampler_name）
+        validated_params: Dict[str, Any] = {
+            "model": params.get("model", ""),
+            "prompt": params.get("prompt", ""),
+            "negative_prompt": params.get("negative_prompt", "bad quality, worst quality"),
+            "sampler_name": params.get("sampler_name") or params.get("sampler", "Euler a"),
+            "steps": params.get("steps", 30),
+            "cfg_scale": params.get("cfg_scale", 7.0),
+            "width": params.get("width", 1024),
+            "height": params.get("height", 1024),
+            "seed": params.get("seed", -1),
+            "clip_skip": params.get("clip_skip", 2),
+        }
+        
+        # LoRA 是可选的
+        if "loras" in params and isinstance(params["loras"], dict):
+            validated_params["loras"] = params["loras"]
+        else:
+            validated_params["loras"] = {}
+        
+        # VAE 是可选的
+        if "vae" in params and params["vae"]:
+            validated_params["vae"] = params["vae"]
+        
+        logger.info(f"✅ 已生成绘图参数：model={validated_params.get('model')}, prompt长度={len(validated_params.get('prompt', ''))}")
+        
+        return {
+            "success": True,
+            "params": validated_params
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"生成绘图参数失败: {e}")
+        raise HTTPException(status_code=500, detail=f"生成绘图参数失败: {str(e)}")
 
 
 @router.post("/iteration/start", summary="启动迭代模式")

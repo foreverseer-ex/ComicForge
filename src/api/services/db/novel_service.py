@@ -295,4 +295,46 @@ class NovelContentService:
             db.delete(content)
             logger.info(f"删除单条内容: {project_id} 第 {chapter} 章 第 {line} 行")
             return True
+    
+    @classmethod
+    def shift_lines(cls, project_id: str, chapter: int, start_line: int, shift: int) -> int:
+        """
+        将指定章节从start_line开始的所有行的行号增加shift。
+        
+        :param project_id: 会话 ID
+        :param chapter: 章节号
+        :param start_line: 起始行号（包含）
+        :param shift: 行号偏移量（正数向后移动，负数向前移动）
+        :return: 更新的行数
+        """
+        if shift == 0:
+            return 0
+        
+        with DatabaseSession() as db:
+            # 获取需要更新的行
+            statement = select(NovelContent).where(
+                NovelContent.project_id == project_id,
+                NovelContent.chapter == chapter,
+                NovelContent.line >= start_line
+            ).order_by(NovelContent.line)
+            
+            contents = db.exec(statement).all()
+            
+            if not contents:
+                return 0
+            
+            # 如果shift是正数，需要从后往前更新，避免行号冲突
+            # 如果shift是负数，需要从前往后更新
+            if shift > 0:
+                contents = reversed(list(contents))
+            
+            updated_count = 0
+            for content in contents:
+                content.line += shift
+                db.add(content)
+                updated_count += 1
+            
+            db.flush()
+            logger.info(f"重新编号行: {project_id} 第 {chapter} 章 从第 {start_line} 行开始偏移 {shift}, 共更新 {updated_count} 行")
+            return updated_count
 

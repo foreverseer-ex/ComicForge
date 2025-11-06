@@ -8,6 +8,7 @@
       <div
         :class="[
           'w-full max-w-4xl max-h-[90vh] rounded-lg shadow-xl flex flex-col',
+          'mx-4 md:mx-0', // 移动端添加左右边距
           isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
         ]"
         @click.stop
@@ -15,13 +16,14 @@
         <!-- 标题栏 -->
         <div 
           :class="[
-            'flex items-center justify-between p-4 border-b',
+            'flex items-center justify-between border-b',
+            'p-3 md:p-4', // 移动端使用更小的内边距
             isDark ? 'border-gray-700' : 'border-gray-200'
           ]"
         >
           <h2 
             :class="[
-              'text-xl font-bold',
+              'text-lg md:text-xl font-bold', // 移动端使用更小的字体
               isDark ? 'text-white' : 'text-gray-900'
             ]"
           >
@@ -42,12 +44,12 @@
         </div>
 
         <!-- 内容区域 -->
-        <div class="flex-1 overflow-y-auto p-6">
+        <div class="flex-1 overflow-y-auto p-4 md:p-6">
           <div class="space-y-6">
             <!-- 立绘展示区域 -->
             <div>
               <div 
-                v-if="firstExample"
+                v-if="firstExample && firstExample.image_path"
                 :class="[
                   'w-full h-64 rounded-lg overflow-hidden border flex items-center justify-center',
                   isDark ? 'border-gray-600 bg-gray-900' : 'border-gray-200 bg-gray-50'
@@ -59,6 +61,17 @@
                   class="w-full h-full object-contain"
                   @error="handleImageError"
                 />
+              </div>
+              <div 
+                v-else-if="firstExample && !firstExample.image_path"
+                :class="[
+                  'w-full h-64 rounded-lg border flex flex-col items-center justify-center',
+                  isDark ? 'border-gray-600 bg-gray-900' : 'border-gray-200 bg-gray-50'
+                ]"
+              >
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2" 
+                     :class="isDark ? 'border-blue-500' : 'border-blue-600'"></div>
+                <span :class="['text-sm mt-4', isDark ? 'text-gray-500' : 'text-gray-500']">生成中...</span>
               </div>
               <div 
                 v-else
@@ -451,6 +464,8 @@
       :actor-name="actor?.name || ''"
       :actor-id="actor?.actor_id || ''"
       :project-id="actor?.project_id || ''"
+      :actor-desc="actor?.desc"
+      :actor-tags="actor?.tags"
       @close="showGenerateDialog = false"
       @generated="handleGenerated"
     />
@@ -458,11 +473,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, nextTick, watch } from 'vue'
+import { computed, ref, nextTick, watch, onUnmounted, onMounted } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { PhotoIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import api from '../api'
+import { getApiBaseURL } from '../utils/apiConfig'
 import GeneratePortraitDialog from './GeneratePortraitDialog.vue'
 
 interface Actor {
@@ -536,10 +552,43 @@ const firstExample = computed(() => {
 
 const getExampleImageUrl = (example: any, index: number) => {
   if (!example?.image_path || !props.actor) return ''
-  const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7864'
+  const baseURL = getApiBaseURL()
   // 通过 actor-example 端点获取图片
   return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=${index}`
 }
+
+// 检查是否有正在生成的立绘（image_path 为 None）
+const hasGeneratingPortrait = computed(() => {
+  if (!props.actor?.examples) return false
+  return props.actor.examples.some((ex: any) => !ex.image_path)
+})
+
+// 每5秒刷新一次（如果有正在生成的立绘）
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
+watch(() => props.actor, (newActor) => {
+  // 清除旧的定时器
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+  
+  // 如果有正在生成的立绘，启动定时刷新
+  if (newActor && hasGeneratingPortrait.value) {
+    refreshTimer = setInterval(async () => {
+      try {
+        // 重新加载 actor 数据
+        const response = await api.get(`/actor/${newActor.actor_id}`)
+        if (response) {
+          emit('refresh')
+        }
+      } catch (error) {
+        console.error('刷新立绘状态失败:', error)
+      }
+    }, 5000) // 每5秒刷新一次
+  }
+}, { immediate: true })
+
 
 const handleImageError = () => {
   // 图片加载失败处理
@@ -785,6 +834,58 @@ watch(() => contextMenu.value.show, (show) => {
     }, 0)
   } else {
     document.removeEventListener('click', handleClickOutside)
+  }
+})
+
+// ESC 键关闭对话框
+const handleKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape') {
+    // 如果生成立绘对话框打开，先关闭它（由子组件处理）
+    if (showGenerateDialog.value) {
+      return // ESC 会由子组件处理
+    }
+    
+    // 如果右键菜单打开，关闭它
+    if (contextMenu.value.show) {
+      contextMenu.value.show = false
+      return
+    }
+    
+    // 如果正在添加标签，取消添加
+    if (isAddingTag.value) {
+      cancelAddTag()
+      return
+    }
+    
+    // 如果正在编辑标签，取消编辑
+    if (editingTagKey.value !== null) {
+      cancelEditTag()
+      return
+    }
+    
+    // 如果正在编辑基本信息，取消编辑
+    if (editingField.value !== null) {
+      cancelEdit()
+      return
+    }
+    
+    // 否则关闭对话框
+    close()
+  }
+}
+
+// 组件挂载时添加键盘事件监听
+onMounted(() => {
+  document.addEventListener('keydown', handleKeydown)
+})
+
+// 组件卸载时移除键盘事件监听
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
+  // 确保清理定时器
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
   }
 })
 </script>

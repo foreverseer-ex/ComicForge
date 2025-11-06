@@ -18,12 +18,12 @@ class ActorExample(BaseModel):
     - title: 示例标题/名称
     - desc: 示例说明
     - draw_args: 生成参数
-    - image_path: 图片相对路径（相对于项目根目录）
+    - image_path: 图片相对路径（相对于项目根目录），None 表示正在生成中
     """
     title: str = Field(description="示例标题")
     desc: str = Field(description="示例说明")
     draw_args: DrawArgs = Field(description="生成参数")
-    image_path: str = Field(description="图片相对路径")
+    image_path: str | None = Field(default=None, description="图片相对路径，None 表示正在生成中")
     
     model_config = ConfigDict(
         arbitrary_types_allowed=True

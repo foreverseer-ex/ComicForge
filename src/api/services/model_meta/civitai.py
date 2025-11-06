@@ -123,6 +123,19 @@ class CivitaiModelMetaService(AbstractModelMetaService):
     
     # ==================== 实现基类接口 ====================
     
+    def get_by_version_name(self, version_name: str) -> Optional[ModelMeta]:
+        """
+        通过模型版本名称获取模型元数据（从本地缓存）。
+        
+        注意：此方法使用本地缓存，不会发起网络请求。
+        如需从 Civitai 获取最新数据，请使用 get_by_id 或 get_by_hash。
+        
+        :param version_name: 模型版本名称（如 "waiIllustriousSDXL-v150"）
+        :return: 模型元数据，未找到返回 None
+        """
+        from api.services.model_meta import local_model_meta_service
+        return local_model_meta_service.get_by_version_name(version_name)
+    
     def get_by_name(self, name: str) -> Optional[ModelMeta]:
         """
         通过模型名称获取模型元数据。

@@ -32,7 +32,7 @@ class HomePageState:
         加载项目列表，并从 settings 恢复上次选中的项目。
         """
         # 从数据库加载项目列表
-        self.projects = ProjectService.list()
+        self.projects = ProjectService.get_all()
         
         # 从 settings 恢复上次选中的项目
         if app_settings.ui.current_project_id:

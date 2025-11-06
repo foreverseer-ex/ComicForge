@@ -2,6 +2,7 @@
 Ollama LLM 服务实现。
 """
 import httpx
+from typing import Optional, Any
 from langchain_ollama import ChatOllama
 from langchain.agents import create_agent
 from loguru import logger
@@ -23,10 +24,11 @@ class OllamaLlmService(AbstractLlmService):
     等
     """
 
-    def initialize_llm(self) -> bool:
+    def initialize_llm(self, response_format: Optional[Any] = None) -> bool:
         """
         初始化 Ollama LLM 实例。
         
+        :param response_format: 可选的响应格式（Pydantic 模型类），用于结构化输出
         :return: 初始化是否成功
         """
         try:
@@ -47,11 +49,24 @@ class OllamaLlmService(AbstractLlmService):
                 temperature=app_settings.llm.temperature,
                 http_client=http_client,
             )
-            llm_with_tools = self.llm.bind_tools(self.tools)
-            self.agent = create_agent(llm_with_tools, self.tools)
+            
+            # Ollama 可能不支持同时绑定工具和结构化输出
+            # 如果有响应格式，创建带工具的 agent（结构化输出会在最后一步处理）
+            if response_format is not None:
+                logger.info(f"初始化带结构化输出的 agent，schema: {response_format.__name__ if hasattr(response_format, '__name__') else type(response_format)}")
+                # Ollama 可能不支持 with_structured_output，所以我们只创建带工具的 agent
+                # 结构化输出会在 _extract_structured_output 中处理
+                llm_with_tools = self.llm.bind_tools(self.tools)
+                self.agent = create_agent(llm_with_tools, self.tools)
+                self._structured_llm = None  # Ollama 不支持结构化输出
+            else:
+                llm_with_tools = self.llm.bind_tools(self.tools)
+                self.agent = create_agent(llm_with_tools, self.tools)
+                self._structured_llm = None
+            
             logger.success(
                 f"Ollama 服务初始化成功: {app_settings.llm.model} "
-                f"({len(self.tools)} 个工具)"
+                f"({len(self.tools)} 个工具" + (f"，结构化输出: {response_format.__name__ if response_format else '无'}" if response_format else "") + ")"
             )
             return True
         except Exception as e:

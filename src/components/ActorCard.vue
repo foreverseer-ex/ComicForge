@@ -81,6 +81,7 @@ import { computed } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { PhotoIcon, TagIcon } from '@heroicons/vue/24/outline'
+import { getApiBaseURL } from '../utils/apiConfig'
 
 interface Actor {
   actor_id: string
@@ -113,9 +114,9 @@ const tagCount = computed(() => Object.keys(props.actor.tags || {}).length)
 const firstExampleImage = computed(() => {
   if (!props.actor.examples || exampleCount.value === 0) return null
   const firstExample = props.actor.examples[0]
-  if (!firstExample?.image_path) return null
+  if (!firstExample?.image_path) return null  // image_path 为 None 时返回 null（不显示图片）
   
-  const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7864'
+  const baseURL = getApiBaseURL()
   // 注意：image_path 可能是相对路径，需要根据实际情况处理
   // 如果是相对路径，需要通过 /file/actor-example 端点获取
   // 这里暂时保持原样，因为 image_path 可能已经是完整路径

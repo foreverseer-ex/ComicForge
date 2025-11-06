@@ -93,7 +93,7 @@ class ChatPage(ft.Container):
         """加载历史记录并显示在界面上"""
         try:
             # 从数据库加载消息
-            db_messages = ChatServiceDB.list(self.project_id)
+            db_messages = ChatServiceDB.get_all(self.project_id)
             
             # 转换为 Pydantic 模型
             messages = []
@@ -458,7 +458,7 @@ class ChatPage(ft.Container):
                 
                 # 检查是否需要执行迭代模式
                 # 从数据库查找是否有迭代消息需要执行迭代循环
-                db_messages = ChatServiceDB.list(self.project_id)
+                db_messages = ChatServiceDB.get_all(self.project_id)
                 iteration_msg_to_execute = None
                 for db_msg in reversed(db_messages):
                     if db_msg.message_type == "iteration":
@@ -555,7 +555,7 @@ class ChatPage(ft.Container):
         """刷新所有消息"""
         try:
             # 查询数据库中的所有消息
-            db_messages = ChatServiceDB.list(self.project_id)
+            db_messages = ChatServiceDB.get_all(self.project_id)
             
             # 转换为 Pydantic 模型
             messages = []

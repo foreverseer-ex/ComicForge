@@ -124,6 +124,7 @@ import {
   LightBulbIcon,
   CubeIcon,
   DocumentTextIcon,
+  PaintBrushIcon,
   Cog6ToothIcon,
   QuestionMarkCircleIcon
 } from '@heroicons/vue/24/outline'
@@ -170,6 +171,7 @@ const navigation: NavigationItem[] = [
   { name: '记忆管理', path: '/memory', icon: LightBulbIcon },
   { name: '模型管理', path: '/model', icon: CubeIcon },
   { name: '内容管理', path: '/content', icon: DocumentTextIcon },
+  { name: '任务管理', path: '/task', icon: PaintBrushIcon },
   { name: '设置', path: '/settings', icon: Cog6ToothIcon },
   { name: '帮助', path: '/help', icon: QuestionMarkCircleIcon }
 ]

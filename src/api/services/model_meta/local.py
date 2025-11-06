@@ -322,6 +322,21 @@ class LocalModelModelMetaService(AbstractModelMetaService):
     
     # ==================== 实现基类接口 ====================
     
+    def get_by_version_name(self, version_name: str) -> Optional[ModelMeta]:
+        """
+        通过模型版本名称获取模型元数据（从内存缓存）。
+        
+        :param version_name: 模型版本名称（如 "waiIllustriousSDXL-v150"）
+        :return: 模型元数据，未找到返回 None
+        """
+        # 按 version_name 属性匹配
+        for meta in self.sd_list + self.lora_list + self.vae_list:
+            if meta.version_name == version_name:
+                return meta
+        
+        logger.debug(f"未在缓存中找到版本名称对应的模型: {version_name}")
+        return None
+    
     def get_by_name(self, name: str) -> Optional[ModelMeta]:
         """
         通过模型名称获取模型元数据（从内存缓存）。

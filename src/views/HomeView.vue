@@ -3,39 +3,41 @@
     <!-- 顶部：项目选择器和操作按钮 -->
     <div 
       :class="[
-        'flex items-center justify-between gap-4 pb-4 border-b',
+        'flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b',
         isDark ? 'border-gray-700' : 'border-gray-200'
       ]"
     >
-      <!-- 项目选择下拉框 -->
-      <div class="flex items-center gap-4 flex-1">
+      <!-- 第一行：标题 -->
+      <div class="flex items-center gap-4">
         <HomeIcon class="w-6 h-6" :class="isDark ? 'text-gray-400' : 'text-gray-600'" />
         <h2 :class="['text-xl font-bold', isDark ? 'text-white' : 'text-gray-900']">
           项目管理
         </h2>
-        
-        <select
-          :value="selectedProjectId"
-          @change="(e) => { projectStore.setSelectedProjectId((e.target as HTMLSelectElement).value); onProjectChange() }"
-          :class="[
-            'px-4 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1 max-w-md',
-            isDark
-              ? 'bg-gray-800 border-gray-700 text-white'
-              : 'bg-white border-gray-300 text-gray-900'
-          ]"
-        >
-          <option value="" disabled>请选择一个项目</option>
-          <option 
-            v-for="project in projects" 
-            :key="project.project_id" 
-            :value="project.project_id"
-          >
-            {{ project.title }}
-          </option>
-        </select>
       </div>
 
-      <!-- 操作按钮 -->
+      <!-- 第二行：项目选择下拉框 -->
+      <select
+        :value="selectedProjectId"
+        @change="(e) => { projectStore.setSelectedProjectId((e.target as HTMLSelectElement).value); onProjectChange() }"
+        :class="[
+          'px-4 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500',
+          'w-full md:flex-1 md:max-w-md',
+          isDark
+            ? 'bg-gray-800 border-gray-700 text-white'
+            : 'bg-white border-gray-300 text-gray-900'
+        ]"
+      >
+        <option value="" disabled>请选择一个项目</option>
+        <option 
+          v-for="project in projects" 
+          :key="project.project_id" 
+          :value="project.project_id"
+        >
+          {{ project.title }}
+        </option>
+      </select>
+
+      <!-- 第三行：操作按钮 -->
       <div class="flex items-center gap-2">
         <button
           @click="showProjectDialog = true; editingProject = null"
@@ -192,7 +194,7 @@
               isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
             ]"
           >
-            <div class="flex items-center justify-between mb-4">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
               <h3 :class="['text-lg font-semibold', isDark ? 'text-white' : 'text-gray-900']">
                 当前段落
               </h3>
@@ -671,6 +673,7 @@ import { useProjectStore } from '../stores/project'
 import { storeToRefs } from 'pinia'
 import api from '../api'
 import axios from 'axios'
+import { getApiBaseURL } from '../utils/apiConfig'
 import {
   HomeIcon,
   PlusIcon,
@@ -814,7 +817,7 @@ const loadCurrentParagraph = async () => {
       currentParagraph.value = content
       
       // 加载对应的图片（使用当前行的行号）
-      const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7864'
+      const baseURL = getApiBaseURL()
       // 图片路径：/file/image?project_id=...&line=...
       const imageUrl = `${baseURL}/file/image?project_id=${currentProject.value.project_id}&line=${line}`
       // 先设置URL，如果图片不存在会在handleImageError中处理

@@ -63,9 +63,7 @@
 
       <!-- 前端设置 -->
       <FrontendSettingsSection 
-        :settings="settings.frontend" 
         :is-dark="isDark"
-        @update="handleUpdateFrontend"
       />
     </div>
   </div>
@@ -90,8 +88,7 @@ const settings = ref<any>({
   llm: {},
   draw: {},
   civitai: {},
-  sd_forge: {}, // 注意：后端返回的是 sd_forge，但 API 路径是 sd-forge
-  frontend: {}
+  sd_forge: {} // 注意：后端返回的是 sd_forge，但 API 路径是 sd-forge
 })
 
 // 加载所有设置
@@ -157,19 +154,6 @@ const handleUpdateSdForge = async (updates: any) => {
   } catch (error: any) {
     console.error('更新 SD Forge 设置失败:', error)
     alert('更新 SD Forge 设置失败: ' + (error.response?.data?.detail || error.message))
-  }
-}
-
-// 更新前端设置
-const handleUpdateFrontend = async (updates: any) => {
-  try {
-    await api.put('/settings/frontend', updates)
-    // 重新加载以获取最新值
-    const updated = await api.get('/settings/frontend')
-    settings.value.frontend = updated
-  } catch (error: any) {
-    console.error('更新前端设置失败:', error)
-    alert('更新前端设置失败: ' + (error.response?.data?.detail || error.message))
   }
 }
 

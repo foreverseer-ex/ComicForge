@@ -28,6 +28,16 @@ class AbstractModelMetaService(ABC):
         raise NotImplementedError
     
     @abstractmethod
+    def get_by_version_name(self, version_name: str) -> Optional[ModelMeta]:
+        """
+        通过模型版本名称获取模型元数据。
+        
+        :param version_name: 模型版本名称（如 "waiIllustriousSDXL-v150"）
+        :return: 模型元数据，未找到返回 None
+        """
+        raise NotImplementedError
+    
+    @abstractmethod
     def get_by_path(self, path: Path) -> Optional[ModelMeta]:
         """
         通过模型文件路径获取模型元数据。

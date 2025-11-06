@@ -39,6 +39,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '内容管理' }
   },
   {
+    path: '/task',
+    name: 'Task',
+    component: () => import('../views/TaskView.vue'),
+    meta: { title: '任务管理' }
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('../views/SettingsView.vue'),

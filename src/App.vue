@@ -80,6 +80,7 @@ import { useProjectStore } from './stores/project'
 import { useConnectionStore } from './stores/connection'
 import { useNavigationStore } from './stores/navigation'
 import { storeToRefs } from 'pinia'
+import { getApiBaseURL } from './utils/apiConfig'
 
 const themeStore = useThemeStore()
 const { isDark } = storeToRefs(themeStore)
@@ -95,7 +96,7 @@ const { width: navigationWidth } = storeToRefs(navigationStore)
 
 // 获取 API 基础 URL
 const apiBaseUrl = computed(() => {
-  return import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7864'
+  return getApiBaseURL()
 })
 
 onMounted(() => {

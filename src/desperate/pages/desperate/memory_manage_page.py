@@ -69,7 +69,7 @@ class MemoryManagePage(ft.Column):
             return
         
         try:
-            self.memories = MemoryService.list(self.project_id)
+            self.memories = MemoryService.get_all(self.project_id)
             logger.info(f"预加载了 {len(self.memories)} 条记忆")
         except Exception as e:
             logger.exception(f"预加载记忆失败: {e}")
@@ -143,7 +143,7 @@ class MemoryManagePage(ft.Column):
             return
         
         try:
-            self.memories = MemoryService.list(self.project_id)
+            self.memories = MemoryService.get_all(self.project_id)
             logger.info(f"加载了 {len(self.memories)} 条记忆")
             
             # 更新列表视图

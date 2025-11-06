@@ -54,7 +54,7 @@ class MemoryService:
             return entry
 
     @classmethod
-    def list(cls, project_id: str, limit: Optional[int] = None, offset: int = 0) -> list[MemoryEntry]:
+    def get_all(cls, project_id: str, limit: Optional[int] = None, offset: int = 0) -> list[MemoryEntry]:
         """
         根据会话 ID 获取记忆条目列表。
         

@@ -12,10 +12,8 @@ try {
   app.use(pinia)
   app.use(router)
   
-  // 初始化图片缓存
-  initImageCache().catch(err => {
-    console.warn('初始化图片缓存失败:', err)
-  })
+  // 初始化图片缓存（从 localStorage 读取）
+  initImageCache()
   
   app.mount('#app')
 } catch (error) {

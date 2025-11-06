@@ -8,24 +8,31 @@ AI 驱动的小说创作与可视化工具：对话、绘图、模型元数据�
 
 ### 🤖 AI 对话系统
 - **多提供商支持**：OpenAI / xAI (Grok) / Ollama / Anthropic (Claude) / Google (Gemini) / 自定义端点
-- **对话模式**：支持 invoke（直接返回）和 stream（流式输出）两种模式
-- **流式输出**：实时显示 AI 响应，支持 Markdown 渲染
-- **会话管理**：多会话支持，会话历史持久化
+- **对话模式**：支持 invoke（直接返回）和 stream（流式输出/SSE）两种模式
+- **流式输出**：实时显示 AI 响应，支持 Markdown 渲染和代码高亮
+- **会话管理**：多会话支持，会话历史持久化到 SQLite 数据库
 - **自动总结**：当消息数量达到配置的倍数时，自动生成对话摘要，保持长期对话连贯性
-- **工具调用**：集成 43+ 个 MCP 工具函数，支持：
+- **工具调用**：基于 LangChain + LangGraph 构建，集成 43+ 个 MCP 工具函数，支持：
   - 项目管理（查询、更新、进度跟踪）
   - 角色管理（创建、更新、删除、立绘生成、标签管理）
   - 记忆管理（创建、查询、更新、删除、批量操作）
   - 小说内容读取（单行、批量、章节、摘要）
   - 图像生成（SD-Forge 本地生成）
   - 迭代模式（批量处理章节内容）
+- **消息状态**：支持消息状态查询（ready/error/success），实时跟踪处理进度
 - **开发者模式**：突破模型限制，支持自定义系统提示词
 - **超时控制**：可配置的网络请求超时时间
+- **递归限制**：可配置的工具调用递归深度限制
 
 ### 🎨 图像生成
 - **本地生成**：对接 SD-Forge/sd-webui，支持 LoRA/模型切换
 - **Civitai 集成**：支持从 Civitai 导入模型元数据（AIR 标识符）
 - **结果管理**：按会话/批次保存生成的图像
+- **AI 参数生成**：使用 LLM 根据任务名称和描述自动生成绘图参数（prompt、模型、LoRA 等）
+- **参数粘贴**：支持从剪切板粘贴绘图参数
+- **任务管理**：完整的绘图任务管理系统，支持创建、查看、删除、批量操作
+- **状态跟踪**：自动检查任务状态，实时刷新生成中的任务
+- **图片预览**：图片画廊对话框，支持键盘导航和缩放
 
 ### 📦 模型元数据管理
 - **本地扫描**：自动扫描本地 Checkpoint/LoRA 模型
@@ -56,6 +63,8 @@ AI 驱动的小说创作与可视化工具：对话、绘图、模型元数据�
 - **自动保存**：配置修改自动保存到 `config.json`
 - **环境变量支持**：优先使用环境变量配置
 - **响应式布局**：支持不同窗口尺寸的自适应布局
+- **前端设置**：图片缓存数量配置（10-1000，默认100）
+- **导航栏折叠**：支持导航栏折叠/展开，状态持久化到 localStorage
 
 ### 🔌 连接状态管理
 - **健康检查**：后端提供 `/health` 健康检查端点
@@ -83,7 +92,8 @@ ComicForge/
 │   │   │   ├── history.py     # 历史记录路由
 │   │   │   ├── file.py        # 文件路由
 │   │   │   ├── help.py        # 帮助路由
-│   │   │   └── settings.py    # 设置路由
+│   │   │   ├── settings.py    # 设置路由
+│   │   │   └── model_meta.py  # 模型元数据路由
 │   │   ├── services/          # 业务服务层
 │   │   │   ├── db/            # 数据库服务（SQLModel）
 │   │   │   │   ├── base.py          # 数据库基础类
@@ -129,14 +139,17 @@ ComicForge/
 │   │   │   ├── llm_setting.py      # LLM 配置
 │   │   │   ├── draw_setting.py     # 绘图配置
 │   │   │   ├── sd_forge_setting.py # SD-Forge 配置
-│   │   │   └── civitai_setting.py  # Civitai 配置
+│   │   │   ├── civitai_setting.py  # Civitai 配置
+│   │   │   └── frontend_setting.py # 前端 UI 配置
 │   │   └── utils/             # 工具函数
 │   │       ├── path.py        # 路径工具
 │   │       ├── download.py    # 下载工具
 │   │       ├── civitai.py     # Civitai 工具
 │   │       ├── hash.py        # 哈希工具
 │   │       ├── url_util.py    # URL 工具
-│   │       └── pubsub.py      # 发布订阅工具
+│   │       ├── pubsub.py      # 发布订阅工具
+│   │       ├── responsive.py # 响应式工具（Flet UI，已废弃）
+│   │       └── flet_util.py   # Flet 工具（已废弃）
 │   │
 │   ├── views/                 # Vue 视图页面
 │   │   ├── HomeView.vue       # 主页视图
@@ -145,24 +158,42 @@ ComicForge/
 │   │   ├── MemoryView.vue     # 记忆管理视图
 │   │   ├── ContentView.vue    # 内容管理视图
 │   │   ├── ModelView.vue      # 模型管理视图
+│   │   ├── TaskView.vue       # 任务管理视图
 │   │   ├── HelpView.vue       # 帮助视图
 │   │   └── SettingsView.vue   # 设置视图
 │   ├── components/            # Vue 组件
 │   │   ├── Navigation.vue     # 导航组件
+│   │   ├── ActorCard.vue      # 角色卡片组件
+│   │   ├── ActorDetailDialog.vue  # 角色详情对话框
+│   │   ├── AlertDialog.vue    # 提示对话框
+│   │   ├── ConfirmDialog.vue  # 确认对话框
+│   │   ├── CreateDrawTaskDialog.vue  # 创建绘图任务对话框
+│   │   ├── DrawTaskForm.vue   # 绘图任务表单
+│   │   ├── GeneratePortraitDialog.vue  # 生成立绘对话框
+│   │   ├── ImageGalleryDialog.vue  # 图片画廊对话框
+│   │   ├── ModelCard.vue      # 模型卡片组件
+│   │   ├── ModelDetailDialog.vue  # 模型详情对话框
+│   │   ├── ModelParamsDialog.vue  # 模型参数对话框
 │   │   └── settings/          # 设置相关组件
 │   │       ├── LlmSettingsSection.vue
 │   │       ├── DrawSettingsSection.vue
 │   │       ├── SdForgeSettingsSection.vue
-│   │       └── CivitaiSettingsSection.vue
+│   │       ├── CivitaiSettingsSection.vue
+│   │       └── FrontendSettingsSection.vue
 │   ├── router/                # Vue Router 配置
 │   │   └── index.ts
 │   ├── stores/                # Pinia 状态管理
 │   │   ├── index.ts
 │   │   ├── project.ts         # 项目状态
 │   │   ├── theme.ts           # 主题状态
-│   │   └── connection.ts       # 连接状态管理
+│   │   ├── connection.ts      # 连接状态管理
+│   │   └── navigation.ts      # 导航状态管理（折叠状态）
 │   ├── styles/                # 样式文件
 │   │   └── highlight.css      # 代码高亮样式
+│   ├── utils/                 # 前端工具函数
+│   │   ├── imageCache.ts      # 图片缓存管理
+│   │   ├── imageUtils.ts      # 图片工具函数（file:// URL 处理）
+│   │   └── toast.ts           # Toast 通知工具
 │   ├── assets/                # 静态资源
 │   │   └── vue.svg
 │   ├── desperate/             # 旧版 Flet UI（已废弃）
@@ -333,6 +364,9 @@ export CIVITAI_API_TOKEN="..."
     "ecosystem_filter": null,
     "base_model_filter": null,
     "privacy_mode": true
+  },
+  "frontend": {
+    "image_cache_size": 100
   }
 }
 ```
@@ -351,14 +385,16 @@ ComicForge 使用 Vue 3 + TypeScript 构建现代化的前后端分离架构。
 - **MemoryView** - 记忆管理页面（键值对管理、批量操作）
 - **ContentView** - 内容管理页面（章节导航、段落编辑）
 - **ModelView** - 模型管理页面（本地扫描、Civitai 集成、元数据查看）
+- **TaskView** - 任务管理页面（绘图任务列表、状态跟踪、批量操作、图片预览）
 - **HelpView** - 帮助文档页面（MCP 工具说明、使用指南）
-- **SettingsView** - 设置页面（LLM、绘图、SD-Forge、Civitai 配置）
+- **SettingsView** - 设置页面（LLM、绘图、SD-Forge、Civitai、前端配置）
 
 ### 状态管理（Pinia）
 
-- **project** - 当前项目状态、项目列表、项目选择持久化
+- **project** - 当前项目状态、项目列表、项目选择持久化（localStorage）
 - **theme** - 主题设置（深色/浅色模式）
-- **connection** - 前后端连接状态监控（健康检查、自动重连）
+- **connection** - 前后端连接状态监控（健康检查、自动重连，默认每5秒检查一次）
+- **navigation** - 导航状态管理（导航栏折叠/展开状态，持久化到 localStorage）
 
 ### 路由配置
 
@@ -366,7 +402,14 @@ ComicForge 使用 Vue 3 + TypeScript 构建现代化的前后端分离架构。
 
 ## 🔌 API 服务
 
-ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API 访问所有功能。
+ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API（Axios）访问所有功能。
+
+### API 客户端配置
+
+前端 API 客户端支持环境变量配置：
+- `VITE_API_BASE_URL` - API 基础URL（默认：`http://127.0.0.1:7864`）
+- 支持请求/响应拦截器
+- 自动处理 FormData 上传
 
 ### 主要路由
 
@@ -375,8 +418,9 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API �
 - `/memory/*` - 记忆管理（键值存储、预定义键）
 - `/reader/*` - 内容读取（单行、批量、章节）
 - `/novel/*` - 小说内容（章节列表、摘要）
-- `/draw/*` - 图像生成（SD-Forge、Civitai、模型元数据）
-- `/llm/*` - LLM 相关功能（模型列表、工具定义）
+- `/draw/*` - 图像生成（创建任务、任务管理、状态查询、批量删除、清空任务、获取图像）
+- `/model-meta/*` - 模型元数据管理（本地扫描、Civitai 导入、元数据查询、示例图片）
+- `/llm/*` - LLM 相关功能（模型列表、工具定义、AI 生成绘图参数、选项管理）
 - `/chat/*` - 聊天对话（invoke/stream 双模式、迭代模式、消息状态查询）
 - `/history/*` - 历史记录（会话管理、消息历史）
 - `/file/*` - 文件服务（图片访问）
@@ -392,9 +436,13 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API �
 - **流式输出**：实时显示 AI 响应，支持 Markdown 格式
 - **会话历史**：自动保存对话历史，支持多会话切换
 - **自动总结**：当消息数量达到配置阈值时，自动生成对话摘要并保存到记忆系统
-- **工具调用**：AI 可以调用 43+ 个工具函数执行实际操作
-- **重新编辑**：支持重新编辑已发送的消息
+- **工具调用**：基于 LangChain 的 tool 机制，AI 可以调用 43+ 个工具函数执行实际操作
+  - 工具函数通过路由层暴露，确保安全性（所有工具必须来自 `routers` 目录，不能直接调用服务层）
+  - 支持工具调用状态跟踪和错误处理
+  - 使用 LangGraph 管理工具调用的状态流转
+- **重新编辑**：支持重新编辑已发送的消息（重新发送并继续对话）
 - **迭代模式**：批量处理章节内容，支持自定义范围和步长
+- **图片缓存**：前端自动缓存图片，提升加载速度
 
 ### 项目管理
 
@@ -423,25 +471,43 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API �
 - **筛选功能**：按生态系统和基础模型筛选
 - **一键打开**：一键在浏览器中打开所有模型的网页链接
 
+### 任务管理
+
+- **任务列表**：查看所有绘图任务，显示任务名称、描述、状态、Job ID
+- **状态跟踪**：自动检查任务状态（已完成/生成中），实时刷新生成中的任务（每3秒）
+- **批量操作**：支持全选、批量删除、清空所有任务
+- **图片预览**：点击已完成任务可预览图片，支持键盘导航（←/→）和缩放
+- **图片下载**：支持下载任务生成的图片
+- **任务创建**：通过对话框创建新任务，支持 AI 生成参数和从剪切板粘贴参数
+
 ## 📝 开发说明
 
 ### 技术栈
 
 #### 前端
-- **构建工具**: Vite
+- **构建工具**: Vite (rolldown-vite)
 - **框架**: Vue 3 + TypeScript
-- **UI 框架**: Tailwind CSS + Headless UI + shadcn/ui
+- **UI 框架**: Tailwind CSS + Headless UI + Heroicons
 - **状态管理**: Pinia
-- **HTTP 客户端**: Axios
+- **路由**: Vue Router
+- **HTTP 客户端**: Axios（支持环境变量配置基础URL）
+- **Markdown 渲染**: marked + highlight.js（代码高亮）
+- **图片缓存**: 前端图片缓存机制（imageCache.ts，支持配置缓存数量）
+- **Toast 通知**: 自定义 Toast 通知系统（toast.ts）
+- **图片工具**: 图片 URL 处理工具（imageUtils.ts，支持 file:// URL 转换）
 - **类型系统**: TypeScript
 
 #### 后端
 - **Web 框架**: FastAPI
 - **数据库**: SQLite (SQLModel)
-- **LLM 集成**: LangChain
+- **LLM 集成**: LangChain + LangGraph（状态图管理）
+- **工具系统**: fastapi-mcp（MCP 工具协议）
 - **HTTP 客户端**: httpx
-- **数据验证**: Pydantic
+- **数据验证**: Pydantic + Pydantic Settings
 - **异步支持**: asyncio
+- **图像处理**: Pillow
+- **Civitai 集成**: civitai-py
+- **日志**: loguru
 
 ### 项目特点
 
@@ -559,9 +625,11 @@ def test_your_endpoint(client):
 - ✅ 记忆管理（键值存储、预定义键、批量操作）
 - ✅ 小说内容读取（单行、批量、章节范围、摘要）
 - ✅ 图像生成（SD-Forge 本地生成、Civitai 集成）
+- ✅ 任务管理（创建、查询、删除、批量操作、状态跟踪、图片获取）
 - ✅ 模型元数据（本地扫描、Civitai 抓取、筛选）
 - ✅ LLM 集成（OpenAI/xAI/Ollama/Anthropic/Google）
 - ✅ AI 对话（invoke/stream 双模式、流式输出、工具调用、迭代模式、自动总结）
+- ✅ AI 参数生成（使用 LLM 生成绘图参数）
 - ✅ 历史记录（会话管理、消息持久化）
 - ✅ 配置管理（读取、保存、环境变量优先级）
 - ✅ 文件服务（图片访问、静态资源）
@@ -570,25 +638,34 @@ def test_your_endpoint(client):
 
 #### 前端 UI（Vue 3 + TypeScript）
 - ✅ 主页视图（项目信息、小说段落、图片展示）
-- ✅ 聊天视图（流式对话、Markdown 渲染、工具调用显示、消息状态）
-- ✅ 角色管理视图（角色列表、创建编辑、立绘生成）
-- ✅ 记忆管理视图（键值对编辑、批量删除）
-- ✅ 内容管理视图（章节导航、段落浏览）
-- ✅ 模型管理视图（模型列表、元数据查看、筛选）
-- ✅ 设置视图（LLM、绘图、SD-Forge、Civitai 配置）
-- ✅ 帮助视图（工具说明、使用指南）
-- ✅ 导航组件（侧边栏、路由切换、连接状态指示）
-- ✅ 状态管理（Pinia：项目状态、主题切换、连接状态监控）
-- ✅ 连接状态管理（自动健康检查、状态指示、连接保护）
+- ✅ 聊天视图（流式对话、Markdown 渲染、代码高亮、工具调用显示、消息状态、消息编辑）
+- ✅ 角色管理视图（角色列表、创建编辑、立绘生成、颜色标识）
+- ✅ 记忆管理视图（键值对编辑、批量删除、预定义键查询）
+- ✅ 内容管理视图（章节导航、段落浏览、章节编辑）
+- ✅ 模型管理视图（模型列表、元数据查看、筛选、一键打开链接）
+- ✅ 任务管理视图（任务列表、状态跟踪、批量操作、图片预览、下载）
+- ✅ 设置视图（LLM、绘图、SD-Forge、Civitai、前端配置，自动保存）
+- ✅ 帮助视图（MCP 工具说明、使用指南）
+- ✅ 导航组件（侧边栏、路由切换、连接状态指示、折叠/展开）
+- ✅ 状态管理（Pinia：项目状态、主题切换、连接状态监控、导航状态）
+- ✅ 连接状态管理（自动健康检查、状态指示、连接保护、自动恢复）
 - ✅ 响应式布局（适配不同屏幕尺寸）
+- ✅ 图片缓存系统（自动缓存、过期管理、可配置缓存数量）
+- ✅ Toast 通知系统（成功/错误/信息提示）
+- ✅ 图片工具函数（file:// URL 处理、图片缓存集成）
+- ✅ API 客户端（Axios 配置、请求/响应拦截器）
 
 #### 工具与服务
-- ✅ MCP 工具系统（43+ 工具函数，涵盖项目管理、角色、记忆、内容读取、图像生成等）
-- ✅ 数据库服务（SQLite + SQLModel）
-- ✅ 聊天服务（流式处理、工具调用解析、自动总结）
+- ✅ MCP 工具系统（43+ 工具函数，基于 LangChain tool 机制，所有工具通过路由层暴露）
+- ✅ 数据库服务（SQLite + SQLModel，自动初始化）
+- ✅ 聊天服务（LangGraph 状态图管理、流式处理、工具调用解析、自动总结）
+- ✅ LLM 服务（抽象基类设计，支持多提供商扩展）
 - ✅ 小说解析器（章节识别、摘要生成）
 - ✅ 数据转换工具（格式转换、数据映射）
 - ✅ 章节摘要服务（章节摘要的 CRUD 操作）
+- ✅ 图片缓存系统（前端自动缓存，提升性能）
+- ✅ Toast 通知系统（前端消息提示）
+- ✅ 图片工具函数（file:// URL 转换、缓存集成）
 
 #### 开发工具
 - ✅ 开发服务器脚本（优化重载速度）

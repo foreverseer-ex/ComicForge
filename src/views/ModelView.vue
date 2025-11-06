@@ -1,24 +1,42 @@
 <template>
   <div class="space-y-4">
     <!-- 筛选和操作栏 -->
-    <div class="flex items-center gap-3">
-      <!-- 筛选器 -->
-      <select
-        v-model="ecosystemFilter"
-        :class="[
-          'flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500',
-          isDark
-            ? 'bg-gray-700 border-gray-600 text-white'
-            : 'bg-white border-gray-300 text-gray-900'
-        ]"
-        @change="saveFilters"
-      >
-        <option value="">生态系统：全部</option>
-        <option value="sd1">sd1</option>
-        <option value="sd2">sd2</option>
-        <option value="sdxl">sdxl</option>
-      </select>
+    <div class="flex flex-col md:flex-row md:items-center gap-3">
+      <!-- 第一行：生态系统筛选器 -->
+      <div class="flex items-center gap-2">
+        <select
+          v-model="ecosystemFilter"
+          :class="[
+            'flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500',
+            isDark
+              ? 'bg-gray-700 border-gray-600 text-white'
+              : 'bg-white border-gray-300 text-gray-900'
+          ]"
+          @change="saveFilters"
+        >
+          <option value="">生态系统：全部</option>
+          <option value="sd1">sd1</option>
+          <option value="sd2">sd2</option>
+          <option value="sdxl">sdxl</option>
+        </select>
+        
+        <!-- 清除筛选按钮（移动端显示在第一行） -->
+        <button
+          v-if="ecosystemFilter || baseModelFilter"
+          @click="clearFilters"
+          :class="[
+            'p-2 rounded-lg transition-colors md:hidden',
+            isDark
+              ? 'hover:bg-gray-700 text-gray-400'
+              : 'hover:bg-gray-100 text-gray-600'
+          ]"
+          title="清除筛选"
+        >
+          <XMarkIcon class="w-5 h-5" />
+        </button>
+      </div>
 
+      <!-- 第二行：基础模型筛选器 -->
       <select
         v-model="baseModelFilter"
         :class="[
@@ -40,12 +58,12 @@
         <option value="SD3">SD3</option>
       </select>
 
-      <!-- 清除筛选按钮 -->
+      <!-- 清除筛选按钮（桌面端显示） -->
       <button
         v-if="ecosystemFilter || baseModelFilter"
         @click="clearFilters"
         :class="[
-          'p-2 rounded-lg transition-colors',
+          'p-2 rounded-lg transition-colors hidden md:block',
           isDark
             ? 'hover:bg-gray-700 text-gray-400'
             : 'hover:bg-gray-100 text-gray-600'
@@ -55,8 +73,8 @@
         <XMarkIcon class="w-5 h-5" />
       </button>
 
-      <!-- 操作按钮 -->
-      <div class="flex items-center gap-1">
+      <!-- 第三行：操作按钮 -->
+      <div class="flex items-center gap-1 flex-wrap">
         <!-- 隐私模式 -->
         <button
           @click="togglePrivacyMode"
@@ -95,18 +113,6 @@
           title="导出所有 AIR 到剪贴板"
         >
           <ClipboardDocumentIcon class="w-5 h-5" />
-        </button>
-
-        <!-- 打开所有链接 -->
-        <button
-          @click="openAllUrls"
-          :class="[
-            'p-2 rounded-lg transition-colors text-green-500',
-            isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-          ]"
-          title="在浏览器中打开所有模型的网页链接"
-        >
-          <ArrowTopRightOnSquareIcon class="w-5 h-5" />
         </button>
 
         <!-- 刷新元数据 -->
@@ -174,7 +180,7 @@
           </p>
         </div>
 
-        <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
           <ModelCard
             v-for="model in filteredCheckpoints"
             :key="model.version_id"
@@ -213,7 +219,7 @@
           </p>
         </div>
 
-        <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
           <ModelCard
             v-for="model in filteredLoras"
             :key="model.version_id"
@@ -237,14 +243,32 @@
         <div
           :class="[
             'w-full max-w-2xl rounded-lg shadow-xl',
+            'mx-4 md:mx-0', // 移动端添加左右边距
             isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
           ]"
           @click.stop
         >
-          <div class="p-6">
-            <h2 :class="['text-xl font-bold mb-4', isDark ? 'text-white' : 'text-gray-900']">
+          <!-- 对话框头部 -->
+          <div class="flex items-center justify-between border-b p-4 md:p-6"
+               :class="isDark ? 'border-gray-700' : 'border-gray-200'">
+            <h2 :class="['text-lg md:text-xl font-bold', isDark ? 'text-white' : 'text-gray-900']">
               从 Civitai 导入模型
             </h2>
+            <button
+              @click="showImportDialog = false"
+              :class="[
+                'p-1 rounded-lg transition-colors',
+                isDark
+                  ? 'hover:bg-gray-700 text-gray-400 hover:text-white'
+                  : 'hover:bg-gray-100 text-gray-500 hover:text-gray-900'
+              ]"
+            >
+              <XMarkIcon class="w-6 h-6" />
+            </button>
+          </div>
+          
+          <!-- 对话框内容 -->
+          <div class="p-4 md:p-6">
             <p :class="['text-sm mb-2', isDark ? 'text-gray-300' : 'text-gray-700']">
               输入 Civitai 模型 AIR 标识符，自动获取并保存模型元数据
             </p>
@@ -255,27 +279,6 @@
               格式：urn:air:{'{ecosystem}'}:{'{type}'}:civitai:{'{model_id}'}@{'{version_id}'}<br/>
               示例：urn:air:sd1:checkpoint:civitai:348620@390021
             </p>
-            
-            <!-- 从剪贴板读取按钮 -->
-            <div class="flex items-center justify-between mb-2">
-              <button
-                @click="loadFromClipboard"
-                :disabled="importing"
-                :class="[
-                  'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                  importing
-                    ? isDark
-                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                      : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                    : isDark
-                      ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                ]"
-                title="从剪贴板读取 AIR 标识符"
-              >
-                📋 从剪贴板读取
-              </button>
-            </div>
             
             <textarea
               v-model="importAirInput"
@@ -337,38 +340,21 @@
               </ul>
             </div>
             
-            <div class="flex justify-end gap-3 mt-4">
-              <button
-                @click="cancelImport"
-                :disabled="!importing && !importAirInput.trim()"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  importing || !importAirInput.trim()
-                    ? isDark
-                      ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                    : isDark
-                      ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                ]"
-              >
-                {{ importing ? '取消导入' : '取消' }}
-              </button>
-              <button
-                @click="batchImport"
-                :disabled="importing || !importAirInput.trim()"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  importing || !importAirInput.trim()
-                    ? isDark
-                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                      : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                ]"
-              >
-                {{ importing ? '导入中...' : '批量导入' }}
-              </button>
-            </div>
+            <!-- 导入按钮 -->
+            <button
+              @click="batchImport"
+              :disabled="importing || !importAirInput.trim()"
+              :class="[
+                'w-full mt-4 px-4 py-3 rounded-lg font-medium transition-colors',
+                importing || !importAirInput.trim()
+                  ? isDark
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+              ]"
+            >
+              {{ importing ? '导入中...' : '批量导入' }}
+            </button>
           </div>
         </div>
       </div>
@@ -384,11 +370,12 @@
         <div
           :class="[
             'w-full max-w-md rounded-lg shadow-xl',
+            'mx-4 md:mx-0', // 移动端添加左右边距
             isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border-gray-200'
           ]"
           @click.stop
         >
-          <div class="p-6">
+          <div class="p-4 md:p-6">
             <h2 class="text-xl font-bold mb-4 text-red-600">确认清空</h2>
             <div class="text-center mb-4">
               <svg class="w-12 h-12 mx-auto text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -446,11 +433,12 @@
         <div
           :class="[
             'w-full max-w-md rounded-lg shadow-xl',
+            'mx-4 md:mx-0', // 移动端添加左右边距
             isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border-gray-200'
           ]"
           @click.stop
         >
-          <div class="p-6">
+          <div class="p-4 md:p-6">
             <h2 class="text-xl font-bold mb-4 text-blue-600">确认重新下载</h2>
             <div class="text-center mb-4">
               <svg class="w-12 h-12 mx-auto text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -528,18 +516,20 @@
   <!-- 模型详情对话框 -->
   <ModelDetailDialog
     :model="detailModel"
+    :privacy-mode="privacyMode"
     @close="detailModel = null"
+    @toggle-privacy-mode="togglePrivacyMode"
   />
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
 import { storeToRefs } from 'pinia'
 import { 
   XMarkIcon, EyeIcon, EyeSlashIcon, CloudArrowDownIcon, 
-  ClipboardDocumentIcon, ArrowTopRightOnSquareIcon, 
+  ClipboardDocumentIcon, 
   ArrowPathIcon, TrashIcon 
 } from '@heroicons/vue/24/outline'
 import ModelCard from '../components/ModelCard.vue'
@@ -577,7 +567,22 @@ const loras = ref<ModelMeta[]>([])
 // 筛选器
 const ecosystemFilter = ref('')
 const baseModelFilter = ref('')
+
+// 隐私模式 - 从 localStorage 读取
 const privacyMode = ref(false)
+
+// 初始化隐私模式（从 localStorage 读取）
+const initPrivacyMode = () => {
+  const saved = localStorage.getItem('modelPrivacyMode')
+  if (saved !== null) {
+    privacyMode.value = saved === 'true'
+  }
+}
+
+// 监听隐私模式变化，保存到 localStorage
+watch(privacyMode, (newVal) => {
+  localStorage.setItem('modelPrivacyMode', String(newVal))
+})
 
 // 对话框
 const showImportDialog = ref(false)
@@ -675,32 +680,6 @@ const exportAllAir = async () => {
   } catch (error) {
     console.error('导出 AIR 失败:', error)
     alert('❌ 导出失败')
-  }
-}
-
-// 打开所有链接
-const openAllUrls = () => {
-  try {
-    // 按 model_id 去重
-    const modelIdToUrl = new Map<number, string>()
-    allModels.value.forEach(model => {
-      if (model.web_page_url && !modelIdToUrl.has(model.model_id)) {
-        modelIdToUrl.set(model.model_id, model.web_page_url)
-      }
-    })
-    
-    const urls = Array.from(modelIdToUrl.values())
-    
-    if (urls.length === 0) {
-      alert('❌ 没有找到任何模型的网页链接')
-      return
-    }
-    
-    urls.forEach(url => window.open(url, '_blank'))
-    alert(`✅ 已在浏览器中打开 ${urls.length} 个模型链接（共 ${allModels.value.length} 个模型，已去重）`)
-  } catch (error) {
-    console.error('打开链接失败:', error)
-    alert('❌ 打开失败')
   }
 }
 
@@ -837,6 +816,15 @@ const batchImport = async () => {
     }
   }
 }
+
+// 监听对话框打开，自动读取剪贴板
+watch(showImportDialog, async (newVal) => {
+  if (newVal) {
+    // 对话框打开时，等待DOM更新后自动读取剪贴板
+    await nextTick()
+    loadFromClipboard()
+  }
+})
 
 // 取消导入
 const cancelImport = () => {
@@ -992,6 +980,9 @@ watch(() => contextMenu.value.show, (show) => {
 onMounted(async () => {
   // 初始化 store
   projectStore.init()
+  
+  // 初始化隐私模式
+  initPrivacyMode()
   
   // 确保项目列表已加载
   if (projectStore.projects.length === 0) {

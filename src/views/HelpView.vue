@@ -91,6 +91,7 @@ import '../styles/highlight.css'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import axios from 'axios'
+import { getApiBaseURL } from '../utils/apiConfig'
 import { LanguageIcon } from '@heroicons/vue/24/outline'
 
 const themeStore = useThemeStore()
@@ -261,7 +262,7 @@ const loadHelp = async () => {
   
   try {
     // 直接使用 axios 而不是 api 实例，避免拦截器处理 text 响应
-    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7864'
+    const baseURL = getApiBaseURL()
     const response = await axios.get(`${baseURL}/help/`, {
       params: {
         lang: currentLang.value

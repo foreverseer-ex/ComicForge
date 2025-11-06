@@ -26,13 +26,18 @@ class JobService:
         :param job: 任务对象
         :return: 创建后的任务对象
         """
-        with DatabaseSession() as db:
-            db.add(job)
-            db.flush()
-            db.refresh(job)
-            db.expunge(job)
-            logger.info(f"创建任务: {job.job_id}")
-        return job
+        try:
+            with DatabaseSession() as db:
+                db.add(job)
+                db.flush()
+                db.refresh(job)
+                db.expunge(job)
+                logger.info(f"创建任务: {job.job_id}")
+            return job
+        except Exception as e:
+            import traceback
+            logger.exception(f"创建任务失败: job_id={job.job_id}, error={e}\n{traceback.format_exc()}")
+            raise
     
     @classmethod
     def get(cls, job_id: str) -> Optional[Job]:
@@ -52,7 +57,7 @@ class JobService:
         return job
     
     @classmethod
-    def list(cls, limit: Optional[int] = None, offset: int = 0) -> list[Job]:
+    def get_all(cls, limit: Optional[int] = None, offset: int = 0) -> list[Job]:
         """
         获取任务列表。
         
@@ -72,6 +77,33 @@ class JobService:
             return list(jobs)
     
     @classmethod
+    def update(cls, job_id: str, **kwargs) -> Optional[Job]:
+        """
+        更新任务。
+        
+        :param job_id: 任务 ID
+        :param kwargs: 要更新的字段
+        :return: 更新后的任务对象，如果不存在则返回 None
+        """
+        with DatabaseSession() as db:
+            job = db.get(Job, job_id)
+            if not job:
+                logger.warning(f"任务不存在，无法更新: {job_id}")
+                return None
+            
+            # 更新字段
+            for key, value in kwargs.items():
+                if hasattr(job, key):
+                    setattr(job, key, value)
+            
+            db.add(job)
+            db.flush()
+            db.refresh(job)
+            db.expunge(job)
+            logger.info(f"更新任务: {job_id}")
+            return job
+    
+    @classmethod
     def delete(cls, job_id: str) -> bool:
         """
         删除任务。
@@ -88,6 +120,49 @@ class JobService:
             db.delete(job)
             logger.info(f"删除任务: {job_id}")
             return True
+    
+    @classmethod
+    def delete_batch(cls, job_ids: list[str]) -> int:
+        """
+        批量删除任务。
+        
+        :param job_ids: 任务 ID 列表
+        :return: 成功删除的任务数量
+        """
+        if not job_ids:
+            return 0
+        
+        with DatabaseSession() as db:
+            count = 0
+            for job_id in job_ids:
+                job = db.get(Job, job_id)
+                if job:
+                    db.delete(job)
+                    count += 1
+                    logger.debug(f"删除任务: {job_id}")
+                else:
+                    logger.warning(f"任务不存在，跳过删除: {job_id}")
+            
+            logger.info(f"批量删除任务: {count}/{len(job_ids)} 条")
+            return count
+    
+    @classmethod
+    def clear(cls) -> int:
+        """
+        清空所有任务。
+        
+        :return: 删除的任务数量
+        """
+        with DatabaseSession() as db:
+            statement = select(Job)
+            jobs = db.exec(statement).all()
+            count = len(jobs)
+            
+            for job in jobs:
+                db.delete(job)
+            
+            logger.info(f"清空所有任务: {count} 条")
+            return count
 
 
 class BatchJobService:
@@ -131,7 +206,7 @@ class BatchJobService:
         return batch_job
     
     @classmethod
-    def list(cls, limit: Optional[int] = None, offset: int = 0) -> list[BatchJob]:
+    def get_all(cls, limit: Optional[int] = None, offset: int = 0) -> list[BatchJob]:
         """
         获取批次任务列表。
         
@@ -248,4 +323,22 @@ class BatchJobService:
             db.delete(batch_job)
             logger.info(f"删除批次任务: {batch_id}")
             return True
+    
+    @classmethod
+    def clear(cls) -> int:
+        """
+        清空所有批次任务。
+        
+        :return: 删除的批次任务数量
+        """
+        with DatabaseSession() as db:
+            statement = select(BatchJob)
+            batch_jobs = db.exec(statement).all()
+            count = len(batch_jobs)
+            
+            for batch_job in batch_jobs:
+                db.delete(batch_job)
+            
+            logger.info(f"清空所有批次任务: {count} 条")
+            return count
 

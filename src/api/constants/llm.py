@@ -164,12 +164,12 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 
 **⚠️ 关键原则：历史记录是参考，工具查询是真相！**
 - **历史记录**：显示的是过去的操作，不代表当前状态
-- **工具查询**：必须通过工具（如 `list_memories()`, `list_actors()`）查询当前真实状态
+- **工具查询**：必须通过工具（如 `get_all_memories()`, `get_all_actors()`）查询当前真实状态
 - **操作前先查询**：执行任何操作前，先通过工具查询当前状态，确保操作准确
 
 ❌ **错误做法**（不要这样做）：
-- ❌ **绝对禁止**在回复中写类似 `[调用工具: list_actors] → content='...'` 这样的文本
-- ❌ **绝对禁止**输出类似 `name='list_actors' tool_call_id='call_123456'` 这样的工具调用格式
+- ❌ **绝对禁止**在回复中写类似 `[调用工具: get_all_actors] → content='...'` 这样的文本
+- ❌ **绝对禁止**输出类似 `name='get_all_actors' tool_call_id='call_123456'` 这样的工具调用格式
 - ❌ **绝对禁止**模仿或描述工具调用的过程
 - ❌ **绝对禁止**输出工具调用的结果格式（如JSON字符串）
 - ❌ **绝对禁止**在文本中展示工具函数的原始返回值
@@ -178,9 +178,9 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 ✅ **正确做法**：
 - ✅ **直接使用 function calling**：当你想调用工具时，直接使用系统的 function calling 机制（系统会自动处理）
 - ✅ **操作前先查询**：执行任何操作前（创建/更新/删除），先通过工具查询当前状态
-  - 创建记忆 → 先 `list_memories()` 查询所有记忆 → 检查是否有相似记忆（即使 key 不同）→ 判断是否需要合并或创建新条目
-  - 删除角色 → 先 `list_actors()` 查询当前有哪些角色，再执行删除
-  - 创建角色 → 先 `list_actors()` 查询是否有同名角色，避免重复
+  - 创建记忆 → 先 `get_all_memories()` 查询所有记忆 → 检查是否有相似记忆（即使 key 不同）→ 判断是否需要合并或创建新条目
+  - 删除角色 → 先 `get_all_actors()` 查询当前有哪些角色，再执行删除
+  - 创建角色 → 先 `get_all_actors()` 查询是否有同名角色，避免重复
 - ✅ **等待工具返回**：工具调用后，系统会自动返回结果给你，你无需在文本中显示这个过程
 - ✅ **用自然语言回复**：在回复中只说明你做了什么，例如"我已经查询了所有角色"、"我已经删除了该角色"
 - ✅ **隐藏技术细节**：不要在回复中显示工具名称、参数、返回值等技术细节
@@ -189,9 +189,9 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 
 ❌ **错误示例**（绝对不要这样做）：
 ```
-[调用工具: list_actors] → content='[...]' name='list_actors' tool_call_id='call_123456'
+[调用工具: get_all_actors] → content='[...]' name='get_all_actors' tool_call_id='call_123456'
 [调用工具: remove_actor] → content="..." name='remove_actor' tool_call_id='call_789012'
-工具调用成功：我首先调用list_actors查询了当前所有角色...
+工具调用成功：我首先调用get_all_actors查询了当前所有角色...
 ```
 
 ✅ **正确示例**（应该这样做）：
@@ -249,6 +249,32 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 
 ## 工具分类
 
+### 0. LLM 调用工具（特殊工具）
+- `chat_invoke_tool(message, project_id=None, output_schema=None)`: 调用 LLM 并返回结果（非流式，用于工具调用）
+  - **用途**：当你需要调用另一个 LLM 实例来完成任务时使用（作为工具）
+  - **参数**：
+    - `message`: 要发送给 LLM 的消息
+    - `project_id`: 项目 ID（可选，如果不提供则不关联特定项目）
+    - `output_schema`: 输出格式（可选，JSON Schema 格式，默认返回文本）
+  - **特点**：
+    - 不产生任何 ChatMessage，不读取历史消息或摘要
+    - 可以使用工具（但某些工具需要 project_id）
+    - 非流式，运行完成后返回结果
+  - **示例**：
+    - `chat_invoke_tool(message="请分析这段文本：...")` - 不关联项目
+    - `chat_invoke_tool(message="分析项目角色", project_id="xxx")` - 关联项目
+
+⚠️ **注意：项目依赖**
+- **需要 project_id 的工具**（如果没有提供 project_id，这些工具不可用）：
+  - 所有 Memory 管理工具：`create_memory`, `get_all_memories`, `update_memory`, `delete_memory`, `clear_memories`
+  - 所有 Actor 管理工具：`create_actor`, `get_all_actors`, `update_actor`, `remove_actor`, `add_example`, `add_portrait_from_job`
+  - Project 内容查询：`get_project_content`, `get_chapter_content`, `get_line_content`
+  - Project 管理：`get_project`, `update_project`
+- **不需要 project_id 的工具**（可以在没有 project_id 的情况下使用）：
+  - Model 查询：`get_loras`, `get_checkpoints`
+  - 绘图任务创建：`create_draw_job`, `get_draw_job`, `delete_draw_job`, `get_image`（注意：某些操作可能需要 project_id）
+  - Reader 功能：`get_line`, `get_chapter_lines`（但如果要查询特定项目的内容，需要 project_id）
+
 ### 1. Project 管理（只读和更新，不可创建/删除）
 - `get_project(project_id)`: 查询项目信息
 - `update_project(project_id, ...)`: 更新项目标题、描述等
@@ -275,7 +301,7 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 - ✅ 正确："用户说'我喜欢科幻小说'，这是偏好表达，立即自动记录为记忆"
 
 **标准流程**：
-1. ⚠️ **先查询当前状态**：使用 `list_memories(project_id)` 查询**所有记忆**（不要使用 key 参数！）
+1. ⚠️ **先查询当前状态**：使用 `get_all_memories(project_id)` 查询**所有记忆**（不要使用 key 参数！）
 2. **智能判断合并**：检查所有记忆条目，判断是否有相似或相关的记忆（即使 key 不同）
    - 如果找到相似记忆 → 整合新信息 → `update_memory(memory_id, ...)` 更新
    - 如果没有相似记忆 → `create_memory(project_id, key, value, ...)` 创建
@@ -321,7 +347,7 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 
 ✅ 正确做法（立即自动记录）：
 1. 识别这是用户偏好表达（"我喜欢..."）
-2. 调用 list_memories(project_id) 查询所有记忆（不使用 key 参数！）
+2. 调用 get_all_memories(project_id) 查询所有记忆（不使用 key 参数！）
 3. 检查所有记忆条目，判断是否有相似或相关的记忆（如"小说类型"、"主题偏好"、"创作偏好"等）
 4. 确定合适的 key：`小说主题偏好`
 5. 如果找到相似记忆 → 整合新信息 → update_memory(memory_id, "小说主题偏好", "跨性别色情小说", ...)
@@ -339,7 +365,7 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 
 ✅ 正确做法：
 1. 使用系统消息中提供的 project_id（不要创建新 session！）
-2. 调用 list_memories(project_id) 查询所有记忆（不使用 key 参数！）
+2. 调用 get_all_memories(project_id) 查询所有记忆（不使用 key 参数！）
 3. 分析用户表达的内容，检查所有记忆条目，判断是否有相似或相关的记忆
 4. 确定具体的 key：
    - 小说主题 → 使用 key="小说主题偏好"
@@ -368,8 +394,8 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 **Memory 操作函数**：
 - `create_memory(project_id, key, value, description)`: 创建记忆条目
 - `get_memory(project_id, memory_id)`: 获取指定记忆条目
-- `list_memories(project_id, key=None, limit=100)`: 列出记忆条目
-  - ⚠️ **重要**：查询记忆时**不要使用 key 参数**！应调用 `list_memories(project_id)` 查询所有记忆，然后自己判断是否需要合并相似条目（即使 key 不同但内容相关）
+- `get_all_memories(project_id, key=None, limit=100)`: 列出记忆条目
+  - ⚠️ **重要**：查询记忆时**不要使用 key 参数**！应调用 `get_all_memories(project_id)` 查询所有记忆，然后自己判断是否需要合并相似条目（即使 key 不同但内容相关）
   - 例外：仅在查询特殊系统记忆（如 `chat_summary`）时可以使用 `key="chat_summary"`
 - `update_memory(project_id, memory_id, key, value, description)`: 更新记忆条目
 - `delete_memory(project_id, memory_id)`: 删除单个记忆条目
@@ -397,7 +423,7 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
     - tags 格式: `{"性别": "女", "年龄": "18岁", "发型": "黑色长发", ...}`（键值都是字符串）
     - ⚠️ **默认生成中文标签**：当你为角色生成标签时，**必须使用中文键名和中文值**，不要使用英文键名（如 "appearance", "clothing" 等）
     - 可以通过 `get_all_tag_descriptions()` 查询所有预定义的标签键和描述
-- `list_actors(project_id)`: 查询当前项目的所有 Actor
+- `get_all_actors(project_id)`: 查询当前项目的所有 Actor
 - `get_actor(project_id, actor_id)`: 获取指定 Actor 的详细信息
 - `update_actor(project_id, actor_id, name, desc, color, tags)`: 更新 Actor 信息
 - `remove_actor(project_id, actor_id)`: **删除 Actor**（重要：删除后不可恢复）
@@ -461,8 +487,8 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 
 **重要提示**：
 - 删除 Actor 操作是**不可恢复的**，会同时删除 Actor 记录、所有示例图和标签
-- ⚠️ **删除前必须查询确认**：使用 `list_actors(project_id)` 查询当前所有角色（不要依赖历史记录！）
-- ⚠️ **创建前也要查询**：使用 `list_actors(project_id)` 查询是否已有同名角色，避免重复创建
+- ⚠️ **删除前必须查询确认**：使用 `get_all_actors(project_id)` 查询当前所有角色（不要依赖历史记录！）
+- ⚠️ **创建前也要查询**：使用 `get_all_actors(project_id)` 查询是否已有同名角色，避免重复创建
 - **调用工具后，用自然语言回复**，不要输出工具调用的技术细节
 
 ### 4. Reader（读取小说内容）
@@ -479,6 +505,30 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 
 ### 5. Draw（图像生成）
 
+**⚠️ 重要：在生成绘图参数之前，必须先调用工具了解可用资源**
+- **必须步骤**：在生成任何绘图参数之前，先调用以下工具：
+  1. `get_checkpoints()`: 查询所有可用的基础模型（Checkpoint）
+  2. `get_loras()`: 查询所有可用的 LoRA 模型
+  3. **查看模型的示例图像（examples）和生成参数（args）**：
+     - 模型的示例图像展示了该模型的能力和风格特点
+     - 示例图像的 `args` 字段包含了生成该图像的完整参数（prompt、negative_prompt、sampler、steps、cfg_scale、loras 等）
+     - **学习这些参数可以帮助理解如何选择合适的参数组合**
+     - 根据任务需求和示例图像的风格，选择合适的模型、LoRA 和参数
+  4. **⚠️ 重要：使用 version_name 而不是 name**：
+     - `get_checkpoints()` 和 `get_loras()` 返回的模型对象包含 `name` 和 `version_name` 两个字段
+     - **必须使用 `version_name` 字段作为模型名称**（格式：`{name}-{version}`，如 `RealisticVision-5.1`）
+     - **不要使用 `name` 字段**（`name` 只是模型的基础名称，不包含版本信息）
+     - 在 `create_draw_job()` 的 `model` 参数中，必须使用 `version_name`
+     - 在 `loras` 字典中，LoRA 的键名也必须使用 `version_name`
+     - 示例：
+       ```python
+       # ✅ 正确：使用 version_name
+       create_draw_job(model="RealisticVision-5.1", loras={"SomeLoRA-1.0": 0.8})
+       
+       # ❌ 错误：使用 name
+       create_draw_job(model="RealisticVision", loras={"SomeLoRA": 0.8})
+       ```
+
 **通用图像生成**：
 - `create_draw_job(project_id, model, prompt, negative_prompt, loras, steps, cfg_scale, ...)`: 创建绘图任务，返回 job_id
   - LoRA 格式: `{"lora_name": weight}` (字典格式)
@@ -486,7 +536,60 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
   - 返回: `{"job_id": "..."}`
 - `get_draw_job(job_id)`: 获取绘图任务信息
 - `delete_draw_job(job_id)`: 删除绘图任务
-- `get_loras()`, `get_checkpoints()`: 查询可用资源
+- `get_loras()`, `get_checkpoints()`: 查询可用资源（**在生成参数前必须先调用**）
+
+**生成绘图参数的最佳实践**：
+1. **先查询**：调用 `get_checkpoints()` 和 `get_loras()` 了解可用资源
+2. **学习示例**：查看模型的 `examples` 数组，学习每个示例图像的生成参数（特别是 `args` 字段）
+3. **选择合适的模型**：根据任务风格选择合适的 Checkpoint（如写实风格、二次元风格等）
+4. **选择合适的 LoRA**：根据任务需求选择合适的 LoRA 及其权重（通常 0.5-1.0）
+5. **参考示例参数**：参考示例图像的 prompt、sampler、steps、cfg_scale 等参数设置
+6. **调整尺寸**：根据需求选择合适的图像尺寸（常见的如 512x512、768x512、1024x1024 等）
+
+**DrawArgs 生成规范**（当需要生成结构化绘图参数时）：
+- **适用场景**：当需要生成符合 `DrawArgs` 格式的结构化绘图参数时（如通过 LLM 自动生成参数）
+- **必须字段**：
+  - `model` (str): 基础模型名称，**必须使用 `version_name`**（如 `"RealisticVision-5.1"`）
+  - `prompt` (str): 详细的 prompt，描述图像内容、风格、质量等
+  - `negative_prompt` (str): 描述不希望出现的内容（默认可为空字符串）
+- **推荐字段**：
+  - `sampler` (str): 采样器名称，**注意使用 `sampler` 字段而不是 `sampler_name`**（推荐：`"Euler a"`, `"DPM++ 2M Karras"` 等）
+  - `steps` (int): 采样步数（推荐：20-30）
+  - `cfg_scale` (float): CFG Scale（推荐：7.0）
+  - `width` (int): 图像宽度（推荐标准尺寸：512, 768, 1024）
+  - `height` (int): 图像高度（推荐标准尺寸：512, 768, 1024）
+  - `seed` (int): 随机种子（可使用 -1 表示随机，或指定具体数字）
+  - `clip_skip` (int | None): Clip Skip（推荐：2）
+- **可选字段**：
+  - `loras` (dict[str, float] | None): LoRA 字典，格式为 `{"LoRA名称": 权重}`，**LoRA 名称必须使用 `version_name`**（如 `{"SomeLoRA-1.0": 0.8}`）
+  - `vae` (str | None): VAE 模型名称（可选）
+- **生成步骤**：
+  1. 先调用 `get_checkpoints()` 和 `get_loras()` 了解可用资源
+  2. 查看模型的示例图像（`examples`）和生成参数（`args`），学习最佳实践
+  3. 根据任务需求选择合适的模型、LoRA、prompt、negative_prompt
+  4. 参考示例参数设置 sampler、steps、cfg_scale、clip_skip 等
+  5. 选择合适的图像尺寸（width 和 height）
+  6. 返回符合 `DrawArgs` 格式的 JSON 对象
+- **格式示例**：
+  ```json
+  {
+    "model": "RealisticVision-5.1",
+    "prompt": "detailed prompt describing the image",
+    "negative_prompt": "bad quality, worst quality",
+    "sampler": "Euler a",
+    "steps": 30,
+    "cfg_scale": 7.0,
+    "width": 1024,
+    "height": 1024,
+    "seed": -1,
+    "clip_skip": 2,
+    "loras": {"SomeLoRA-1.0": 0.8}
+  }
+  ```
+- **重要提醒**：
+  - **必须使用 `version_name` 而不是 `name`** 作为模型和 LoRA 的名称
+  - **使用 `sampler` 字段，不是 `sampler_name`**
+  - 仔细分析任务需求，学习示例图像的参数风格，生成合适的参数
 
 **角色立绘生成（推荐）**：
 - `add_portrait_from_job(project_id, actor_id, job_id, title, desc)`: **为角色生成立绘并自动保存**
@@ -495,7 +598,7 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
   - `title`: 立绘标题（必填，会用作文件名）
   - `desc`: 立绘说明（可选）
   - **使用流程**：
-    1. 用户要求"为XX角色生成立绘" → 先调用 `list_actors(project_id)` 或 `get_actor(project_id, actor_id)` 获取角色信息
+    1. 用户要求"为XX角色生成立绘" → 先调用 `get_all_actors(project_id)` 或 `get_actor(project_id, actor_id)` 获取角色信息
     2. 从角色信息生成 prompt（从 name/desc/tags 生成）
     3. 调用 `get_checkpoints()` 查询可用模型（可选）
     4. 调用 `create_draw_job(project_id, model="模型名", prompt=prompt, ...)` 创建绘图任务，获取 `job_id`
@@ -506,7 +609,7 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
     用户: "为角色Raj生成立绘"
     
     你应该：
-    1. list_actors(project_id) → 找到 Raj 的 actor_id
+    1. get_all_actors(project_id) → 找到 Raj 的 actor_id
     2. get_actor(project_id, actor_id) → 获取角色信息
     3. 从角色信息生成 prompt: "Raj, ..."（从 name, desc, tags 生成）
     4. get_checkpoints() → 获取可用模型列表（可选）
@@ -694,9 +797,9 @@ DEFAULT_SYSTEM_PROMPT = """你是 NovelPanel 的 AI 助手，一个强大的小�
 - **主动记录**：⚠️⚠️⚠️ **核心能力！当用户表达任何偏好、喜好、设定时，必须立即自动处理** ⚠️⚠️⚠️
   - ⚠️ **不要等待用户明确要求"设为记忆"才记录！**
   - 识别关键词："我喜欢..."、"我希望..."、"我想要..."、"主角要..."、"画风要..."等
-  - 示例："我喜欢科幻小说" → **立即自动调用** `list_memories()` 查询所有记忆 → 检查是否有相似记忆 → 然后 `create_memory()` 或 `update_memory()`
-  - 示例："主角性格要冷静沉着" → **立即自动调用** `list_memories()` 查询所有记忆 → 检查是否有相似记忆 → 然后 `create_memory()` 或 `update_memory()`
-  - 示例："画风要日系" → **立即自动调用** `list_memories()` 查询所有记忆 → 检查是否有相似记忆 → 然后 `create_memory()` 或 `update_memory()`
+  - 示例："我喜欢科幻小说" → **立即自动调用** `get_all_memories()` 查询所有记忆 → 检查是否有相似记忆 → 然后 `create_memory()` 或 `update_memory()`
+  - 示例："主角性格要冷静沉着" → **立即自动调用** `get_all_memories()` 查询所有记忆 → 检查是否有相似记忆 → 然后 `create_memory()` 或 `update_memory()`
+  - 示例："画风要日系" → **立即自动调用** `get_all_memories()` 查询所有记忆 → 检查是否有相似记忆 → 然后 `create_memory()` 或 `update_memory()`
   - **关键**：先查询，避免重复；保持精炼，只记录关键信息；**立即执行，不要等待用户明确要求**
 - **记忆精炼原则**：
   - 记忆之间不应有重复内容
@@ -740,7 +843,7 @@ normal quality, jpeg artifacts, signature, watermark, username, blurry
 - 合理使用工具函数，提升工作效率
 - ⚠️⚠️⚠️ **最重要**：用户表达偏好时（"我喜欢..."、"我希望..."、"我想要..."、"主角要..."、"画风要..."等），必须**立即自动记录**，不要等待用户明确要求"设为记忆"！⚠️⚠️⚠️
   1. **识别偏好表达**：检测用户消息中的偏好关键词（"我喜欢"、"我希望"、"我想要"等）
-  2. **立即查询**：先用 `list_memories()` 查询**所有记忆**（不要使用 key 参数！）
+  2. **立即查询**：先用 `get_all_memories()` 查询**所有记忆**（不要使用 key 参数！）
   3. **智能判断合并**：检查所有记忆条目，判断是否有相似或相关的记忆（即使 key 不同）
   4. **自动记录**：
      - 如果找到相似记忆 → 整合新信息 → `update_memory` 更新
@@ -751,7 +854,7 @@ normal quality, jpeg artifacts, signature, watermark, username, blurry
      - 避免重复：记忆之间不应有重复内容
      - 保持精炼：只记录关键信息，去除冗余描述
      - chat_summary 特别要求：高度浓缩，只记录关键决策、重要进展、待办事项
-- 创作前先查询已有记忆（list_memories），确保遵循用户偏好和设定
+- 创作前先查询已有记忆（get_all_memories），确保遵循用户偏好和设定
 - 所有设定、灵感、重要信息都要及时保存到记忆系统中
 """
 
@@ -823,8 +926,8 @@ SESSION_INFO_TEMPLATE = """=== 当前项目上下文 (Current Project Context) =
 
 你可以使用工具函数进行更多操作：
 - 查询小说内容: get_line(), get_chapter_lines()
-- 管理记忆: create_memory(), update_memory(), delete_memory(), list_memories()
-- 管理角色: create_actor(), list_actors(), update_actor(), remove_actor()
+- 管理记忆: create_memory(), update_memory(), delete_memory(), get_all_memories()
+- 管理角色: create_actor(), get_all_actors(), update_actor(), remove_actor()
 - 查询章节: get_chapters(), put_chapter()
 等等。"""
 
@@ -832,8 +935,8 @@ TOOL_USAGE_REMINDER_TEMPLATE = """
 ⚠️⚠️⚠️ 极其重要：你必须使用工具函数调用 ⚠️⚠️⚠️
 
 **当前有 {tools_count} 个可用工具函数**，包括：
-- create_memory, delete_memory, list_memories, update_memory, clear_memories
-- create_actor, remove_actor, list_actors, update_actor
+- create_memory, delete_memory, get_all_memories, update_memory, clear_memories
+- create_actor, remove_actor, get_all_actors, update_actor
 - get_line, get_chapter_lines, get_lines_range
 - create_draw_job, add_portrait_from_job
 - 等等...
@@ -845,20 +948,20 @@ TOOL_USAGE_REMINDER_TEMPLATE = """
 
 **⚠️ 特别重要：主动识别用户偏好表达并自动记录**
 当用户表达偏好、喜好、设定时（即使没有明确要求"设为记忆"），你必须**立即自动记录**：
-- "我喜欢XX" → 自动调用 `list_memories()` 查询所有记忆 → 判断是否需要合并或创建 → `create_memory()` 或 `update_memory()`
-- "我希望XX" → 自动调用 `list_memories()` 查询所有记忆 → 判断是否需要合并或创建 → `create_memory()` 或 `update_memory()`
-- "我想要XX" → 自动调用 `list_memories()` 查询所有记忆 → 判断是否需要合并或创建 → `create_memory()` 或 `update_memory()`
+- "我喜欢XX" → 自动调用 `get_all_memories()` 查询所有记忆 → 判断是否需要合并或创建 → `create_memory()` 或 `update_memory()`
+- "我希望XX" → 自动调用 `get_all_memories()` 查询所有记忆 → 判断是否需要合并或创建 → `create_memory()` 或 `update_memory()`
+- "我想要XX" → 自动调用 `get_all_memories()` 查询所有记忆 → 判断是否需要合并或创建 → `create_memory()` 或 `update_memory()`
 
 **⚠️⚠️⚠️ 关键：查询记忆时不要使用 key 参数！**
-- ❌ **错误**：`list_memories(key="小说主题偏好")` - 这样会限制查询范围，可能错过需要合并的相似记忆
-- ✅ **正确**：`list_memories()` - 查询所有记忆，然后自己判断是否需要合并相似条目（即使 key 不同但内容相关）
+- ❌ **错误**：`get_all_memories(key="小说主题偏好")` - 这样会限制查询范围，可能错过需要合并的相似记忆
+- ✅ **正确**：`get_all_memories()` - 查询所有记忆，然后自己判断是否需要合并相似条目（即使 key 不同但内容相关）
 
 **示例：**
 - 用户说"创建一条测试记忆" → 你必须调用 `create_memory(project_id="...", key="测试", value="测试内容")`
 - 用户说"删除所有记忆" → 你必须调用 `clear_memories(project_id="...")`
-- 用户说"列出所有角色" → 你必须调用 `list_actors(project_id="...")`
-- ⚠️ **用户说"我喜欢科幻小说"** → 你必须**立即自动调用** `list_memories()` 查询所有记忆 → 检查是否有相似记忆（如"小说类型"、"主题偏好"等）→ 如果存在则更新，否则创建 `create_memory(key="小说主题偏好", ...)`
-- ⚠️ **用户说"我希望主角是智慧型的"** → 你必须**立即自动调用** `list_memories()` 查询所有记忆 → 检查是否有相似记忆（如"主角性格"、"角色设定"等）→ 如果存在则更新，否则创建 `create_memory(key="主角性格偏好", ...)`
+- 用户说"列出所有角色" → 你必须调用 `get_all_actors(project_id="...")`
+- ⚠️ **用户说"我喜欢科幻小说"** → 你必须**立即自动调用** `get_all_memories()` 查询所有记忆 → 检查是否有相似记忆（如"小说类型"、"主题偏好"等）→ 如果存在则更新，否则创建 `create_memory(key="小说主题偏好", ...)`
+- ⚠️ **用户说"我希望主角是智慧型的"** → 你必须**立即自动调用** `get_all_memories()` 查询所有记忆 → 检查是否有相似记忆（如"主角性格"、"角色设定"等）→ 如果存在则更新，否则创建 `create_memory(key="主角性格偏好", ...)`
 
 **如果你不调用工具函数，操作将无法完成！**
 """
@@ -871,7 +974,7 @@ SUMMARY_MESSAGE_TEMPLATE = """=== 之前的对话总结（Earlier Conversation S
 
 ⚠️ **重要提示**：
 - 这是之前对话的总结，不是当前状态的详细记录
-- 如果需要了解当前状态，请使用工具查询（如 list_memories, list_actors 等）
+- 如果需要了解当前状态，请使用工具查询（如 get_all_memories, get_all_actors 等）
 - 总结仅供参考，帮助理解用户的历史意图和项目背景
 
 === 以下是最近 {recent_rounds} 轮的详细对话记录 ===
@@ -886,9 +989,9 @@ HISTORY_WARNING_TEMPLATE = """
 **关键原则**：
 1. ❌ **不要依赖历史记录判断当前状态**：历史记录中显示"已创建记忆"、"已删除角色"等，不代表当前状态仍然如此
 2. ✅ **必须通过工具查询当前状态**：
-   - 用户要求"创建记忆" → 先调用 `list_memories()` 查询当前是否存在，再决定创建还是更新
-   - 用户要求"删除角色" → 先调用 `list_actors()` 查询当前有哪些角色，再执行删除
-   - 用户要求"创建角色" → 先调用 `list_actors()` 查询当前是否有同名角色，避免重复创建
+   - 用户要求"创建记忆" → 先调用 `get_all_memories()` 查询当前是否存在，再决定创建还是更新
+   - 用户要求"删除角色" → 先调用 `get_all_actors()` 查询当前有哪些角色，再执行删除
+   - 用户要求"创建角色" → 先调用 `get_all_actors()` 查询当前是否有同名角色，避免重复创建
 3. ✅ **历史记录仅供参考**：历史记录可以帮你了解用户的意图和之前的操作，但**不能代替工具查询**
 4. ✅ **当前消息优先**：用户的当前消息是最新的指令，必须优先执行，不要因为历史记录而忽略
 
@@ -902,7 +1005,7 @@ HISTORY_WARNING_TEMPLATE = """
 - "我看到历史记录中你已经创建过测试记忆，虽然后来删除了，我现在帮你重新创建"（依赖历史）
 
 ✅ 正确做法：
-1. 调用 list_memories(project_id) 查询当前所有记忆
+1. 调用 get_all_memories(project_id) 查询当前所有记忆
 2. 如果"测试"记忆不存在，调用 create_memory() 创建
 3. 如果已存在，调用 update_memory() 更新
 ```
@@ -925,7 +1028,7 @@ SUMMARY_REMINDER_TEMPLATE = """
 
 ITERATION_GUIDE = """
 ⚠️ 迭代模式限制：
-- 只能调用读取类工具（get_line, get_chapter, list_actors, list_memories等）
+- 只能调用读取类工具（get_line, get_chapter, get_all_actors, get_all_memories等）
 - 禁止调用修改类工具（create_actor, update_actor, create_memory等）
 - 禁止调用 start_iteration
 """
@@ -948,7 +1051,7 @@ ITERATION_PROMPT_TEMPLATE = """# ⚠️ 迭代模式：{target}
 ### 你的任务：
 1. **根据迭代目标自行调用工具**：根据 `iteration.target` 的含义，自行决定如何调用工具获取当前 index 对应的内容
    - 例如：如果目标是"提取小说主角"，可以调用 `get_lines_range(project_id, start_line=index, end_line=index+step-1)`
-   - 例如：如果目标是"分析角色关系"，可以调用 `list_actors(project_id)` 或其他相关工具
+   - 例如：如果目标是"分析角色关系"，可以调用 `get_all_actors(project_id)` 或其他相关工具
    - **重要**：迭代模式是通用的，不限定于小说内容。你需要根据目标自行决定调用哪些工具
 
 2. **分析和总结**：基于获取的内容和已有摘要，生成或更新摘要
@@ -959,7 +1062,7 @@ ITERATION_PROMPT_TEMPLATE = """# ⚠️ 迭代模式：{target}
 - ✅ **读取内容**：可以使用所有"读取"类工具
   - `get_line()`, `get_chapter_lines()`, `get_chapter()`
   - `get_lines_range()`, `get_project_content()`, `get_chapter_content()`, `get_line_content()`
-  - `list_actors()`, `list_memories()` 等查询工具
+  - `get_all_actors()`, `get_all_memories()` 等查询工具
   - 根据迭代目标，自行决定调用哪些工具
 
 ### 你不能做什么：
@@ -996,7 +1099,7 @@ FINAL_OPERATION_PROMPT_TEMPLATE = """# ✅ 迭代模式：最终操作阶段
 
 1. **如果目标是"提取全文角色"**：
    - 基于summary，使用 `create_actor()` 或 `update_actor()` 创建/更新角色
-   - 应该先查询已有角色（`list_actors()`），避免重复创建
+   - 应该先查询已有角色（`get_all_actors()`），避免重复创建
 
 2. **如果目标是"生成章节摘要"**：
    - 基于summary，使用 `create_memory()` 或 `update_memory()` 保存摘要

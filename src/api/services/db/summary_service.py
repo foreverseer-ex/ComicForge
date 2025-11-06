@@ -58,7 +58,7 @@ class SummaryService:
             return summary
 
     @classmethod
-    def list(cls, project_id: str, limit: Optional[int] = None, offset: int = 0) -> list[
+    def get_all(cls, project_id: str, limit: Optional[int] = None, offset: int = 0) -> list[
         ChapterSummary]:
         """
         根据会话 ID 获取章节摘要列表。

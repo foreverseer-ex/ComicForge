@@ -113,7 +113,7 @@ async def get_chapters(project_id: str) -> List[ChapterSummary]:
     Returns:
         章节摘要列表
     """
-    return SummaryService.list(project_id)
+    return SummaryService.get_all(project_id)
 
 
 @router.get("/chapter", summary="获取章节详情", response_model=ChapterSummary)

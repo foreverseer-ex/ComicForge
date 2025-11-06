@@ -33,7 +33,7 @@ export const useProjectStore = defineStore('project', () => {
   // 加载项目列表
   const loadProjects = async () => {
     try {
-      const data = await api.get('/project/list', {
+      const data = await api.get('/project/all', {
         params: { limit: 100, offset: 0 }
       })
       projects.value = Array.isArray(data) ? data : []

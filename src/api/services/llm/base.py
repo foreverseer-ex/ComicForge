@@ -7,15 +7,15 @@ import functools
 import json
 import uuid
 from abc import ABC, abstractmethod
-from typing import Optional, List, AsyncGenerator
+from typing import Optional, List, AsyncGenerator, Any, Dict
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, AIMessage
 from langchain_core.tools import tool, BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
 from pydantic_core import to_jsonable_python
-
+from api.services.db.project_service import ProjectService
 from api.constants.llm import (
     DEVELOP_MODE_PROMPTS, MCP_TOOLS_GUIDE,
     ERROR_SD_FORGE_CONNECTION, ERROR_CONNECTION_FAILED, ERROR_TOOL_CALL_FAILED,
@@ -24,18 +24,19 @@ from api.constants.llm import (
     SUMMARY_MESSAGE_TEMPLATE, ITERATION_GUIDE, ITERATION_PROMPT_TEMPLATE, FINAL_OPERATION_PROMPT_TEMPLATE,
 )
 from api.routers.actor import (
-    create_actor, get_actor, list_actors, update_actor,
+    create_actor, get_actor, get_all_actors, update_actor,
     remove_actor, get_tag_description, get_all_tag_descriptions,
-    add_example, remove_example, add_portrait_from_job
+    add_example, remove_example, add_portrait_from_job_tool
 )
 from api.routers.draw import (
-    get_loras, get_checkpoints, create_draw_job, get_draw_job, delete_draw_job, get_image,
+    create_draw_job, get_draw_job, delete_draw_job, get_image,
 )
-from api.routers.llm import (
-    add_choices, get_choices, clear_choices, start_iteration,
+from api.routers.model_meta import (
+    get_loras, get_checkpoints,
 )
+
 from api.routers.memory import (
-    create_memory, get_memory, list_memories, update_memory,
+    create_memory, get_memory, get_all_memories, update_memory,
     delete_memory, clear_memories, get_key_description, get_all_key_descriptions,
 )
 from api.routers.novel import (
@@ -126,9 +127,9 @@ class AbstractLlmService(ABC):
         self.tools: List[BaseTool] = []
         self._initialize_tools()
 
-        # 尝试初始化 LLM 服务
+        # 尝试初始化 LLM 服务（默认无结构化输出）
         try:
-            self.initialize_llm()
+            self.initialize_llm(response_format=None)
         except Exception as e:
             logger.exception(f"LLM 服务初始化失败（将在首次使用时重试）: {e}")
 
@@ -139,11 +140,11 @@ class AbstractLlmService(ABC):
             # Project 管理（只允许查询和更新，不允许创建和删除）
             get_project, update_project,
             # Actor 管理
-            create_actor, get_actor, list_actors, update_actor,
-            remove_actor, add_example, remove_example, add_portrait_from_job,
+            create_actor, get_actor, get_all_actors, update_actor,
+            remove_actor, add_example, remove_example, add_portrait_from_job_tool,
             get_tag_description, get_all_tag_descriptions,
             # Memory 管理
-            create_memory, get_memory, list_memories, update_memory,
+            create_memory, get_memory, get_all_memories, update_memory,
             delete_memory, clear_memories, get_key_description, get_all_key_descriptions,
             # Reader 功能
             get_line, get_chapter_lines, get_lines_range, get_chapters,
@@ -152,33 +153,22 @@ class AbstractLlmService(ABC):
             get_project_content, get_chapter_content, get_line_content,
             # Draw 功能
             get_loras, get_checkpoints, create_draw_job, get_draw_job, delete_draw_job, get_image,
-            # LLM 辅助功能
-            add_choices, get_choices, clear_choices,
-            # 迭代模式
-            start_iteration,
         ]
         # 先包装，再转换为工具
         self.tools = [tool(tool_wrapper(func)) for func in all_functions]
         logger.info(f"已初始化 {len(self.tools)} 个工具函数")
 
     @abstractmethod
-    def initialize_llm(self) -> bool:
+    def initialize_llm(self, response_format: Optional[Any] = None) -> bool:
         """
         初始化 LLM 实例。
         
         由子类实现具体的 LLM 初始化逻辑（如 ChatOpenAI、ChatOllama 等）。
         
+        :param response_format: 可选的响应格式（Pydantic 模型类），用于结构化输出
         :return: 初始化是否成功
         """
         raise NotImplementedError
-
-    def is_ready(self) -> bool:
-        """
-        检查服务是否就绪。
-        
-        :return: 服务是否已初始化且可用
-        """
-        return self.llm is not None and self.agent is not None
 
     def get_session_context(self, project_id: str) -> Optional[str]:
         """
@@ -189,7 +179,7 @@ class AbstractLlmService(ABC):
         """
         try:
             # 查询项目信息（项目不存在时返回 None，不抛出异常）
-            from api.services.db.project_service import ProjectService
+
             project = ProjectService.get(project_id)
             if not project:
                 logger.debug(f"项目不存在: {project_id}，跳过项目上下文")
@@ -207,7 +197,7 @@ class AbstractLlmService(ABC):
             }
 
             # 查询所有记忆条目
-            memories = MemoryService.list(project_id=project_id, limit=1000)
+            memories = MemoryService.get_all(project_id=project_id, limit=1000)
 
             # 构建记忆字典（按 key 分组）
             memories_dict = {}
@@ -230,12 +220,11 @@ class AbstractLlmService(ABC):
             logger.exception(f"获取项目上下文失败: {e}")
             return None
 
-    def build_system_messages(self, project_id: str) -> list[tuple[str, str]]:
+    def build_system_messages(self) -> list[tuple[str, str]]:
         """
-        构建消息列表，包含项目上下文和用户消息。
+        构建基础系统消息列表（不包含项目上下文）。
 
-        :param project_id: 项目 ID
-        :return: 包含系统提示词和用户消息的元组列表
+        :return: 包含系统提示词的元组列表
         """
         # 构建消息列表
         messages = []
@@ -255,16 +244,76 @@ class AbstractLlmService(ABC):
         # 4. 添加 MCP 工具使用指南
         messages.append(("system", MCP_TOOLS_GUIDE))
 
-        # 5. 添加当前项目信息
-        session_info = self.get_session_context(project_id)
-        if session_info:
-            messages.append(("system", session_info))
-
         # 合并记录所有系统提示词
         if len(messages) > 0:
             logger.debug(
-                f"已添加 {len(messages)} 条系统提示词（开发者模式、系统提示词、工具调用提示、MCP指南、项目信息、历史警告）")
+                f"已添加 {len(messages)} 条基础系统提示词（开发者模式、系统提示词、工具调用提示、MCP指南）")
         return messages
+
+    async def chat_invoke(self, message: str, project_id: Optional[str] = None,
+                          output_schema: Optional[Any] = None) -> str:
+        """
+        调用 LLM 并返回结果（非流式，用于工具调用）。
+        
+        :param message: 用户消息
+        :param project_id: 项目 ID（可选）
+        :param output_schema: 输出模式（可选，Pydantic 模型类，如果不指定则默认返回文本）
+        :return: LLM 的回复内容（如果是结构化输出，返回 JSON 字符串；否则返回文本）
+        """
+        logger.info(f"🔧 工具调用 LLM: {message[:200]}{'...' if len(message) > 200 else ''}")
+
+        try:
+            # 1. 构建系统消息（不包含历史消息和摘要）
+            messages = self.build_system_messages()
+
+            # 2. 如果提供了 project_id，添加项目上下文信息
+            if project_id:
+                session_info = self.get_session_context(project_id)
+                if session_info:
+                    messages.append(("system", session_info))
+
+            # 3. 添加工具使用说明（如果没有 project_id，告知某些工具可能不可用）
+            if not project_id:
+                no_project_warning = (
+                    "\n⚠️ 注意：当前没有提供 project_id，以下工具可能不可用：\n"
+                    "- 读取/操作记忆（create_memory, get_all_memories 等）\n"
+                    "- 读取项目内容（get_project_content 等）\n"
+                    "- 查询/操作角色（get_all_actors 等需要 project_id 的工具）\n"
+                    "请根据实际情况选择合适的工具。"
+                )
+                messages.append(("system", no_project_warning))
+
+            # 4. 添加用户消息
+            messages.append(("human", message))
+
+            # 5. 如果有输出 schema，需要重新初始化 agent 以支持结构化输出
+            if output_schema is not None:
+                logger.info(
+                    f"使用结构化输出，schema: {output_schema.__name__ if hasattr(output_schema, '__name__') else type(output_schema)}")
+                # 重新初始化 agent 以支持结构化输出（同时保留工具调用能力）
+                self.initialize_llm(response_format=output_schema)
+
+            # 6. 调用 agent（使用异步调用）
+            logger.info(f"开始调用 LLM，使用 {len(self.tools)} 个工具" + (
+                f"，结构化输出: {output_schema.__name__ if output_schema else '无'}" if output_schema else ""))
+            config = {"recursion_limit": app_settings.llm.recursion_limit}
+            result: dict = await self.agent.ainvoke({"messages": messages}, config=config, stream_mode='values')
+            result_message: AIMessage = result['messages'][-1]
+            context = result_message.content  # json text
+            
+            # 7. 如果有结构化输出，直接返回文本（LLM 已经返回了 JSON）
+            if output_schema is not None:
+                logger.info(f"✅ LLM 调用完成，返回结构化输出，长度={len(context)}")
+                return context
+            
+            # 8. 如果没有结构化输出，返回普通文本内容
+            logger.info(f"✅ LLM 调用完成，返回长度={len(context)}")
+            logger.debug(f"最终提取的内容: {context[:500] if context else '(空)'}")
+            return context
+
+        except Exception as e:
+            logger.exception(f"LLM 调用失败: {e}")
+            return f"错误：LLM 调用失败 - {str(e)}"
 
     def summary_history(self, project_id: str):
         """
@@ -272,9 +321,6 @@ class AbstractLlmService(ABC):
         
         :param project_id: 项目ID
         """
-        if not self.is_ready():
-            return
-
         count = HistoryService.count(project_id)
         res_round = count % app_settings.llm.summary_epoch
 
@@ -282,8 +328,14 @@ class AbstractLlmService(ABC):
             try:
                 # 获取最近的消息
                 start_index = count - app_settings.llm.summary_epoch
-                messages = self.build_system_messages(project_id)
-                recent_messages = HistoryService.list(project_id, start_index=start_index, end_index=count)
+                messages = self.build_system_messages()
+
+                # 添加项目上下文信息
+                session_info = self.get_session_context(project_id)
+                if session_info:
+                    messages.append(("system", session_info))
+
+                recent_messages = HistoryService.get_all(project_id, start_index=start_index, end_index=count)
 
                 # 获取现有摘要
                 chat_summary = MemoryService.get_summary(project_id)
@@ -331,20 +383,6 @@ class AbstractLlmService(ABC):
         """
         logger.info(f"👤 用户消息: {message[:200]}{'...' if len(message) > 200 else ''}")
 
-        if not self.is_ready():
-            logger.error("LLM 服务未就绪")
-            error_msg = ChatMessage(
-                message_id=str(uuid.uuid4()),
-                project_id=project_id,
-                role="assistant",
-                context="错误：LLM 服务未就绪，请先初始化 LLM",
-                status="error",
-                message_type="normal"
-            )
-            HistoryService.create(error_msg)
-            yield {'type': 'error', 'error': 'LLM 服务未就绪，请先初始化 LLM'}
-            return
-
         # 创建助手消息的 ID（提前创建，用于实时更新）
         assistant_message_id = str(uuid.uuid4())
         assistant_context = ""
@@ -353,7 +391,13 @@ class AbstractLlmService(ABC):
 
         try:
             # 1. 构建系统消息和历史消息
-            messages = self.build_system_messages(project_id)
+            messages = self.build_system_messages()
+
+            # 添加项目上下文信息
+            session_info = self.get_session_context(project_id)
+            if session_info:
+                messages.append(("system", session_info))
+
             self.summary_history(project_id)
             chat_summary_memory = MemoryService.get_summary(project_id)
 
@@ -370,7 +414,7 @@ class AbstractLlmService(ABC):
 
             # 3. 获取历史消息（用于上下文）
             start_index = max(0, HistoryService.count(project_id) - app_settings.llm.summary_epoch)
-            messages_to_include = HistoryService.list(project_id, start_index=start_index)
+            messages_to_include = HistoryService.get_all(project_id, start_index=start_index)
 
             # 4. 如果有聊天摘要，添加到系统消息
             if chat_summary_memory and chat_summary_memory.data:

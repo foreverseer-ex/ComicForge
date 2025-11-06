@@ -76,8 +76,8 @@ async def create_memory(
     return {"memory_id": memory_id}
 
 
-@router.get("/list", response_model=List[MemoryEntry], summary="列出记忆")
-async def list_memories(
+@router.get("/all", response_model=List[MemoryEntry], summary="列出记忆")
+async def get_all_memories(
     project_id: str,
     key: Optional[str] = None,
     limit: int = 100,
@@ -96,7 +96,7 @@ async def list_memories(
         符合条件的记忆列表
     """
     # 获取项目的所有记忆条目
-    entries = MemoryService.list(project_id, limit=limit + offset)
+    entries = MemoryService.get_all(project_id, limit=limit + offset)
     
     # 如果提供了键名过滤，应用过滤
     if key:

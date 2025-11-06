@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <!-- 标题栏 -->
+    <!-- 页面标题栏 -->
     <div 
       :class="[
         'flex items-center justify-between gap-4 pb-4 border-b',
@@ -11,40 +11,40 @@
         <svg class="w-6 h-6" :class="isDark ? 'text-gray-400' : 'text-gray-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
-        <h2 
+        <h1 
           :class="[
-            'text-xl font-bold',
+            'text-3xl font-bold',
             isDark ? 'text-white' : 'text-gray-900'
           ]"
         >
           记忆管理
-        </h2>
+        </h1>
       </div>
       <div v-if="selectedProjectId" class="flex items-center gap-2">
         <button
           v-if="memories.length > 0"
-          @click="showClearConfirm = true"
+          @click="selectedMemoryIds.size > 0 ? handleDeleteSelected() : handleClearAll()"
           :class="[
-            'px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2',
+            'p-2 rounded-lg transition-colors',
             isDark
               ? 'bg-red-600 hover:bg-red-700 text-white'
               : 'bg-red-600 hover:bg-red-700 text-white'
           ]"
+          :title="selectedMemoryIds.size > 0 ? `删除选中 (${selectedMemoryIds.size})` : '清空所有记忆'"
         >
           <TrashIcon class="w-5 h-5" />
-          清空记忆
         </button>
         <button
           @click="showCreateDialog = true"
           :class="[
-            'px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2',
+            'p-2 rounded-lg transition-colors',
             isDark
               ? 'bg-blue-600 hover:bg-blue-700 text-white'
               : 'bg-blue-600 hover:bg-blue-700 text-white'
           ]"
+          title="新增记忆"
         >
           <PlusIcon class="w-5 h-5" />
-          新增记忆
         </button>
       </div>
     </div>
@@ -88,10 +88,11 @@
       <!-- 加载状态 -->
       <div 
         v-else-if="loading"
-        class="h-full flex items-center justify-center"
+        class="flex justify-center items-center py-12"
       >
         <div class="text-center">
-          <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <div class="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4" 
+               :class="isDark ? 'border-blue-500' : 'border-blue-600'"></div>
           <p :class="['text-sm', isDark ? 'text-gray-400' : 'text-gray-600']">
             加载中...
           </p>
@@ -101,9 +102,17 @@
       <!-- 空状态 -->
       <div 
         v-else-if="memories.length === 0"
-        class="h-full flex items-center justify-center"
+        class="h-full flex items-center justify-center py-20"
       >
-        <div class="text-center">
+        <div 
+          @click="showCreateDialog = true"
+          :class="[
+            'text-center rounded-lg border p-8 cursor-pointer transition-colors',
+            isDark 
+              ? 'bg-gray-800 border-gray-700 hover:bg-gray-750 hover:border-gray-600' 
+              : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+          ]"
+        >
           <svg 
             class="w-16 h-16 mx-auto mb-4"
             :class="isDark ? 'text-gray-600' : 'text-gray-400'"
@@ -123,11 +132,11 @@
           </h3>
           <p 
             :class="[
-              'text-sm mb-4',
+              'text-sm',
               isDark ? 'text-gray-500' : 'text-gray-500'
             ]"
           >
-            点击"新增记忆"按钮开始添加记忆
+            点击此处开始添加记忆
           </p>
         </div>
       </div>
@@ -137,40 +146,80 @@
         v-else
         class="space-y-4"
       >
+        <!-- 全选复选框（如果有记忆） -->
+        <div 
+          v-if="memories.length > 0"
+          :class="[
+            'pb-2 mb-2 border-b',
+            isDark ? 'border-gray-700' : 'border-gray-200'
+          ]"
+        >
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              :checked="isAllSelected"
+              @change="toggleSelectAll"
+              :class="[
+                'w-4 h-4 rounded cursor-pointer',
+                isDark ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+              ]"
+            />
+            <span :class="['text-sm font-medium', isDark ? 'text-gray-300' : 'text-gray-700']">
+              全选 (已选择 {{ selectedMemoryIds.size }} 项)
+            </span>
+          </label>
+        </div>
         <div
           v-for="memory in memories"
           :key="memory.memory_id"
           :class="[
             'rounded-lg border p-6 transition-shadow hover:shadow-md',
             isDark 
-              ? 'bg-gray-800 border-gray-700' 
-              : 'bg-white border-gray-200'
+              ? selectedMemoryIds.has(memory.memory_id)
+                ? 'bg-gray-800 border-gray-600' 
+                : 'bg-gray-800 border-gray-700'
+              : selectedMemoryIds.has(memory.memory_id)
+                ? 'bg-blue-50 border-blue-300'
+                : 'bg-white border-gray-200'
           ]"
         >
           <!-- 记忆卡片头部 -->
           <div class="flex items-start justify-between mb-3">
-            <div class="flex-1">
-              <h3 
+            <div class="flex items-start gap-3 flex-1">
+              <!-- 复选框 -->
+              <input
+                type="checkbox"
+                :checked="selectedMemoryIds.has(memory.memory_id)"
+                @change="toggleSelectMemory(memory.memory_id)"
                 :class="[
-                  'text-lg font-semibold mb-1',
-                  isDark ? 'text-white' : 'text-gray-900'
+                  'w-4 h-4 rounded cursor-pointer mt-1',
+                  isDark ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
                 ]"
-              >
-                {{ memory.key }}
-              </h3>
-              <p 
-                v-if="memory.description"
-                :class="[
-                  'text-sm italic',
-                  isDark ? 'text-gray-400' : 'text-gray-500'
-                ]"
-              >
-                {{ memory.description }}
-              </p>
+                @click.stop
+              />
+              <div class="flex-1">
+                <h3 
+                  :class="[
+                    'text-lg font-semibold mb-1',
+                    isDark ? 'text-white' : 'text-gray-900'
+                  ]"
+                >
+                  {{ memory.key }}
+                </h3>
+                <p 
+                  v-if="memory.description"
+                  :class="[
+                    'text-sm italic',
+                    isDark ? 'text-gray-400' : 'text-gray-500'
+                  ]"
+                >
+                  {{ memory.description }}
+                </p>
+              </div>
             </div>
             <div class="flex items-center gap-2 ml-4">
               <button
-                @click="editMemory(memory)"
+                @click.stop="editMemory(memory)"
                 :class="[
                   'p-2 rounded-lg transition-colors',
                   isDark
@@ -182,7 +231,7 @@
                 <PencilIcon class="w-5 h-5" />
               </button>
               <button
-                @click="deleteMemory(memory)"
+                @click.stop="deleteMemory(memory)"
                 :class="[
                   'p-2 rounded-lg transition-colors',
                   isDark
@@ -451,155 +500,14 @@
       </div>
     </Teleport>
 
-    <!-- 删除确认对话框 -->
-    <Teleport to="body">
-      <div
-        v-if="memoryToDelete"
-        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        @click.self="memoryToDelete = null"
-      >
-        <div
-          :class="[
-            'w-full max-w-md rounded-lg shadow-xl',
-            isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
-          ]"
-          @click.stop
-        >
-          <div class="p-6">
-            <h2 
-              :class="[
-                'text-xl font-bold mb-4 text-red-600'
-              ]"
-            >
-              确认删除
-            </h2>
-            <p 
-              :class="[
-                'mb-6',
-                isDark ? 'text-gray-300' : 'text-gray-700'
-              ]"
-            >
-              确定要删除这条记忆吗？
-            </p>
-            <div 
-              :class="[
-                'p-3 rounded-lg mb-4',
-                isDark ? 'bg-gray-700' : 'bg-gray-50'
-              ]"
-            >
-              <p 
-                :class="[
-                  'text-sm font-semibold mb-1',
-                  isDark ? 'text-gray-300' : 'text-gray-900'
-                ]"
-              >
-                键: {{ memoryToDelete?.key }}
-              </p>
-              <p 
-                :class="[
-                  'text-sm break-words',
-                  isDark ? 'text-gray-400' : 'text-gray-600'
-                ]"
-              >
-                {{ truncateValue(memoryToDelete?.value || '') }}
-              </p>
-            </div>
-            <div class="flex justify-end gap-3">
-              <button
-                @click="memoryToDelete = null"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  isDark
-                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                ]"
-              >
-                取消
-              </button>
-              <button
-                @click="confirmDelete"
-                :disabled="deleting"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  deleting
-                    ? 'bg-gray-400 cursor-not-allowed text-white'
-                    : 'bg-red-600 hover:bg-red-700 text-white'
-                ]"
-              >
-                {{ deleting ? '删除中...' : '删除' }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- 清空记忆确认对话框 -->
-    <Teleport to="body">
-      <div
-        v-if="showClearConfirm"
-        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        @click.self="showClearConfirm = false"
-      >
-        <div
-          :class="[
-            'w-full max-w-md rounded-lg shadow-xl',
-            isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
-          ]"
-          @click.stop
-        >
-          <div class="p-6">
-            <h2 
-              :class="[
-                'text-xl font-bold mb-4 text-red-600'
-              ]"
-            >
-              确认清空所有记忆
-            </h2>
-            <p 
-              :class="[
-                'mb-4',
-                isDark ? 'text-gray-300' : 'text-gray-700'
-              ]"
-            >
-              即将清空当前项目的所有记忆条目（共 {{ memories.length }} 条）
-            </p>
-            <p 
-              :class="[
-                'text-sm mb-6 text-red-600 font-semibold'
-              ]"
-            >
-              ⚠️ 此操作不可恢复，所有记忆将被永久删除！
-            </p>
-            <div class="flex justify-end gap-3">
-              <button
-                @click="showClearConfirm = false"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  isDark
-                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                ]"
-              >
-                取消
-              </button>
-              <button
-                @click="confirmClear"
-                :disabled="clearing"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  clearing
-                    ? 'bg-gray-400 cursor-not-allowed text-white'
-                    : 'bg-red-600 hover:bg-red-700 text-white'
-                ]"
-              >
-                {{ clearing ? '清空中...' : '确认清空' }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <!-- 统一确认对话框 -->
+    <ConfirmDialog
+      :show="confirmDialog.show"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      @confirm="confirmDialog.onConfirm"
+      @cancel="confirmDialog.show = false"
+    />
   </div>
 </template>
 
@@ -611,6 +519,7 @@ import { storeToRefs } from 'pinia'
 import api from '../api'
 import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { showToast } from '../utils/toast'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 interface MemoryEntry {
   memory_id: string
@@ -637,10 +546,19 @@ const deleting = ref(false)
 // 对话框状态
 const showCreateDialog = ref(false)
 const editingMemory = ref<MemoryEntry | null>(null)
-const memoryToDelete = ref<MemoryEntry | null>(null)
 const showKeySelector = ref(false)
-const showClearConfirm = ref(false)
 const clearing = ref(false)
+
+// 多选状态
+const selectedMemoryIds = ref<Set<string>>(new Set())
+
+// 统一确认对话框
+const confirmDialog = ref({
+  show: false,
+  title: '',
+  message: '',
+  onConfirm: () => {}
+})
 
 // 表单数据
 const memoryForm = ref({
@@ -697,7 +615,7 @@ const loadMemories = async () => {
 
   loading.value = true
   try {
-    const data = await api.get('/memory/list', {
+    const data = await api.get('/memory/all', {
       params: {
         project_id: selectedProjectId.value
       }
@@ -795,52 +713,115 @@ const saveMemory = async () => {
 
 // 删除记忆
 const deleteMemory = (memory: MemoryEntry) => {
-  memoryToDelete.value = memory
-}
-
-// 确认删除
-const confirmDelete = async () => {
-  if (!selectedProjectId.value || !memoryToDelete.value) {
-    return
-  }
-
-  deleting.value = true
-  try {
-    await api.delete(`/memory/${memoryToDelete.value.memory_id}`)
-    
-    memoryToDelete.value = null
-    await loadMemories()
-    showToast('记忆已删除', 'success')
-  } catch (error: any) {
-    console.error('删除记忆失败:', error)
-    showToast('删除记忆失败: ' + (error.response?.data?.detail || error.message), 'error')
-  } finally {
-    deleting.value = false
-  }
-}
-
-// 确认清空所有记忆
-const confirmClear = async () => {
-  if (!selectedProjectId.value) {
-    return
-  }
-
-  clearing.value = true
-  try {
-    const result = await api.delete('/memory/clear', {
-      params: {
-        project_id: selectedProjectId.value
+  confirmDialog.value = {
+    show: true,
+    title: '确认删除',
+    message: `确定要删除记忆 "${memory.key}" 吗？此操作不可恢复！`,
+    onConfirm: async () => {
+      confirmDialog.value.show = false
+      const memoryId = memory.memory_id
+      deleting.value = true
+      try {
+        await api.delete(`/memory/${memoryId}`)
+        
+        // 清除已删除记忆的选中状态
+        selectedMemoryIds.value.delete(memoryId)
+        await loadMemories()
+        showToast('记忆已删除', 'success')
+      } catch (error: any) {
+        console.error('删除记忆失败:', error)
+        showToast('删除记忆失败: ' + (error.response?.data?.detail || error.message), 'error')
+      } finally {
+        deleting.value = false
       }
+    }
+  }
+}
+
+// 全选/取消全选
+const toggleSelectAll = () => {
+  if (isAllSelected.value) {
+    selectedMemoryIds.value.clear()
+  } else {
+    memories.value.forEach(memory => {
+      selectedMemoryIds.value.add(memory.memory_id)
     })
-    
-    showClearConfirm.value = false
-    await loadMemories()
-    showToast(`已清空 ${result.deleted_count || 0} 条记忆`, 'success')
-  } catch (error: any) {
-    console.error('清空记忆失败:', error)
-    showToast('清空记忆失败: ' + (error.response?.data?.detail || error.message), 'error')
-  } finally {
-    clearing.value = false
+  }
+}
+
+// 是否全选
+const isAllSelected = computed(() => {
+  return memories.value.length > 0 && selectedMemoryIds.value.size === memories.value.length
+})
+
+// 切换单个记忆的选择状态
+const toggleSelectMemory = (memoryId: string) => {
+  if (selectedMemoryIds.value.has(memoryId)) {
+    selectedMemoryIds.value.delete(memoryId)
+  } else {
+    selectedMemoryIds.value.add(memoryId)
+  }
+}
+
+// 删除选中的记忆
+const handleDeleteSelected = async () => {
+  const count = selectedMemoryIds.value.size
+  if (count === 0) return
+
+  confirmDialog.value = {
+    show: true,
+    title: '确认删除',
+    message: `确定要删除选中的 ${count} 条记忆吗？此操作不可恢复！`,
+    onConfirm: async () => {
+      confirmDialog.value.show = false
+      try {
+        // 批量删除
+        const memoryIds = Array.from(selectedMemoryIds.value)
+        for (const memoryId of memoryIds) {
+          await api.delete(`/memory/${memoryId}`)
+        }
+        
+        selectedMemoryIds.value.clear()
+        await loadMemories()
+        showToast(`成功删除 ${count} 条记忆`, 'success')
+      } catch (error: any) {
+        console.error('批量删除记忆失败:', error)
+        showToast('删除失败: ' + (error.response?.data?.detail || error.message), 'error')
+      }
+    }
+  }
+}
+
+// 清空所有记忆
+const handleClearAll = () => {
+  confirmDialog.value = {
+    show: true,
+    title: '确认清空所有记忆',
+    message: `即将清空当前项目的所有记忆条目（共 ${memories.value.length} 条）\n\n⚠️ 此操作不可恢复，所有记忆将被永久删除！`,
+    onConfirm: async () => {
+      confirmDialog.value.show = false
+      if (!selectedProjectId.value) {
+        return
+      }
+
+      clearing.value = true
+      try {
+        const result = await api.post('/memory/clear', null, {
+          params: {
+            project_id: selectedProjectId.value
+          }
+        })
+        
+        selectedMemoryIds.value.clear()
+        await loadMemories()
+        showToast(`已清空 ${result.deleted_count || 0} 条记忆`, 'success')
+      } catch (error: any) {
+        console.error('清空记忆失败:', error)
+        showToast('清空记忆失败: ' + (error.response?.data?.detail || error.message), 'error')
+      } finally {
+        clearing.value = false
+      }
+    }
   }
 }
 

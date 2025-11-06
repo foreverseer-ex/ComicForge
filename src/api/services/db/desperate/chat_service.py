@@ -238,7 +238,7 @@ class ChatService:
             return True
     
     @classmethod
-    def list(cls, project_id: str, start: int = 0, end: Optional[int] = None) -> List[ChatMessageDB]:
+    def get_all(cls, project_id: str, start: int = 0, end: Optional[int] = None) -> List[ChatMessageDB]:
         """
         获取会话的所有消息。
         

@@ -31,3 +31,10 @@ class CivitaiSettings(BaseModel):
         le=10,
         description="导入模型时的最大并发数（1-10）"
     )
+    
+    draw_timeout: int = Field(
+        default=600,
+        ge=60,
+        le=3600,
+        description="绘图任务超时时间（秒），60-3600秒，默认10分钟"
+    )

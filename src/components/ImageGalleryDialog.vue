@@ -6,13 +6,23 @@
       @click.self="close"
       @wheel.prevent="handleWheel"
     >
-      <!-- 关闭按钮 -->
+      <!-- 关闭按钮（始终可点击，即使在 loading 时） -->
       <button
-        @click="close"
-        class="absolute top-4 right-4 z-10 p-3 rounded-full bg-black bg-opacity-50 hover:bg-opacity-70 text-white transition-colors"
+        @click.stop="close"
+        class="absolute top-4 right-4 z-50 p-3 rounded-full bg-black bg-opacity-50 hover:bg-opacity-70 text-white transition-colors pointer-events-auto"
         title="关闭 (ESC)"
       >
         <XMarkIcon class="w-6 h-6" />
+      </button>
+
+      <!-- 下载按钮 -->
+      <button
+        v-if="currentImageUrl"
+        @click.stop="handleDownload"
+        class="absolute top-4 right-16 md:right-20 z-50 p-3 rounded-full bg-black bg-opacity-50 hover:bg-opacity-70 text-white transition-colors pointer-events-auto"
+        title="下载图片"
+      >
+        <ArrowDownTrayIcon class="w-5 h-5 md:w-6 md:h-6" />
       </button>
 
       <!-- 左右切换按钮 -->
@@ -41,11 +51,12 @@
       <div
         class="relative w-full h-full flex items-center justify-center overflow-hidden"
         @mousedown="handleMouseDown"
-        @mousemove="handleMouseMove"
-        @mouseup="handleMouseUp"
-        @mouseleave="handleMouseUp"
       >
+        <!-- 图片（大图始终显示，不受隐私模式影响） -->
         <img
+          v-if="currentImageUrl && !loading"
+          v-show="!imageLoading"
+          ref="imageElement"
           :src="currentImageUrl"
           :alt="`图片 ${currentIndex + 1}`"
           class="max-w-full max-h-full object-contain select-none"
@@ -54,8 +65,17 @@
             transition: isDragging ? 'none' : 'transform 0.3s ease-out'
           }"
           draggable="false"
+          @load="handleImageLoad"
           @error="handleImageError"
         />
+        <!-- Loading 状态 -->
+        <div
+          v-if="loading || imageLoading"
+          class="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none"
+        >
+          <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-white"></div>
+          <span class="text-white text-sm mt-4">加载中...</span>
+        </div>
       </div>
 
       <!-- 图片索引指示器 -->
@@ -70,14 +90,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { XMarkIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { XMarkIcon, ChevronLeftIcon, ChevronRightIcon, ArrowDownTrayIcon } from '@heroicons/vue/24/outline'
 import { getImageUrl } from '../utils/imageUtils'
 
 interface Props {
   images: string[]  // 图片 URL 数组
   initialIndex?: number  // 初始显示的图片索引
   visible: boolean  // 是否显示
+  // 注意：大图始终显示，不受隐私模式影响（隐私模式只影响列表中的缩略图）
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -97,6 +118,9 @@ const isDragging = ref(false)
 const dragStart = ref({ x: 0, y: 0 })
 const imageUrls = ref<string[]>([])
 const loading = ref(true)
+const imageLoading = ref(true) // 图片实际加载状态
+const imageElement = ref<HTMLImageElement | null>(null)
+const lastLoadedKey = ref<string>('') // 记录上次加载的图片列表 key，用于避免重复加载
 
 // 当前图片 URL
 const currentImageUrl = computed(() => {
@@ -106,16 +130,26 @@ const currentImageUrl = computed(() => {
   return imageUrls.value[currentIndex.value] || ''
 })
 
-// 加载所有图片 URL
+// 加载所有图片 URL（使用缓存）
 const loadImageUrls = async () => {
   if (props.images.length === 0) return
   
+  // 检查是否已经加载过相同的图片列表
+  const currentImagesKey = props.images.join('|')
+  if (lastLoadedKey.value === currentImagesKey && imageUrls.value.length > 0) {
+    // 相同的图片列表，且已有缓存，直接使用
+    loading.value = false
+    return
+  }
+  
   loading.value = true
   try {
+    // 并行加载所有图片 URL（使用缓存）
     const urls = await Promise.all(
       props.images.map(url => getImageUrl(url))
     )
-    imageUrls.value = urls
+    imageUrls.value = urls.filter((url): url is string => url !== null)
+    lastLoadedKey.value = currentImagesKey
   } catch (error) {
     console.error('加载图片失败:', error)
     imageUrls.value = []
@@ -127,6 +161,7 @@ const loadImageUrls = async () => {
 // 切换到上一张
 const prevImage = () => {
   if (currentIndex.value > 0) {
+    imageLoading.value = true
     currentIndex.value--
     resetTransform()
   }
@@ -135,6 +170,7 @@ const prevImage = () => {
 // 切换到下一张
 const nextImage = () => {
   if (currentIndex.value < props.images.length - 1) {
+    imageLoading.value = true
     currentIndex.value++
     resetTransform()
   }
@@ -169,31 +205,77 @@ const handleWheel = (event: WheelEvent) => {
 
 // 处理鼠标按下（开始拖拽）
 const handleMouseDown = (event: MouseEvent) => {
-  if (scale.value <= 1) return  // 只有在放大时才能拖拽
+  // 允许在任何缩放状态下拖拽
+  if (event.button !== 0) return  // 只响应左键
   
   isDragging.value = true
   dragStart.value = {
     x: event.clientX - translateX.value,
     y: event.clientY - translateY.value
   }
+  event.preventDefault()
+  
+  // 在文档级别添加事件监听器，以便在鼠标移出容器时也能响应
+  document.addEventListener('mousemove', handleDocumentMouseMove)
+  document.addEventListener('mouseup', handleDocumentMouseUp)
 }
 
-// 处理鼠标移动（拖拽中）
-const handleMouseMove = (event: MouseEvent) => {
+// 处理文档级别的鼠标移动（拖拽中）
+const handleDocumentMouseMove = (event: MouseEvent) => {
   if (!isDragging.value) return
   
   translateX.value = event.clientX - dragStart.value.x
   translateY.value = event.clientY - dragStart.value.y
+  event.preventDefault()
 }
 
-// 处理鼠标释放（结束拖拽）
-const handleMouseUp = () => {
+// 处理文档级别的鼠标释放（结束拖拽）
+const handleDocumentMouseUp = () => {
   isDragging.value = false
+  document.removeEventListener('mousemove', handleDocumentMouseMove)
+  document.removeEventListener('mouseup', handleDocumentMouseUp)
+}
+
+// 处理图片加载完成
+const handleImageLoad = () => {
+  imageLoading.value = false
 }
 
 // 处理图片加载错误
 const handleImageError = () => {
   console.error('图片加载失败:', currentImageUrl.value)
+  imageLoading.value = false
+}
+
+// 下载当前图片
+const handleDownload = async () => {
+  if (!currentImageUrl.value) return
+  
+  try {
+    // 使用 fetch 下载图片
+    const response = await fetch(currentImageUrl.value)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    
+    const blob = await response.blob()
+    const blobUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = blobUrl
+    
+    // 从 URL 中提取文件名，如果没有则使用默认名称
+    const url = new URL(currentImageUrl.value)
+    const jobId = url.searchParams.get('job_id') || 'image'
+    link.download = `job_${jobId}.png`
+    
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(blobUrl)
+  } catch (error) {
+    console.error('下载图片失败:', error)
+    alert('下载失败，请重试')
+  }
 }
 
 // 处理键盘事件
@@ -225,22 +307,40 @@ const handleKeyDown = (event: KeyboardEvent) => {
   }
 }
 
-// 关闭
+// 关闭（可打断加载）
 const close = () => {
   resetTransform()
+  // 清理事件监听器
+  if (isDragging.value) {
+    isDragging.value = false
+    document.removeEventListener('mousemove', handleDocumentMouseMove)
+    document.removeEventListener('mouseup', handleDocumentMouseUp)
+  }
+  // 中断加载状态
+  loading.value = false
+  imageLoading.value = false
   emit('close')
 }
 
 // 监听 visible 变化
-watch(() => props.visible, (newVisible) => {
+watch(() => props.visible, async (newVisible) => {
   if (newVisible) {
     currentIndex.value = props.initialIndex
     resetTransform()
-    loadImageUrls()
+    imageLoading.value = true
+    await loadImageUrls()
+    // 检查图片是否已在浏览器缓存中（已加载过的图片通常会立即完成）
+    await nextTick()
+    if (imageElement.value?.complete && imageElement.value.naturalWidth > 0) {
+      // 图片已在浏览器缓存中，立即显示
+      imageLoading.value = false
+    }
+    // 如果不在缓存中，等待 @load 事件触发
   } else {
-    // 关闭时重置状态
+    // 关闭时重置状态（但保留 imageUrls 以便下次快速打开）
     resetTransform()
-    imageUrls.value = []
+    imageLoading.value = true
+    // 不清空 imageUrls，保留缓存以便下次快速打开
   }
 })
 
@@ -254,27 +354,47 @@ watch(() => props.images, () => {
 // 监听 initialIndex 变化
 watch(() => props.initialIndex, (newIndex) => {
   if (props.visible) {
+    imageLoading.value = true
     currentIndex.value = newIndex
     resetTransform()
   }
 })
 
-// 监听 currentIndex 变化，重新加载图片
-watch(() => currentIndex.value, () => {
+// 监听 currentIndex 变化，检查图片是否已在浏览器缓存中
+watch(() => currentIndex.value, async () => {
+  imageLoading.value = true
   if (imageUrls.value.length === 0 && props.visible) {
-    loadImageUrls()
+    await loadImageUrls()
   }
+  // 检查图片是否已在浏览器缓存中（已加载过的图片通常会立即完成）
+  await nextTick()
+  if (imageElement.value?.complete && imageElement.value.naturalWidth > 0) {
+    // 图片已在浏览器缓存中，立即显示
+    imageLoading.value = false
+  }
+  // 如果不在缓存中，等待 @load 事件触发
 })
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('keydown', handleKeyDown)
   if (props.visible) {
-    loadImageUrls()
+    await loadImageUrls()
+    // 检查图片是否已在浏览器缓存中
+    await nextTick()
+    if (imageElement.value?.complete && imageElement.value.naturalWidth > 0) {
+      imageLoading.value = false
+    }
   }
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
+  // 清理鼠标事件监听器
+  if (isDragging.value) {
+    isDragging.value = false
+    document.removeEventListener('mousemove', handleDocumentMouseMove)
+    document.removeEventListener('mouseup', handleDocumentMouseUp)
+  }
 })
 </script>
 

@@ -65,12 +65,6 @@ async def chat_invoke(request: ChatRequest):
     """
     llm_service = get_current_llm_service()
     
-    if not llm_service.is_ready():
-        raise HTTPException(
-            status_code=503,
-            detail="LLM 服务未就绪，请先初始化 LLM"
-        )
-    
     try:
         # 收集完整响应
         full_response = ""
@@ -81,7 +75,7 @@ async def chat_invoke(request: ChatRequest):
         await asyncio.sleep(0.1)
         
         # 获取最后一条助手消息（包含工具调用和建议）
-        messages = HistoryService.list(request.project_id)
+        messages = HistoryService.get_all(request.project_id)
         assistant_messages = [m for m in messages if m.role == "assistant"]
         
         if assistant_messages:
@@ -139,24 +133,6 @@ async def chat_stream(request: ChatRequest):
     - error: 错误信息 {error: "..."}
     """
     llm_service = get_current_llm_service()
-    
-    if not llm_service.is_ready():
-        async def error_generate():
-            error_data = json.dumps({
-                'type': 'error',
-                'error': 'LLM 服务未就绪，请先初始化 LLM'
-            }, ensure_ascii=False)
-            yield f"data: {error_data}\n\n"
-        
-        return StreamingResponse(
-            error_generate(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"
-            }
-        )
     
     async def generate():
         try:

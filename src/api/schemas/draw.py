@@ -2,6 +2,7 @@
 绘图相关的数据模型。
 """
 from datetime import datetime
+from typing import Optional, Dict, Any
 from pydantic import BaseModel
 from sqlalchemy import Column, JSON
 from sqlalchemy.ext.mutable import MutableList
@@ -34,7 +35,15 @@ class Job(SQLModel, table=True):
     记录单次图像生成任务的基本信息。
     """
     job_id: str = Field(description="任务唯一标识", primary_key=True)
+    name: Optional[str] = Field(default=None, description="任务名称")
+    desc: Optional[str] = Field(default=None, description="任务描述")
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
+    completed_at: Optional[datetime] = Field(default=None, description="完成时间")
+    draw_args: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(JSON()),
+        description="绘图参数（DrawArgs 的字典形式）"
+    )
 
 
 class BatchJob(SQLModel, table=True):

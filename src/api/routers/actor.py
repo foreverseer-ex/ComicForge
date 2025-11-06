@@ -17,7 +17,6 @@ from api.schemas.actor import Actor, ActorExample
 from api.schemas.draw import DrawArgs, Job
 from api.constants.actor import character_tags_description
 from api.services.db import ActorService
-from api.services.draw.sd_forge import sd_forge_draw_service
 from api.utils.path import project_home
 
 router = APIRouter(
@@ -72,8 +71,8 @@ async def create_actor(
     return {"actor_id": actor_id}
 
 
-@router.get("/list", response_model=List[Actor], summary="列出所有Actor")
-async def list_actors(
+@router.get("/all", response_model=List[Actor], summary="列出所有Actor")
+async def get_all_actors(
     project_id: str,
     limit: int = 100,
     offset: int = 0
@@ -373,24 +372,56 @@ async def _monitor_job_and_add_portrait(
     project_id: str,
     title: str,
     desc: str,
-    draw_args: DrawArgs
+    draw_args: DrawArgs,
+    example_index: int
 ):
     """
-    监控 job 状态，完成后添加立绘到 Actor。
+    监控 job 状态，完成后更新 ActorExample 的 image_path。
     
-    这是一个后台任务函数，会轮询检查 job 状态，直到完成。
+    这是一个后台任务函数，会轮询检查 job 状态，直到完成或超时。
+    如果超时或失败，会删除之前创建的 ActorExample。
     """
-    max_attempts = 300  # 最多尝试 300 次（5分钟，每秒一次）
+    from api.services.draw import get_current_draw_service
+    from api.settings import app_settings
+    
+    # 获取当前绘图服务
+    draw_service = get_current_draw_service()
+    
+    # 根据后端类型设置超时时间
+    backend = app_settings.draw.backend
+    if backend == "civitai":
+        # Civitai 超时时间（秒），从配置中读取
+        timeout_seconds = app_settings.civitai.draw_timeout
+        max_attempts = int(timeout_seconds)  # 每秒检查一次
+    else:
+        # SD-Forge 默认超时时间：5分钟
+        max_attempts = 300
+    
     attempt = 0
+    last_error = None
     
     while attempt < max_attempts:
         try:
             # 检查 job 状态
-            if sd_forge_draw_service.get_job_status(job_id):
-                # Job 已完成，保存图片并添加到 Actor
+            if draw_service.get_job_status(job_id):
+                # Job 已完成，设置完成时间（如果未设置）
+                from api.services.db import JobService
+                job = JobService.get(job_id)
+                if job and job.completed_at is None:
+                    from datetime import datetime
+                    JobService.update(job_id, completed_at=datetime.now())
+                
+                # 保存图片并更新 ActorExample
                 actor = ActorService.get(actor_id)
                 if not actor:
                     logger.error(f"监控任务失败: Actor 不存在 {actor_id}")
+                    # 删除 ActorExample
+                    ActorService.remove_example(actor_id, example_index)
+                    return
+                
+                # 验证示例索引是否有效
+                if example_index >= len(actor.examples):
+                    logger.error(f"监控任务失败: 示例索引越界 {actor_id}, index={example_index}")
                     return
                 
                 # 保存图片到 projects/{project_id}/actors/{actor_id}/{title}.png
@@ -411,12 +442,12 @@ async def _monitor_job_and_add_portrait(
                     out_path = out_dir / filename
                 
                 # 保存图片
-                sd_forge_draw_service.save_image(job_id, out_path)
+                draw_service.save_image(job_id, out_path)
                 
                 # 生成相对路径（相对 projects 根）
                 rel_path = out_path.relative_to(project_home).as_posix()
                 
-                # 创建 ActorExample
+                # 更新 ActorExample 的 image_path
                 example = ActorExample(
                     title=title,
                     desc=desc,
@@ -424,12 +455,11 @@ async def _monitor_job_and_add_portrait(
                     image_path=rel_path,
                 )
                 
-                # 添加到 Actor
-                updated = ActorService.add_example(actor_id, example)
+                updated = ActorService.update_example(actor_id, example_index, example)
                 if updated:
-                    logger.success(f"监控任务完成: 为 Actor {actor.name} 添加立绘成功, title={title}, file={rel_path}")
+                    logger.success(f"监控任务完成: 为 Actor {actor.name} 更新立绘成功, title={title}, file={rel_path}")
                 else:
-                    logger.error(f"监控任务失败: 添加立绘示例失败 {actor_id}")
+                    logger.error(f"监控任务失败: 更新立绘示例失败 {actor_id}")
                 return
             
             # Job 未完成，等待 1 秒后重试
@@ -438,11 +468,17 @@ async def _monitor_job_and_add_portrait(
             
         except Exception as e:
             logger.exception(f"监控任务出错 (attempt {attempt}): {e}")
+            last_error = e
             await asyncio.sleep(1)
             attempt += 1
     
-    # 超时
-    logger.error(f"监控任务超时: job_id={job_id}, actor_id={actor_id}")
+    # 超时或失败，删除 ActorExample
+    logger.error(f"监控任务超时/失败: job_id={job_id}, actor_id={actor_id}, attempt={attempt}, error={last_error}")
+    try:
+        ActorService.remove_example(actor_id, example_index)
+        logger.info(f"已删除失败的 ActorExample: {actor_id}, index={example_index}")
+    except Exception as e:
+        logger.exception(f"删除失败的 ActorExample 时出错: {e}")
 
 
 @router.post("/{actor_id}/add_portrait_from_job", summary="从 job_id 添加立绘到 Actor")
@@ -484,29 +520,34 @@ async def add_portrait_from_job(
     if actor.project_id != project_id:
         raise HTTPException(status_code=403, detail=f"Actor 不属于该项目: {project_id}")
     
-    # 检查 job 是否存在
+    # 检查 job 是否存在，并获取 draw_args
     from api.services.db import JobService
     job = JobService.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
     
-    # 获取 job 的 draw_args（需要从 job 中获取，这里简化处理，假设可以从 job 中获取）
-    # 注意：当前 Job 模型中没有存储 draw_args，这里需要后续扩展
-    # 暂时使用一个空的 DrawArgs，实际使用时需要存储 draw_args
-    draw_args = DrawArgs(
-        model="",  # 需要从 job 中获取
-        prompt="",  # 需要从 job 中获取
-        negative_prompt="",
-        steps=30,
-        cfg_scale=7.0,
-        sampler="DPM++ 2M Karras",
-        seed=-1,
-        width=1024,
-        height=1024,
-        clip_skip=None,
-        vae=None,
-        loras=None,
+    # 从 job 中获取 draw_args
+    if not job.draw_args:
+        raise HTTPException(status_code=400, detail=f"任务没有保存绘图参数: {job_id}")
+    
+    # 解析 DrawArgs
+    draw_args = DrawArgs(**job.draw_args)
+    
+    # 立即创建 ActorExample（image_path 为 None，表示正在生成中）
+    example = ActorExample(
+        title=title,
+        desc=desc,
+        draw_args=draw_args,
+        image_path=None  # 正在生成中
     )
+    
+    # 添加到 Actor
+    updated = ActorService.add_example(actor_id, example)
+    if not updated:
+        raise HTTPException(status_code=500, detail=f"添加示例失败: {actor_id}")
+    
+    # 获取刚添加的示例的索引（最后一个）
+    example_index = len(updated.examples) - 1
     
     # 启动后台任务监控 job 状态
     background_tasks.add_task(
@@ -516,7 +557,89 @@ async def add_portrait_from_job(
         project_id=project_id,
         title=title,
         desc=desc,
-        draw_args=draw_args
+        draw_args=draw_args,
+        example_index=example_index  # 传递示例索引
+    )
+    
+    logger.info(f"已启动监控任务: job_id={job_id}, actor_id={actor_id}, title={title}")
+    return {
+        "job_id": job_id,
+        "actor_id": actor_id,
+        "title": title,
+        "message": f"已启动监控任务，立绘将在 job 完成后自动添加到角色 {actor.name}"
+    }
+
+
+async def add_portrait_from_job_tool(
+    actor_id: str,
+    project_id: str,
+    job_id: str,
+    title: str,
+    desc: str = "",
+) -> Dict[str, Any]:
+    """
+    从已存在的 job_id 添加立绘到 Actor（工具函数版本，不包含 BackgroundTasks）。
+    
+    这是 add_portrait_from_job 的工具函数包装版本，移除了 BackgroundTasks 参数，
+    直接使用 asyncio 创建后台任务。
+    
+    Args:
+        actor_id: Actor ID
+        project_id: 项目ID（用于权限校验）
+        job_id: 绘图任务 ID
+        title: 立绘标题（会用作文件名，即 {title}.png）
+        desc: 立绘说明/描述
+    
+    Returns:
+        包含 job_id、actor_id、title 的字典
+    """
+    # 校验 actor 归属
+    actor = ActorService.get(actor_id)
+    if not actor:
+        raise HTTPException(status_code=404, detail=f"Actor 不存在: {actor_id}")
+    if actor.project_id != project_id:
+        raise HTTPException(status_code=403, detail=f"Actor 不属于该项目: {project_id}")
+    
+    # 检查 job 是否存在，并获取 draw_args
+    from api.services.db import JobService
+    job = JobService.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
+    
+    # 从 job 中获取 draw_args
+    if not job.draw_args:
+        raise HTTPException(status_code=400, detail=f"任务没有保存绘图参数: {job_id}")
+    
+    # 解析 DrawArgs
+    draw_args = DrawArgs(**job.draw_args)
+    
+    # 立即创建 ActorExample（image_path 为 None，表示正在生成中）
+    example = ActorExample(
+        title=title,
+        desc=desc,
+        draw_args=draw_args,
+        image_path=None  # 正在生成中
+    )
+    
+    # 添加到 Actor
+    updated = ActorService.add_example(actor_id, example)
+    if not updated:
+        raise HTTPException(status_code=500, detail=f"添加示例失败: {actor_id}")
+    
+    # 获取刚添加的示例的索引（最后一个）
+    example_index = len(updated.examples) - 1
+    
+    # 使用 asyncio 创建后台任务（不依赖 FastAPI 的 BackgroundTasks）
+    asyncio.create_task(
+        _monitor_job_and_add_portrait(
+            job_id=job_id,
+            actor_id=actor_id,
+            project_id=project_id,
+            title=title,
+            desc=desc,
+            draw_args=draw_args,
+            example_index=example_index
+        )
     )
     
     logger.info(f"已启动监控任务: job_id={job_id}, actor_id={actor_id}, title={title}")

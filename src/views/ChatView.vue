@@ -21,7 +21,7 @@
         <span 
           v-if="selectedProject"
           :class="[
-            'text-xs px-2 py-1 rounded-full',
+            'text-xs px-2 py-1 rounded-full hidden md:inline-block',
             isDark ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-100 text-blue-700'
           ]"
         >
@@ -559,6 +559,7 @@ import { useProjectStore } from '../stores/project'
 import { useNavigationStore } from '../stores/navigation'
 import { storeToRefs } from 'pinia'
 import api from '../api'
+import { getApiBaseURL } from '../utils/apiConfig'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 // 动态导入 highlight.js 样式（根据主题）
@@ -637,7 +638,7 @@ const loadHistory = async () => {
 
   loadingHistory.value = true
   try {
-    const loadedMessages = await api.get('/history/list', {
+    const loadedMessages = await api.get('/history/all', {
       params: { project_id: selectedProjectId.value }
     })
     // 为每条历史消息添加稳定的 _internalKey
@@ -707,7 +708,7 @@ const sendMessage = async () => {
 
   try {
     // 使用 fetch 发送 POST 请求并读取流式响应
-    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7864'
+    const baseURL = getApiBaseURL()
     
     const response = await fetch(`${baseURL}/chat/stream`, {
       method: 'POST',

@@ -3,8 +3,11 @@ OpenAI 兼容 LLM 服务实现（支持 xAI/OpenAI/Anthropic/Google 等）。
 """
 
 import httpx
+import json
+from typing import Any, Optional
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
 from api.settings import app_settings
@@ -23,10 +26,11 @@ class OpenAILlmService(AbstractLlmService):
     - 自定义端点
     """
 
-    def initialize_llm(self) -> bool:
+    def initialize_llm(self, response_format: Optional[Any] = None) -> bool:
         """
         初始化 OpenAI 兼容的 LLM 实例。
         
+        :param response_format: 可选的响应格式（Pydantic 模型类），用于结构化输出
         :return: 初始化是否成功
         """
         try:
@@ -48,14 +52,35 @@ class OpenAILlmService(AbstractLlmService):
                 temperature=app_settings.llm.temperature,
                 http_client=http_client,
             )
-            logger.info(f"正在绑定 {len(self.tools)} 个工具到模型...")
-            llm_with_tools = self.llm.bind_tools(self.tools)
-            self.agent = create_agent(llm_with_tools, self.tools)
+            
+            # 如果有响应格式，创建同时支持工具和结构化输出的 agent
+            if response_format is not None:
+                logger.info(f"初始化带结构化输出的 agent，schema: {response_format.__name__ if hasattr(response_format, '__name__') else type(response_format)}")
+                # 注意：不能同时绑定工具和结构化输出（bind_tools().with_structured_output() 返回 RunnableSequence，无法再次 bind_tools）
+                # 所以我们采用两步策略：
+                # 1. 创建带工具的 agent（用于工具调用）
+                # 2. 保存结构化输出 LLM（用于最后一步的结构化输出）
+                llm_with_tools = self.llm.bind_tools(self.tools)
+                self.agent = create_agent(llm_with_tools, self.tools)
+                # 保存结构化输出 LLM 供后续使用
+                try:
+                    self._structured_llm = self.llm.with_structured_output(response_format)
+                    logger.info(f"成功创建带工具的 agent 和结构化输出 LLM")
+                except Exception as e:
+                    logger.warning(f"创建结构化输出 LLM 失败: {e}，将使用文本提取")
+                    self._structured_llm = None
+            else:
+                logger.info(f"正在绑定 {len(self.tools)} 个工具到模型...")
+                llm_with_tools = self.llm.bind_tools(self.tools)
+                self.agent = create_agent(llm_with_tools, self.tools)
+                self._structured_llm = None
+            
             logger.success(
                 f"OpenAI 兼容服务初始化成功: {app_settings.llm.provider} / {app_settings.llm.model} "
-                f"({len(self.tools)} 个工具)"
+                f"({len(self.tools)} 个工具" + (f"，结构化输出: {response_format.__name__ if response_format else '无'}" if response_format else "") + ")"
             )
             return True
         except Exception as e:
             logger.exception(f"OpenAI 兼容服务初始化失败: {e}")
             return False
+    

@@ -5,16 +5,13 @@
 """
 import asyncio
 from typing import List, Optional, Dict, Any
-from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
 
 from api.services.model_meta import civitai_model_meta_service, local_model_meta_service
-from api.services.draw.sd_forge import SdForgeDrawService
 from api.utils.civitai import AIR
-from api.utils.download import url_to_path
 from api.settings import app_settings
 
 router = APIRouter(
@@ -189,27 +186,19 @@ async def get_loras() -> List[Dict[str, Any]]:
     """
     获取本地模型元数据中的 LoRA 列表。
     
+    注意：此端点只返回本地缓存的模型元数据，不检查 SD-Forge 连接状态。
+    模型是否在 SD-Forge 中可用，应该在生成图片时检查。
+    
     Returns:
         LoRA 元数据列表，每个项包含：
         - name: LoRA 名称
         - alias: LoRA 别名
         - filename: 文件名
-        - available: 是否在绘图后端可用（仅当后端为 sd_forge 时检查）
         - 其他元数据字段
     """
     try:
         # 获取本地 LoRA 元数据
         lora_metas = local_model_meta_service.lora_list
-        
-        # 如果绘图后端是 SD-Forge，检查可用性
-        sd_forge_loras = set()
-        if app_settings.draw.backend == "sd_forge":
-            try:
-                sd_loras_data = SdForgeDrawService._get_loras()  # pylint: disable=protected-access
-                if isinstance(sd_loras_data, list):
-                    sd_forge_loras = {lora.get("name") for lora in sd_loras_data if lora.get("name")}
-            except Exception as e:
-                logger.warning(f"无法获取 SD-Forge LoRA 列表: {e}")
         
         # 构建返回列表
         result = []
@@ -218,14 +207,6 @@ async def get_loras() -> List[Dict[str, Any]]:
             # 手动添加 version_name 和 air（因为它们是 @property，不会自动序列化）
             lora_dict["version_name"] = lora.version_name
             lora_dict["air"] = lora.air
-            # 如果后端是 SD-Forge，标记可用性
-            if app_settings.draw.backend == "sd_forge":
-                # SD-Forge 中的 LoRA 名称通常是去掉扩展名的文件名
-                lora_filename_no_ext = Path(lora.filename).stem
-                lora_dict["available"] = lora_filename_no_ext in sd_forge_loras or lora.filename in sd_forge_loras
-            else:
-                # Civitai 后端，所有都可用
-                lora_dict["available"] = True
             
             result.append(lora_dict)
         
@@ -240,28 +221,18 @@ async def get_checkpoints() -> List[Dict[str, Any]]:
     """
     获取本地模型元数据中的 Checkpoint 列表。
     
+    注意：此端点只返回本地缓存的模型元数据，不检查 SD-Forge 连接状态。
+    模型是否在 SD-Forge 中可用，应该在生成图片时检查。
+    
     Returns:
         Checkpoint 元数据列表，每个项包含：
         - name: 模型名称
         - filename: 文件名
-        - available: 是否在绘图后端可用（仅当后端为 sd_forge 时检查）
         - 其他元数据字段
     """
     try:
         # 获取本地 Checkpoint 元数据
         checkpoint_metas = local_model_meta_service.sd_list
-        
-        # 如果绘图后端是 SD-Forge，检查可用性
-        sd_forge_models = set()
-        if app_settings.draw.backend == "sd_forge":
-            try:
-                sd_models_data = SdForgeDrawService._get_sd_models()  # pylint: disable=protected-access
-                if isinstance(sd_models_data, list):
-                    sd_forge_models = {model.get("title") for model in sd_models_data if model.get("title")}
-                    # 也添加 model_name
-                    sd_forge_models.update({model.get("model_name") for model in sd_models_data if model.get("model_name")})
-            except Exception as e:
-                logger.warning(f"无法获取 SD-Forge 模型列表: {e}")
         
         # 构建返回列表
         result = []
@@ -270,17 +241,6 @@ async def get_checkpoints() -> List[Dict[str, Any]]:
             # 手动添加 version_name 和 air（因为它们是 @property，不会自动序列化）
             model_dict["version_name"] = model.version_name
             model_dict["air"] = model.air
-            # 如果后端是 SD-Forge，标记可用性
-            if app_settings.draw.backend == "sd_forge":
-                model_filename_no_ext = Path(model.filename).stem
-                model_dict["available"] = (
-                    model.name in sd_forge_models or 
-                    model.filename in sd_forge_models or 
-                    model_filename_no_ext in sd_forge_models
-                )
-            else:
-                # Civitai 后端，所有都可用
-                model_dict["available"] = True
             
             result.append(model_dict)
         

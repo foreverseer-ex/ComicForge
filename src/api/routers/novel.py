@@ -6,6 +6,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from loguru import logger
+from pydantic import BaseModel
 
 from api.schemas.novel import NovelContent
 from api.services.db import NovelContentService
@@ -15,6 +16,13 @@ router = APIRouter(
     tags=["小说内容"],
     responses={404: {"description": "内容不存在"}},
 )
+
+
+# ==================== 请求模型 ====================
+
+class UpdateContentRequest(BaseModel):
+    """更新内容的请求模型"""
+    content: str
 
 
 # ==================== 小说内容操作 ====================
@@ -190,6 +198,70 @@ async def count_project_chapters(project_id: str) -> dict:
     return {"project_id": project_id, "chapters": count}
 
 
+@router.put("/content", summary="更新单行内容", response_model=NovelContent)
+async def update_content(
+    project_id: str,
+    chapter: int,
+    line: int,
+    request: UpdateContentRequest
+) -> NovelContent:
+    """
+    更新指定行的内容。
+    
+    Args:
+        project_id: 项目ID（查询参数）
+        chapter: 章节号（查询参数）
+        line: 行号（查询参数）
+        request: 更新请求体，包含新的内容
+    
+    Returns:
+        更新后的行内容
+    
+    Raises:
+        HTTPException: 内容不存在时返回 404
+    """
+    updated = NovelContentService.update(project_id, chapter, line, request.content)
+    if not updated:
+        raise HTTPException(
+            status_code=404,
+            detail=f"内容不存在: chapter={chapter}, line={line}"
+        )
+    logger.info(f"更新小说内容: project={project_id}, chapter={chapter}, line={line}")
+    return updated
+
+
+@router.delete("/content", summary="删除单行内容")
+async def delete_content(
+    project_id: str,
+    chapter: int,
+    line: int
+) -> dict:
+    """
+    删除指定行的内容。
+    
+    Args:
+        project_id: 项目ID（查询参数）
+        chapter: 章节号（查询参数）
+        line: 行号（查询参数）
+    
+    Returns:
+        删除结果
+    """
+    success = NovelContentService.delete_single(project_id, chapter, line)
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail=f"内容不存在: chapter={chapter}, line={line}"
+        )
+    logger.info(f"删除小说内容: project={project_id}, chapter={chapter}, line={line}")
+    return {
+        "message": "内容删除成功",
+        "project_id": project_id,
+        "chapter": chapter,
+        "line": line
+    }
+
+
 @router.delete("/content/project", summary="删除项目的所有内容")
 async def delete_project_content(project_id: str) -> dict:
     """
@@ -221,4 +293,79 @@ async def delete_chapter_content(project_id: str, chapter: int) -> dict:
     count = NovelContentService.delete_by_chapter(project_id, chapter)
     logger.info(f"删除章节内容: project={project_id}, chapter={chapter}, 共 {count} 条")
     return {"message": "章节内容删除成功", "project_id": project_id, "chapter": chapter, "deleted_count": count}
+
+
+@router.post("/content/insert", summary="插入内容并重新编号")
+async def insert_content(
+    project_id: str,
+    chapter: int,
+    line: int,
+    content: str
+) -> dict:
+    """
+    在指定位置插入内容，并自动重新编号后续行。
+    
+    Args:
+        project_id: 项目ID（查询参数）
+        chapter: 章节号（查询参数）
+        line: 插入位置的行号（新内容将插入在这个位置，原位置及后续行号+1）
+        content: 要插入的内容
+    
+    Returns:
+        插入结果
+    """
+    # 先重新编号：将line及之后的所有行的行号+1
+    NovelContentService.shift_lines(project_id, chapter, line, 1)
+    
+    # 创建新内容
+    novel_content = NovelContent(
+        project_id=project_id,
+        chapter=chapter,
+        line=line,
+        content=content
+    )
+    created = NovelContentService.create(novel_content)
+    logger.info(f"插入小说内容: project={project_id}, chapter={chapter}, line={line}")
+    return {"id": created.id}
+
+
+@router.post("/content/insert/batch", summary="批量插入内容并重新编号")
+async def batch_insert_content(
+    project_id: str,
+    chapter: int,
+    line: int,
+    contents: List[str]
+) -> dict:
+    """
+    在指定位置批量插入内容，并自动重新编号后续行。
+    
+    Args:
+        project_id: 项目ID（查询参数）
+        chapter: 章节号（查询参数）
+        line: 插入位置的行号（新内容将插入在这个位置，原位置及后续行号+N，N为插入的段落数）
+        contents: 要插入的内容列表（每个元素是一个段落）
+    
+    Returns:
+        插入结果
+    """
+    if not contents:
+        return {"message": "没有内容需要插入", "count": 0}
+    
+    # 先重新编号：将line及之后的所有行的行号+N（N为插入的段落数）
+    NovelContentService.shift_lines(project_id, chapter, line, len(contents))
+    
+    # 批量创建新内容
+    novel_contents = [
+        NovelContent(
+            project_id=project_id,
+            chapter=chapter,
+            line=line + i,
+            content=content
+        )
+        for i, content in enumerate(contents)
+    ]
+    
+    NovelContentService.batch_create(novel_contents)
+    logger.info(f"批量插入小说内容: project={project_id}, chapter={chapter}, line={line}, count={len(contents)}")
+    return {"message": "批量插入成功", "count": len(contents)}
 
