@@ -62,6 +62,30 @@
         <!-- 内容区域 -->
         <div class="flex-1 overflow-y-auto p-4 md:p-6">
           <div class="space-y-4">
+            <!-- Job ID（如果提供） -->
+            <div v-if="jobId">
+              <label :class="['block text-sm font-semibold mb-2', isDark ? 'text-gray-300' : 'text-gray-700']">
+                Job ID
+              </label>
+              <div class="flex items-center gap-2">
+                <div :class="['flex-1 px-3 py-2 rounded border font-mono text-sm', isDark ? 'bg-gray-700 border-gray-600 text-gray-300' : 'bg-gray-50 border-gray-300 text-gray-900']">
+                  {{ jobId }}
+                </div>
+                <button
+                  @click="copyJobId"
+                  :class="[
+                    'px-3 py-2 rounded border transition-colors text-sm font-medium',
+                    isDark
+                      ? 'border-gray-600 bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                  ]"
+                  title="复制 Job ID"
+                >
+                  复制
+                </button>
+              </div>
+            </div>
+
             <!-- 基础模型 -->
             <div>
               <label :class="['block text-sm font-semibold mb-2', isDark ? 'text-gray-300' : 'text-gray-700']">
@@ -193,6 +217,7 @@ export interface DrawParams {
 interface Props {
   params: DrawParams | null
   title?: string  // 可自定义标题
+  jobId?: string  // Job ID（可选）
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -205,6 +230,19 @@ const emit = defineEmits<{
 
 const themeStore = useThemeStore()
 const { isDark } = storeToRefs(themeStore)
+
+// 复制 Job ID 到剪贴板
+const copyJobId = async () => {
+  if (!props.jobId) return
+  
+  try {
+    await navigator.clipboard.writeText(props.jobId)
+    showToast('Job ID 已复制到剪贴板', 'success')
+  } catch (error) {
+    console.error('复制失败:', error)
+    showToast('复制失败，请重试', 'error')
+  }
+}
 
 // 复制参数到剪贴板
 const copyParams = async () => {

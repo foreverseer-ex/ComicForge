@@ -20,16 +20,31 @@
       </div>
       
       <div v-if="selectedProjectId" class="flex items-center gap-2">
+        <!-- 隐私模式 -->
+        <button
+          @click="togglePrivacyMode"
+          :class="[
+            'p-2 rounded-lg transition-colors',
+            privacyMode
+              ? isDark ? 'text-blue-400' : 'text-blue-600'
+              : isDark ? 'text-gray-400' : 'text-gray-500',
+            isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
+          ]"
+          :title="privacyMode ? '隐私模式：已启用（点击关闭）' : '隐私模式：已关闭（点击启用）'"
+        >
+          <EyeSlashIcon v-if="privacyMode" class="w-5 h-5" />
+          <EyeIcon v-else class="w-5 h-5" />
+        </button>
         <button
           v-if="actors.length > 0"
-          @click="selectedActorIds.size > 0 ? handleDeleteSelected() : handleClearAll()"
+          @click="handleClearAll"
           :class="[
             'p-2 rounded-lg transition-colors',
             isDark
               ? 'bg-red-600 hover:bg-red-700 text-white'
               : 'bg-red-600 hover:bg-red-700 text-white'
           ]"
-          :title="selectedActorIds.size > 0 ? `删除选中 (${selectedActorIds.size})` : '清空所有角色'"
+          title="清空所有角色"
         >
           <TrashIcon class="w-5 h-5" />
         </button>
@@ -147,61 +162,14 @@
         v-else
         class="space-y-4"
       >
-        <!-- 全选复选框（如果有角色） -->
-        <div 
-          v-if="actors.length > 0"
-          :class="[
-            'pb-2 mb-2 border-b',
-            isDark ? 'border-gray-700' : 'border-gray-200'
-          ]"
-        >
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              :checked="isAllSelected"
-              @change="toggleSelectAll"
-              :class="[
-                'w-4 h-4 rounded cursor-pointer',
-                isDark ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
-              ]"
-            />
-            <span :class="['text-sm font-medium', isDark ? 'text-gray-300' : 'text-gray-700']">
-              全选 (已选择 {{ selectedActorIds.size }} 项)
-            </span>
-          </label>
-        </div>
-        
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           <div
             v-for="actor in actors"
             :key="actor.actor_id"
-            class="relative"
           >
-            <!-- 复选框覆盖层 -->
-            <div 
-              class="absolute top-2 left-2 z-10"
-              @click.stop
-            >
-              <input
-                type="checkbox"
-                :checked="selectedActorIds.has(actor.actor_id)"
-                @change="toggleSelectActor(actor.actor_id)"
-                :class="[
-                  'w-5 h-5 rounded cursor-pointer shadow-lg',
-                  isDark ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
-                ]"
-              />
-            </div>
-            
-            <!-- 选中高亮 -->
-            <div
-              v-if="selectedActorIds.has(actor.actor_id)"
-              class="absolute inset-0 border-2 border-blue-500 rounded-lg pointer-events-none z-20"
-              :class="isDark ? 'bg-blue-900/20' : 'bg-blue-100/30'"
-            ></div>
-            
             <ActorCard
               :actor="actor"
+              :privacy-mode="privacyMode"
               @open-detail="openDetailDialog"
               @open-examples="openExamplesDialog"
               :on-delete="handleDelete"
@@ -388,8 +356,9 @@
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
+import { usePrivacyStore } from '../stores/privacy'
 import { storeToRefs } from 'pinia'
-import { UserGroupIcon, PlusIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { UserGroupIcon, PlusIcon, TrashIcon, EyeIcon, EyeSlashIcon } from '@heroicons/vue/24/outline'
 import ActorCard from '../components/ActorCard.vue'
 import ActorDetailDialog from '../components/ActorDetailDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -412,17 +381,21 @@ const { isDark } = storeToRefs(themeStore)
 const projectStore = useProjectStore()
 const { selectedProjectId } = storeToRefs(projectStore)
 
+const privacyStore = usePrivacyStore()
+const { privacyMode } = storeToRefs(privacyStore)
+
+// 切换隐私模式
+const togglePrivacyMode = () => {
+  privacyStore.togglePrivacyMode()
+}
+
 const loading = ref(false)
 const actors = ref<Actor[]>([])
 const showCreateDialog = ref(false)
 const editingActor = ref<Actor | null>(null)
-const actorToDelete = ref<Actor | null>(null)
 const detailActor = ref<Actor | null>(null)
 const saving = ref(false)
 const deleting = ref(false)
-
-// 多选状态
-const selectedActorIds = ref<Set<string>>(new Set())
 
 // 统一确认对话框
 const confirmDialog = ref({
@@ -502,53 +475,7 @@ const saveActor = async () => {
         }
       })
       actorId = result.actor_id
-      
-      // 创建角色后，自动创建一个生成角色立绘的任务
-      try {
-        const taskName = `角色立绘 - ${actorForm.value.name.trim()}`
-        const taskDescParts: string[] = []
-        if (actorForm.value.desc.trim()) {
-          taskDescParts.push(actorForm.value.desc.trim())
-        }
-        const taskDesc = taskDescParts.join('\n')
-        
-        // 调用 AI 生成参数 API
-        const paramsResponse = await api.post('/llm/generate-draw-params', {
-          name: taskName,
-          desc: taskDesc || undefined
-        })
-        
-        if (paramsResponse.success && paramsResponse.params) {
-          const params = paramsResponse.params
-          const lorasDict: Record<string, number> = params.loras || {}
-          
-          // 创建绘图任务
-          await api.post('/draw', null, {
-            params: {
-              name: taskName,
-              desc: taskDesc || undefined,
-              model: params.model,
-              prompt: params.prompt,
-              negative_prompt: params.negative_prompt,
-              sampler_name: params.sampler_name || params.sampler,
-              steps: params.steps,
-              cfg_scale: params.cfg_scale,
-              width: params.width,
-              height: params.height,
-              seed: params.seed,
-              clip_skip: params.clip_skip || undefined,
-              vae: params.vae || undefined,
-              loras: Object.keys(lorasDict).length > 0 ? JSON.stringify(lorasDict) : undefined
-            }
-          })
-          
-          showToast('角色创建成功，已自动提交立绘生成任务', 'success')
-        }
-      } catch (error: any) {
-        // 如果自动创建任务失败，不影响角色创建，只记录错误
-        console.error('自动创建立绘任务失败:', error)
-        showToast('角色创建成功，但自动创建立绘任务失败', 'warning')
-      }
+      showToast('角色创建成功', 'success')
     }
     
     closeCreateDialog()
@@ -590,62 +517,6 @@ const openExamplesDialog = (actor: Actor) => {
   console.log('打开示例图:', actor)
 }
 
-// 全选/取消全选
-const toggleSelectAll = () => {
-  if (isAllSelected.value) {
-    selectedActorIds.value.clear()
-  } else {
-    actors.value.forEach(actor => {
-      selectedActorIds.value.add(actor.actor_id)
-    })
-  }
-}
-
-// 是否全选
-const isAllSelected = computed(() => {
-  return actors.value.length > 0 && selectedActorIds.value.size === actors.value.length
-})
-
-// 切换单个角色的选择状态
-const toggleSelectActor = (actorId: string) => {
-  if (selectedActorIds.value.has(actorId)) {
-    selectedActorIds.value.delete(actorId)
-  } else {
-    selectedActorIds.value.add(actorId)
-  }
-}
-
-// 删除选中的角色
-const handleDeleteSelected = () => {
-  const count = selectedActorIds.value.size
-  if (count === 0) return
-
-  confirmDialog.value = {
-    show: true,
-    title: '确认删除',
-    message: `确定要删除选中的 ${count} 个角色吗？此操作不可恢复！\n\n⚠️ 此操作将删除角色的所有示例图片和标签，且不可恢复！`,
-    onConfirm: async () => {
-      confirmDialog.value.show = false
-      deleting.value = true
-      try {
-        const actorIds = Array.from(selectedActorIds.value)
-        for (const actorId of actorIds) {
-          await api.delete(`/actor/${actorId}`)
-        }
-        
-        selectedActorIds.value.clear()
-        await loadActors()
-        showToast(`成功删除 ${count} 个角色`, 'success')
-      } catch (error: any) {
-        console.error('批量删除角色失败:', error)
-        showToast('删除失败: ' + (error.response?.data?.detail || error.message), 'error')
-      } finally {
-        deleting.value = false
-      }
-    }
-  }
-}
-
 // 清空所有角色
 const handleClearAll = () => {
   if (actors.value.length === 0) return
@@ -663,7 +534,6 @@ const handleClearAll = () => {
           await api.delete(`/actor/${actor.actor_id}`)
         }
         
-        selectedActorIds.value.clear()
         await loadActors()
         showToast(`成功删除所有角色`, 'success')
       } catch (error: any) {
@@ -688,8 +558,6 @@ const handleDelete = (actor: Actor) => {
       try {
         await api.delete(`/actor/${actor.actor_id}`)
         
-        // 清除已删除角色的选中状态
-        selectedActorIds.value.delete(actor.actor_id)
         await loadActors()
         showToast('角色已删除', 'success')
       } catch (error: any) {
@@ -704,12 +572,22 @@ const handleDelete = (actor: Actor) => {
 
 // 刷新角色列表（用于详情对话框更新后刷新）
 const handleRefresh = async () => {
+  // 先保存当前 detailActor 的 ID
+  const currentActorId = detailActor.value?.actor_id
+  
+  // 重新加载所有角色
   await loadActors()
+  
   // 如果详情对话框打开，更新其数据
-  if (detailActor.value) {
-    const updatedActor = actors.value.find(a => a.actor_id === detailActor.value?.actor_id)
+  if (currentActorId && detailActor.value) {
+    const updatedActor = actors.value.find(a => a.actor_id === currentActorId)
     if (updatedActor) {
-      detailActor.value = updatedActor
+      // 创建新对象，确保响应式系统检测到变化
+      // 特别注意：需要深拷贝 examples 数组，确保顺序变化能被检测到
+      detailActor.value = {
+        ...updatedActor,
+        examples: [...updatedActor.examples]
+      }
     }
   }
 }
@@ -721,8 +599,10 @@ const hasGeneratingPortrait = computed(() => {
   )
 })
 
-// 每5秒刷新一次（如果有正在生成的立绘）
+// 每5秒检查一次正在生成的立绘状态（如果有正在生成的立绘）
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+// 保存上一次的 actors 状态快照，用于比较是否有变化
+let lastActorsState = ref<string>('')
 
 watch([hasGeneratingPortrait, selectedProjectId], ([hasGenerating, projectId]) => {
   // 清除旧的定时器
@@ -731,18 +611,80 @@ watch([hasGeneratingPortrait, selectedProjectId], ([hasGenerating, projectId]) =
     refreshTimer = null
   }
   
-  // 如果有正在生成的立绘且项目有效，启动定时刷新
+  // 初始化状态快照
+  if (actors.value.length > 0) {
+    lastActorsState.value = JSON.stringify(actors.value.map(actor => ({
+      actor_id: actor.actor_id,
+      examples: actor.examples?.map((ex: any) => ({
+        image_path: ex.image_path,
+        title: ex.title
+      })) || []
+    })))
+  }
+  
+  // 如果有正在生成的立绘且项目有效，启动定时检查（只检查状态变化，不刷新整个页面）
   if (hasGenerating && projectId) {
     refreshTimer = setInterval(async () => {
-      await loadActors()
-      // 如果详情对话框打开，更新其数据
-      if (detailActor.value) {
-        const updatedActor = actors.value.find(a => a.actor_id === detailActor.value?.actor_id)
-        if (updatedActor) {
-          detailActor.value = updatedActor
+      try {
+        // 只获取有正在生成立绘的 actor 列表，检查是否有变化
+        const response = await api.get(`/actor/all`, {
+          params: {
+            project_id: projectId,
+            limit: 1000
+          }
+        })
+        
+        if (response && Array.isArray(response)) {
+          // 比较当前状态和上次状态
+          const currentState = JSON.stringify(response.map((actor: any) => ({
+            actor_id: actor.actor_id,
+            examples: actor.examples?.map((ex: any) => ({
+              image_path: ex.image_path,
+              title: ex.title
+            })) || []
+          })))
+          
+          // 如果有变化（比如 image_path 从 null 变成了有值），才更新
+          if (currentState !== lastActorsState.value) {
+            lastActorsState.value = currentState
+            
+            // 只更新 actors 列表，不触发整个页面刷新
+            // 智能更新：只更新有变化的 actor
+            response.forEach((updatedActor: any) => {
+              const existingIndex = actors.value.findIndex(a => a.actor_id === updatedActor.actor_id)
+              if (existingIndex >= 0) {
+                // 检查这个 actor 的 examples 是否有变化
+                const existingActor = actors.value[existingIndex]
+                const existingExamplesState = JSON.stringify(existingActor.examples?.map((ex: any) => ({
+                  image_path: ex.image_path,
+                  title: ex.title
+                })) || [])
+                const updatedExamplesState = JSON.stringify(updatedActor.examples?.map((ex: any) => ({
+                  image_path: ex.image_path,
+                  title: ex.title
+                })) || [])
+                
+                // 只有 examples 有变化时才更新
+                if (existingExamplesState !== updatedExamplesState) {
+                  actors.value[existingIndex] = { ...updatedActor, examples: [...updatedActor.examples] }
+                  
+                  // 如果详情对话框打开且是当前 actor，更新其数据
+                  if (detailActor.value && detailActor.value.actor_id === updatedActor.actor_id) {
+                    detailActor.value = { ...updatedActor, examples: [...updatedActor.examples] }
+                  }
+                }
+              } else {
+                // 新 actor，添加到列表
+                actors.value.push(updatedActor)
+              }
+            })
+          }
+          // 如果没有变化，不进行任何操作，避免刷新页面
         }
+      } catch (error) {
+        console.error('检查立绘状态失败:', error)
       }
-    }, 5000) // 每5秒刷新一次
+    }, 5000) // 每5秒检查一次
   }
 }, { immediate: true })
 

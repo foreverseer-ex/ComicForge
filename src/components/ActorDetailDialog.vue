@@ -121,17 +121,35 @@
               <div 
                 v-if="currentExample && currentExample.image_path"
                 :class="[
-                  'w-full h-96 rounded-lg overflow-hidden border flex items-center justify-center cursor-pointer',
+                  'w-full h-96 rounded-lg overflow-hidden border flex flex-col cursor-pointer relative',
                   isDark ? 'border-gray-600 bg-gray-900' : 'border-gray-200 bg-gray-50'
                 ]"
                 @click="openImageGallery"
               >
-                <img
-                  :src="getExampleImageUrl(currentExample, currentExampleIndex)"
-                  :alt="currentExample.title || actor.name"
-                  class="w-full h-full object-contain"
-                  @error="handleImageError"
-                />
+                <div class="flex-1 flex items-center justify-center">
+                  <img
+                    v-if="!privacyMode"
+                    :src="getExampleImageUrlWithRetry(currentExample, currentExampleIndex)"
+                    :alt="currentExample.title || actor.name"
+                    class="w-full h-full object-contain"
+                    @error="handleCurrentImageError"
+                    @load="handleCurrentImageLoad"
+                  />
+                  <div v-else class="flex flex-col items-center justify-center">
+                    <PhotoIcon class="w-16 h-16 mb-2" :class="isDark ? 'text-gray-600' : 'text-gray-400'" />
+                    <span :class="['text-sm', isDark ? 'text-gray-500' : 'text-gray-500']">隐私模式</span>
+                  </div>
+                </div>
+                <!-- 标题（浮动在图片下方） -->
+                <div 
+                  v-if="currentExample.title"
+                  :class="[
+                    'absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-sm px-3 py-2 text-center',
+                    isDark ? 'bg-opacity-80' : 'bg-opacity-70'
+                  ]"
+                >
+                  {{ currentExample.title }}
+                </div>
               </div>
               <div 
                 v-else-if="currentExample && !currentExample.image_path"
@@ -312,67 +330,103 @@
                 >
                   立绘列表 ({{ exampleCount }})
                 </h3>
-                <button
-                  v-if="exampleCount > 0"
-                  @click="openGenerateDialog"
-                  :class="[
-                    'flex items-center gap-1 text-sm px-3 py-1.5 rounded-lg transition-colors',
-                    isDark
-                      ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                      : 'bg-blue-500 hover:bg-blue-600 text-white'
-                  ]"
-                  title="生成新立绘"
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                  </svg>
-                  生成新立绘
-                </button>
+                <div class="flex items-center gap-2">
+                  <button
+                    v-if="exampleCount > 0"
+                    @click="clearAllExamples"
+                    :class="[
+                      'p-2 rounded-lg transition-colors',
+                      isDark
+                        ? 'bg-red-600 hover:bg-red-700 text-white'
+                        : 'bg-red-500 hover:bg-red-600 text-white'
+                    ]"
+                    title="清空所有立绘"
+                  >
+                    <TrashIcon class="w-5 h-5" />
+                  </button>
+                  <button
+                    v-if="exampleCount > 0"
+                    @click="openGenerateDialog"
+                    :class="[
+                      'p-2 rounded-lg transition-colors',
+                      isDark
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                        : 'bg-blue-500 hover:bg-blue-600 text-white'
+                    ]"
+                    title="生成新立绘"
+                  >
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                  </button>
+                </div>
               </div>
               <div v-if="exampleCount > 0" class="overflow-x-auto">
                 <div class="flex gap-4 pb-2">
                   <div
                     v-for="(example, index) in actor.examples"
                     :key="index"
-                    :class="[
-                      'relative rounded-lg overflow-hidden border cursor-pointer group flex-shrink-0',
-                      isDark ? 'border-gray-600' : 'border-gray-200'
-                    ]"
-                    style="width: 120px; height: 120px;"
-                    @click="viewExample(index)"
-                    @contextmenu.prevent="showExampleContextMenu($event, example, index)"
+                    class="flex-shrink-0"
+                    style="width: 120px;"
                   >
-                    <!-- 有图片路径时显示图片 -->
-                    <template v-if="example.image_path">
-                      <img
-                        :src="getExampleImageUrl(example, index)"
-                        :alt="example.title || `立绘 ${index + 1}`"
-                        class="w-full h-full object-cover"
-                        @error="handleImageError"
-                      />
-                    </template>
-                    <!-- 没有图片路径时显示生成中 -->
-                    <template v-else>
-                      <div 
-                        :class="[
-                          'w-full h-full flex flex-col items-center justify-center',
-                          isDark ? 'bg-gray-800' : 'bg-gray-100'
-                        ]"
-                      >
-                        <div class="animate-spin rounded-full h-8 w-8 border-b-2" 
-                             :class="isDark ? 'border-blue-500' : 'border-blue-600'"></div>
-                        <span :class="['text-xs mt-2', isDark ? 'text-gray-400' : 'text-gray-500']">生成中...</span>
-                      </div>
-                    </template>
-                    <div 
+                    <!-- 图片容器 -->
+                    <div
                       :class="[
-                        'absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity flex items-center justify-center',
-                        isDark ? 'text-gray-300' : 'text-white'
+                        'relative rounded-lg overflow-hidden border cursor-pointer',
+                        isDark ? 'border-gray-600' : 'border-gray-200'
+                      ]"
+                      style="width: 120px; height: 120px;"
+                      @click="viewExample(index)"
+                      @contextmenu.prevent="showExampleContextMenu($event, example, index)"
+                    >
+                      <!-- 有图片路径时显示图片 -->
+                      <template v-if="example.image_path">
+                        <img
+                          v-if="!privacyMode"
+                          :src="getExampleImageUrlWithRetry(example, index)"
+                          :alt="example.title || `立绘 ${index + 1}`"
+                          class="w-full h-full object-cover"
+                          @error="(e) => handleExampleImageError(e, index)"
+                          @load="(e) => handleExampleImageLoad(e, index)"
+                        />
+                        <div v-else :class="['w-full h-full flex flex-col items-center justify-center', isDark ? 'bg-gray-800' : 'bg-gray-100']">
+                          <PhotoIcon class="w-8 h-8 mb-1" :class="isDark ? 'text-gray-600' : 'text-gray-400'" />
+                          <span :class="['text-xs', isDark ? 'text-gray-500' : 'text-gray-500']">隐私模式</span>
+                        </div>
+                      </template>
+                      <!-- 没有图片路径时显示生成中 -->
+                      <template v-else>
+                        <div 
+                          :class="[
+                            'w-full h-full flex flex-col items-center justify-center',
+                            isDark ? 'bg-gray-800' : 'bg-gray-100'
+                          ]"
+                        >
+                          <div class="animate-spin rounded-full h-8 w-8 border-b-2" 
+                               :class="isDark ? 'border-blue-500' : 'border-blue-600'"></div>
+                          <span :class="['text-xs mt-2', isDark ? 'text-gray-400' : 'text-gray-500']">生成中...</span>
+                        </div>
+                      </template>
+                    </div>
+                    <!-- 标题（在图片下方，不是浮动） -->
+                    <div
+                      v-if="example.title"
+                      @click.stop="viewExampleParams(index)"
+                      :class="[
+                        'mt-2 text-xs text-center cursor-pointer truncate px-1',
+                        isDark ? 'text-gray-300' : 'text-gray-600'
+                      ]"
+                      :title="example.title"
+                    >
+                      {{ example.title }}
+                    </div>
+                    <div
+                      v-else
+                      :class="[
+                        'mt-2 text-xs text-center text-gray-500 px-1'
                       ]"
                     >
-                      <span class="text-xs opacity-0 group-hover:opacity-100 text-center px-1">
-                        {{ example.title || `立绘 ${index + 1}` }}
-                      </span>
+                      立绘 {{ index + 1 }}
                     </div>
                   </div>
                 </div>
@@ -549,6 +603,18 @@
         设置为默认图像
       </button>
       <button
+        v-if="exampleCount > 1"
+        @click="deleteOtherExamples"
+        :class="[
+          'w-full px-4 py-2 text-left text-sm transition-colors',
+          isDark 
+            ? 'text-gray-300 hover:bg-orange-600 hover:text-white' 
+            : 'text-gray-700 hover:bg-orange-500 hover:text-white'
+        ]"
+      >
+        删除其他立绘
+      </button>
+      <button
         @click="deleteExample"
         :class="[
           'w-full px-4 py-2 text-left text-sm transition-colors',
@@ -591,6 +657,7 @@
 <script setup lang="ts">
 import { computed, ref, nextTick, watch, onUnmounted, onMounted } from 'vue'
 import { useThemeStore } from '../stores/theme'
+import { usePrivacyStore } from '../stores/privacy'
 import { storeToRefs } from 'pinia'
 import { 
   PhotoIcon, 
@@ -599,7 +666,8 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   InformationCircleIcon,
-  ClipboardIcon
+  ClipboardIcon,
+  TrashIcon
 } from '@heroicons/vue/24/outline'
 import api from '../api'
 import { getApiBaseURL } from '../utils/apiConfig'
@@ -634,6 +702,9 @@ const emit = defineEmits<{
 
 const themeStore = useThemeStore()
 const { isDark } = storeToRefs(themeStore)
+
+const privacyStore = usePrivacyStore()
+const { privacyMode } = storeToRefs(privacyStore)
 
 // 颜色选择
 const localColor = ref('#808080')
@@ -706,7 +777,80 @@ const getExampleImageUrl = (example: any, index: number) => {
   if (!example?.image_path || !props.actor) return ''
   const baseURL = getApiBaseURL()
   // 通过 actor-example 端点获取图片
-  return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=${index}`
+  // 使用 image_path 作为缓存破坏参数，确保不同图片使用不同的 URL
+  // 这样即使两个 job 名称相同，只要 image_path 不同，URL 就不同
+  return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=${index}&path=${encodeURIComponent(example.image_path)}`
+}
+
+// 图片重试相关状态
+const currentImageRetryCount = ref(0)
+const currentImageLoadKey = ref(0)
+const currentImageTimestamp = ref(Date.now())
+const exampleImageRetryCounts = ref<Record<number, number>>({})
+const exampleImageLoadKeys = ref<Record<number, number>>({})
+const exampleImageTimestamps = ref<Record<number, number>>({})
+
+// 带重试的当前图片URL
+const getExampleImageUrlWithRetry = (example: any, index: number) => {
+  const baseUrl = getExampleImageUrl(example, index)
+  if (!baseUrl) return ''
+  
+  // 根据是否是当前显示的图片，使用不同的重试计数
+  const isCurrent = index === currentExampleIndex.value
+  const retryCount = isCurrent ? currentImageRetryCount.value : (exampleImageRetryCounts.value[index] || 0)
+  const loadKey = isCurrent ? currentImageLoadKey.value : (exampleImageLoadKeys.value[index] || 0)
+  const timestamp = isCurrent ? currentImageTimestamp.value : (exampleImageTimestamps.value[index] || Date.now())
+  
+  // 添加时间戳和重试次数作为查询参数，避免浏览器缓存
+  const separator = baseUrl.includes('?') ? '&' : '?'
+  return `${baseUrl}${separator}_t=${timestamp}&_retry=${retryCount}&_key=${loadKey}`
+}
+
+// 当前图片错误处理
+const handleCurrentImageError = (event: Event) => {
+  const img = event.target as HTMLImageElement
+  if (currentImageRetryCount.value < 3) {
+    currentImageRetryCount.value++
+    currentImageLoadKey.value++
+    currentImageTimestamp.value = Date.now() // 更新时间戳，强制重新加载
+    setTimeout(() => {
+      if (img && currentExample.value) {
+        img.src = getExampleImageUrlWithRetry(currentExample.value, currentExampleIndex.value)
+      }
+    }, 500)
+  } else {
+    console.error('当前图片加载失败，已重试3次:', getExampleImageUrl(currentExample.value!, currentExampleIndex.value))
+  }
+}
+
+// 当前图片加载成功
+const handleCurrentImageLoad = () => {
+  currentImageRetryCount.value = 0
+  currentImageLoadKey.value = 0
+}
+
+// 立绘列表中图片错误处理
+const handleExampleImageError = (event: Event, index: number) => {
+  const img = event.target as HTMLImageElement
+  const retryCount = exampleImageRetryCounts.value[index] || 0
+  if (retryCount < 3) {
+    exampleImageRetryCounts.value[index] = retryCount + 1
+    exampleImageLoadKeys.value[index] = (exampleImageLoadKeys.value[index] || 0) + 1
+    exampleImageTimestamps.value[index] = Date.now() // 更新时间戳，强制重新加载
+    setTimeout(() => {
+      if (img && props.actor?.examples[index]) {
+        img.src = getExampleImageUrlWithRetry(props.actor.examples[index], index)
+      }
+    }, 500)
+  } else {
+    console.error(`立绘 ${index} 加载失败，已重试3次:`, getExampleImageUrl(props.actor!.examples[index], index))
+  }
+}
+
+// 立绘列表中图片加载成功
+const handleExampleImageLoad = (event: Event, index: number) => {
+  exampleImageRetryCounts.value[index] = 0
+  exampleImageLoadKeys.value[index] = 0
 }
 
 // 检查是否有正在生成的立绘（image_path 为 None）
@@ -715,8 +859,10 @@ const hasGeneratingPortrait = computed(() => {
   return props.actor.examples.some((ex: any) => !ex.image_path)
 })
 
-// 每5秒刷新一次（如果有正在生成的立绘）
+// 每5秒检查一次正在生成的立绘状态（如果有正在生成的立绘）
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+// 保存上一次的 examples 状态，用于比较是否有变化
+const lastExamplesState = ref<string>('')
 
 watch(() => props.actor, (newActor) => {
   // 清除旧的定时器
@@ -725,26 +871,44 @@ watch(() => props.actor, (newActor) => {
     refreshTimer = null
   }
   
-  // 如果有正在生成的立绘，启动定时刷新
+  // 初始化状态快照
+  if (newActor?.examples) {
+    lastExamplesState.value = JSON.stringify(newActor.examples.map((ex: any) => ({
+      image_path: ex.image_path,
+      title: ex.title
+    })))
+  }
+  
+  // 如果有正在生成的立绘，启动定时检查（只检查状态变化，不刷新整个页面）
   if (newActor && hasGeneratingPortrait.value) {
     refreshTimer = setInterval(async () => {
       try {
-        // 重新加载 actor 数据
+        // 只获取 actor 数据，检查是否有变化
         const response = await api.get(`/actor/${newActor.actor_id}`)
-        if (response) {
-          emit('refresh')
+        if (response && response.examples) {
+          // 比较当前状态和上次状态
+          const currentState = JSON.stringify(response.examples.map((ex: any) => ({
+            image_path: ex.image_path,
+            title: ex.title
+          })))
+          
+          // 如果有变化（比如 image_path 从 null 变成了有值），才更新
+          if (currentState !== lastExamplesState.value) {
+            lastExamplesState.value = currentState
+            // 只更新 actor 数据，不触发整个页面刷新
+            // 通过 emit('refresh') 让父组件更新，但父组件会智能更新，不会关闭对话框
+            emit('refresh')
+          }
+          // 如果没有变化，不进行任何操作，避免刷新页面
         }
       } catch (error) {
-        console.error('刷新立绘状态失败:', error)
+        console.error('检查立绘状态失败:', error)
       }
-    }, 5000) // 每5秒刷新一次
+    }, 5000) // 每5秒检查一次
   }
 }, { immediate: true })
 
 
-const handleImageError = () => {
-  // 图片加载失败处理
-}
 
 // 开始编辑名称
 const startEditName = () => {
@@ -947,14 +1111,25 @@ const nextExample = () => {
   }
 }
 
-// 监听角色变化，重置索引
-watch(() => props.actor, () => {
-  if (props.actor) {
-    currentExampleIndex.value = 0
+// 监听角色变化，只在角色ID变化时重置索引（避免交换立绘时错误重置）
+let lastActorId = ref<string | null>(null)
+watch(() => props.actor, (newActor, oldActor) => {
+  if (newActor) {
+    // 只有在角色ID变化时才重置索引（新打开对话框时）
+    if (lastActorId.value !== newActor.actor_id) {
+      currentExampleIndex.value = 0
+      lastActorId.value = newActor.actor_id
+    } else if (oldActor && newActor.examples && oldActor.examples) {
+      // 如果角色ID相同，但 examples 数组引用变化了，说明数据已更新
+      // 保持当前索引不变（已经在 setAsDefaultExample 中更新了）
+      // 这里不需要做任何操作，让 Vue 的响应式系统自动更新视图
+    }
     showParamsDialog.value = false
     showImageGallery.value = false
+  } else {
+    lastActorId.value = null
   }
-}, { immediate: true })
+}, { immediate: true, deep: true })
 
 // 查看立绘（点击时）
 const viewExample = (index: number) => {
@@ -962,6 +1137,17 @@ const viewExample = (index: number) => {
   currentExampleIndex.value = index
   if (props.actor?.examples[index]?.image_path) {
     openImageGallery()
+  }
+}
+
+// 查看立绘参数（点击标题时）
+const viewExampleParams = (index: number) => {
+  if (!props.actor?.examples || index >= props.actor.examples.length) return
+  const example = props.actor.examples[index]
+  if (example?.draw_args) {
+    // 设置当前索引（用于显示正确的参数）
+    currentExampleIndex.value = index
+    showParamsDialog.value = true
   }
 }
 
@@ -1048,23 +1234,28 @@ const setAsDefaultExample = async () => {
     return
   }
   
+  const oldIndex = contextMenu.value.index
+  
   try {
     // 调用交换API，将选中的立绘与index=0的立绘交换
     await api.post(`/actor/${props.actor.actor_id}/example/swap`, null, {
       params: {
-        index1: contextMenu.value.index,
+        index1: oldIndex,
         index2: 0
       }
     })
     
     contextMenu.value.show = false
-    // 如果当前查看的是被交换的立绘，更新索引
-    if (currentExampleIndex.value === contextMenu.value.index) {
-      currentExampleIndex.value = 0
-    } else if (currentExampleIndex.value === 0) {
-      currentExampleIndex.value = contextMenu.value.index
-    }
+    
+    // 设置默认图像后，切换到第0张图像（因为默认图像就是索引0）
+    currentExampleIndex.value = 0
+    
+    // 触发刷新，让父组件重新加载 actor 数据
     emit('refresh')
+    
+    // 等待一小段时间，确保数据已更新
+    await new Promise(resolve => setTimeout(resolve, 100))
+    
     showToast('已设置为默认图像', 'success')
   } catch (error: any) {
     console.error('设置为默认图像失败:', error)
@@ -1089,6 +1280,84 @@ const deleteExample = async () => {
     emit('refresh')
   } catch (error) {
     console.error('删除立绘失败:', error)
+    contextMenu.value.show = false
+  }
+}
+
+// 清空所有立绘
+const clearAllExamples = async () => {
+  if (!props.actor) return
+  
+  // 确认对话框
+  if (!confirm('确定要清空所有立绘吗？此操作不可撤销。')) {
+    return
+  }
+  
+  try {
+    await api.delete(`/actor/${props.actor.actor_id}/examples/clear`, {
+      params: {
+        project_id: props.actor.project_id
+      }
+    })
+    
+    showToast('已清空所有立绘', 'success')
+    emit('refresh')
+  } catch (error: any) {
+    console.error('清空立绘失败:', error)
+    showToast('清空立绘失败: ' + (error.response?.data?.detail || error.message), 'error')
+  }
+}
+
+// 删除其他立绘（保留当前立绘）
+const deleteOtherExamples = async () => {
+  if (!props.actor || contextMenu.value.index === -1) return
+  
+  // 确认对话框
+  if (!confirm('确定要删除除当前立绘外的所有其他立绘吗？此操作不可撤销。')) {
+    return
+  }
+  
+  try {
+    const currentIndex = contextMenu.value.index
+    
+    // 如果当前立绘不是 index=0，先将其移动到 index=0
+    if (currentIndex !== 0) {
+      await api.post(`/actor/${props.actor.actor_id}/example/swap`, null, {
+        params: {
+          index1: 0,
+          index2: currentIndex,
+          project_id: props.actor.project_id
+        }
+      })
+    }
+    
+    // 计算要删除的索引列表（除了 index=0 之外的所有索引）
+    // 需要先刷新 actor 数据以获取最新的 examples 列表
+    const updatedActor = await api.get(`/actor/${props.actor.actor_id}`)
+    const totalCount = updatedActor.examples?.length || 0
+    
+    if (totalCount <= 1) {
+      showToast('没有其他立绘需要删除', 'info')
+      contextMenu.value.show = false
+      return
+    }
+    
+    // 要删除的索引：从 1 到 totalCount-1
+    const indicesToDelete = Array.from({ length: totalCount - 1 }, (_, i) => i + 1)
+    
+    // 批量删除
+    await api.post(`/actor/${props.actor.actor_id}/examples/batch-remove`, indicesToDelete, {
+      params: {
+        project_id: props.actor.project_id
+      }
+    })
+    
+    showToast('已删除其他立绘', 'success')
+    contextMenu.value.show = false
+    emit('refresh')
+  } catch (error: any) {
+    console.error('删除其他立绘失败:', error)
+    showToast('删除其他立绘失败: ' + (error.response?.data?.detail || error.message), 'error')
     contextMenu.value.show = false
   }
 }

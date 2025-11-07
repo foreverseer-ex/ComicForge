@@ -48,13 +48,37 @@
           范围：10-1000，默认 100
         </p>
       </div>
+
+      <!-- 清空图片缓存按钮 -->
+      <div>
+        <button
+          @click="handleClearImageCache"
+          :class="[
+            'px-4 py-2 rounded-lg font-medium transition-colors',
+            isDark
+              ? 'bg-red-600 hover:bg-red-700 text-white'
+              : 'bg-red-500 hover:bg-red-600 text-white'
+          ]"
+        >
+          清空图片缓存
+        </button>
+        <p 
+          :class="[
+            'mt-1 text-xs',
+            isDark ? 'text-gray-400' : 'text-gray-500'
+          ]"
+        >
+          清空当前内存中的图片缓存
+        </p>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import { updateImageCacheSize } from '../../utils/imageCache'
+import { updateImageCacheSize, imageCache } from '../../utils/imageCache'
+import { showToast } from '../../utils/toast'
 
 const props = defineProps<{
   isDark: boolean
@@ -98,6 +122,13 @@ const handleImageCacheSizeBlur = (event: Event) => {
   } else {
     target.value = localImageCacheSize.value // 恢复原值
   }
+}
+
+// 清空图片缓存
+const handleClearImageCache = () => {
+  const cacheSize = imageCache.size
+  imageCache.clear()
+  showToast(`已清空图片缓存（${cacheSize} 张图片）`, 'success')
 }
 
 // 组件挂载时初始化

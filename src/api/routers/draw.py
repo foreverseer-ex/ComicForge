@@ -4,7 +4,7 @@
 专注于绘图功能：创建绘图任务、接受结果、管理绘图任务。
 """
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pathlib import Path
 import httpx
@@ -109,18 +109,26 @@ async def _monitor_job_and_save_image(job_id: str):
     while attempt < max_attempts:
         try:
             # 检查 job 状态（异步）
-            if await draw_service.get_job_status(job_id):
-                # Job 已完成，设置完成时间（如果未设置）
+            is_complete = await draw_service.get_job_status(job_id)
+            
+            if is_complete:
+                # Job 已完成，设置完成时间和状态
                 job = JobService.get(job_id)
                 if job and job.completed_at is None:
-                    JobService.update(job_id, completed_at=datetime.now())
+                    JobService.update(job_id, completed_at=datetime.now(), status="completed")
                 
                 # 保存图片到 jobs/{job_id}.png
                 job_image_path = jobs_home / f"{job_id}.png"
-                await draw_service.save_image(job_id, job_image_path)
-                
-                logger.success(f"任务图像已保存: {job_id} -> {job_image_path}")
-                return
+                try:
+                    await draw_service.save_image(job_id, job_image_path)
+                    logger.success(f"任务图像已保存: {job_id} -> {job_image_path}")
+                    return
+                except Exception as save_error:
+                    # 保存图片失败，记录为失败状态，但设置完成时间
+                    error_message = f"保存图片失败: {str(save_error)}"
+                    JobService.update(job_id, completed_at=datetime.now(), status="failed")
+                    logger.error(f"保存图片失败: job_id={job_id}, error={save_error}")
+                    return
             
             # Job 未完成，等待 1 秒后重试
             await asyncio.sleep(1)
@@ -132,7 +140,9 @@ async def _monitor_job_and_save_image(job_id: str):
             await asyncio.sleep(1)
             attempt += 1
     
-    # 超时或失败
+    # 超时或失败，设置完成时间和失败状态
+    error_message = f"任务超时或失败: {str(last_error) if last_error else '超时'} (尝试了 {attempt} 次)"
+    JobService.update(job_id, completed_at=datetime.now(), status="failed")
     logger.error(f"监控任务超时/失败: job_id={job_id}, attempt={attempt}, error={last_error}")
 
 
@@ -152,10 +162,10 @@ async def create_draw_job(
     vae: Optional[str] = None,
     name: Optional[str] = None,
     desc: Optional[str] = None,
-    background_tasks: BackgroundTasks = BackgroundTasks(),
-) -> Dict[str, str]:
+    batch_size: int = 1,  # 批量大小，默认1（单个任务）
+) -> Dict[str, Any]:
     """
-    创建绘图任务（文生图），返回 job_id。
+    创建绘图任务（文生图），返回 batch_id。
     
     注意：如果使用的是SD-Forge后端，会自动检查并设置model和vae选项。
     
@@ -174,17 +184,26 @@ async def create_draw_job(
         vae: VAE 模型（查询参数）
         name: 任务名称（查询参数，可选）
         desc: 任务描述（查询参数，可选）
+        batch_size: 批量大小（查询参数，1-16，默认1）
     
     Returns:
-        包含 job_id 的字典
+        包含 batch_id 和 job_ids 列表的字典
     
     实现要点：
     - 调用绘图服务的 draw() 方法
     - 如果使用SD-Forge后端，会自动检查当前加载的model和vae，如果不同则自动设置
-    - 创建 Job 记录到数据库
+    - 创建 batch_size 个 Job 记录到数据库
+    - 创建 BatchJob 记录
     """
     try:
         import json
+        import uuid
+        from datetime import datetime
+        
+        # 验证 batch_size
+        if batch_size < 1 or batch_size > 16:
+            raise HTTPException(status_code=400, detail="batch_size 必须在 1-16 之间")
+        
         # 解析 loras（如果是字符串，尝试解析为 JSON）
         loras_dict: Optional[Dict[str, float]] = None
         if loras:
@@ -245,23 +264,71 @@ async def create_draw_job(
         
         # 使用当前配置的绘图服务
         draw_service = get_current_draw_service()
-        job_id = draw_service.draw(args)
         
-        # 创建 Job 记录到数据库
-        from datetime import datetime
-        job = Job(
-            job_id=job_id,
-            name=name,
-            desc=desc,
-            created_at=datetime.now(),
-            draw_args=args.model_dump(exclude_none=True)  # 保存 DrawArgs 到 Job，排除 None 值
+        # 生成 batch_id
+        batch_id = str(uuid.uuid4())
+        job_ids = []
+        failed_count = 0
+        last_error = None
+        
+        # 创建 batch_size 个任务（允许部分成功）
+        for i in range(batch_size):
+            try:
+                job_id = draw_service.draw(args)
+                job_ids.append(job_id)
+                
+                # 创建 Job 记录到数据库
+                job = Job(
+                    job_id=job_id,
+                    name=name,
+                    desc=desc,
+                    created_at=datetime.now(),
+                    status="pending",  # 初始状态为 pending
+                    draw_args=args.model_dump(exclude_none=True)  # 保存 DrawArgs 到 Job，排除 None 值
+                )
+                JobService.create(job)
+                
+                # 启动后台任务监控 job 状态并保存图片到 jobs/{job_id}.png
+                asyncio.create_task(_monitor_job_and_save_image(job_id=job_id))
+            except Exception as e:
+                failed_count += 1
+                last_error = e
+                logger.error(f"创建批量任务中的第 {i+1}/{batch_size} 个任务失败: {e}")
+                # 继续创建下一个任务，不中断整个批量创建流程
+        
+        # 如果所有任务都失败了，抛出异常
+        if not job_ids:
+            error_msg = f"批量创建任务失败：所有 {batch_size} 个任务都创建失败"
+            if last_error:
+                if isinstance(last_error, httpx.ReadTimeout) or isinstance(last_error, httpx.TimeoutException):
+                    error_msg += f"。最后一个错误：连接超时。请检查网络连接和代理设置。"
+                else:
+                    error_msg += f"。最后一个错误：{str(last_error)}"
+            raise HTTPException(status_code=500, detail=error_msg)
+        
+        # 创建 BatchJob 记录（只包含成功创建的 job_ids）
+        batch_job = BatchJob(
+            batch_id=batch_id,
+            job_ids=job_ids,
+            created_at=datetime.now()
         )
-        JobService.create(job)
+        BatchJobService.create(batch_job)
         
-        # 启动后台任务监控 job 状态并保存图片到 jobs/{job_id}.png
-        background_tasks.add_task(_monitor_job_and_save_image, job_id=job_id)
+        # 如果部分失败，记录警告
+        if failed_count > 0:
+            logger.warning(
+                f"批量创建任务部分成功: batch_id={batch_id}, "
+                f"成功={len(job_ids)}/{batch_size}, 失败={failed_count}"
+            )
         
-        return {"job_id": job_id}
+        return {
+            "batch_id": batch_id,
+            "job_ids": job_ids,
+            "total_requested": batch_size,
+            "success_count": len(job_ids),
+            "failed_count": failed_count,
+            "partial_success": failed_count > 0
+        }
     except httpx.HTTPError as e:
         backend = app_settings.draw.backend
         raise HTTPException(status_code=502, detail=f"{backend} 连接失败: {e}") from e
@@ -471,155 +538,13 @@ async def get_job_image(job_id: str) -> FileResponse:
 
 # ==================== Batch 管理 ====================
 
-@router.post("/batch", summary="创建批量绘图任务")
-async def create_batch(
-    batch_size: int,
-    model: str,
-    prompt: str,
-    negative_prompt: str = "",
-    loras: Optional[Dict[str, float] | str] = None,  # 可以是字典或 JSON 字符串
-    seed: int = -1,
-    sampler_name: str = "DPM++ 2M Karras",
-    steps: int = 30,
-    cfg_scale: float = 7.0,
-    width: int = 1024,
-    height: int = 1024,
-    clip_skip: Optional[int] = None,
-    vae: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    创建批量绘图任务，返回 batch_id。
-    
-    Args:
-        batch_size: 批量大小（查询参数）
-        model: SD模型名称（查询参数）
-        prompt: 正向提示词（查询参数）
-        negative_prompt: 负向提示词（查询参数）
-        loras: LoRA 配置 {name: weight}（查询参数）
-        seed: 随机种子（-1 表示随机，查询参数）
-        sampler_name: 采样器名称（查询参数）
-        steps: 采样步数（查询参数）
-        cfg_scale: CFG Scale（查询参数）
-        width: 图像宽度（查询参数）
-        height: 图像高度（查询参数）
-        clip_skip: CLIP skip（查询参数）
-        vae: VAE 模型（查询参数）
-    
-    Returns:
-        包含 batch_id 和 job_ids 列表的字典
-    
-    实现要点：
-    - 创建 batch_size 个绘图任务
-    - 将所有 job_id 添加到 BatchJob
-    """
-    try:
-        import uuid
-        import json
-        from datetime import datetime
-        
-        # 解析 loras（如果是字符串，尝试解析为 JSON）
-        loras_dict: Optional[Dict[str, float]] = None
-        if loras:
-            if isinstance(loras, str):
-                try:
-                    loras_dict = json.loads(loras)
-                except json.JSONDecodeError:
-                    logger.warning(f"LoRA 参数格式错误，尝试其他解析方式: {loras}")
-                    loras_dict = None
-            elif isinstance(loras, dict):
-                loras_dict = loras
-        
-        args = DrawArgs(
-            model=model,
-            prompt=prompt,
-            negative_prompt=negative_prompt or "",
-            steps=steps,
-            cfg_scale=cfg_scale,
-            sampler=sampler_name,
-            seed=seed,
-            width=width,
-            height=height,
-            clip_skip=clip_skip,
-            vae=vae,
-            loras=loras_dict or {},
-        )
-        
-        # 如果是 Civitai 后端，检查并调整宽高限制（最大 1024）
-        backend = app_settings.draw.backend
-        if backend == "civitai":
-            original_width = args.width
-            original_height = args.height
-            
-            # 如果宽高超过 1024，自动调整为 1024（保持宽高比例）
-            if args.width > 1024 or args.height > 1024:
-                if args.width > args.height:
-                    # 宽度更大，以宽度为基准缩放到 1024
-                    scale = 1024 / args.width
-                    args.width = 1024
-                    args.height = int(args.height * scale)
-                else:
-                    # 高度更大，以高度为基准缩放到 1024
-                    scale = 1024 / args.height
-                    args.height = 1024
-                    args.width = int(args.width * scale)
-                
-                # 确保调整后的宽高不超过 1024（由于舍入可能导致）
-                if args.width > 1024:
-                    args.width = 1024
-                if args.height > 1024:
-                    args.height = 1024
-                
-                logger.warning(
-                    f"⚠️ Civitai 后端：图像尺寸已自动调整 "
-                    f"（{original_width}x{original_height} → {args.width}x{args.height}，最大限制 1024）"
-                )
-        
-        # 使用当前配置的绘图服务
-        draw_service = get_current_draw_service()
-        
-        # 生成 batch_id
-        batch_id = str(uuid.uuid4())
-        job_ids = []
-        
-        # 创建多个任务
-        for i in range(batch_size):
-            job_id = draw_service.draw(args)
-            job_ids.append(job_id)
-            
-            # 创建 Job 记录到数据库
-            job = Job(
-                job_id=job_id,
-                created_at=datetime.now(),
-                draw_args=args.model_dump(exclude_none=True)  # 保存 DrawArgs 到 Job，排除 None 值
-            )
-            JobService.create(job)
-        
-        # 创建 BatchJob 记录
-        batch_job = BatchJob(
-            batch_id=batch_id,
-            job_ids=job_ids,
-            created_at=datetime.now()
-        )
-        BatchJobService.create(batch_job)
-        
-        return {
-            "batch_id": batch_id,
-            "job_ids": job_ids
-        }
-    except httpx.HTTPError as e:
-        backend = app_settings.draw.backend
-        raise HTTPException(status_code=502, detail=f"{backend} 连接失败: {e}") from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@router.get("/batch", summary="获取批量绘图任务信息")
+@router.get("/batch/{batch_id}", summary="获取批量绘图任务信息")
 async def get_batch(batch_id: str) -> List[Job]:
     """
     获取批量绘图任务的所有 job 信息。
     
     Args:
-        batch_id: 批次ID（查询参数）
+        batch_id: 批次ID（路径参数）
     
     Returns:
         Job 列表
@@ -641,13 +566,13 @@ async def get_batch(batch_id: str) -> List[Job]:
     return jobs
 
 
-@router.delete("/batch", summary="删除批量绘图任务")
+@router.delete("/batch/{batch_id}", summary="删除批量绘图任务")
 async def delete_batch(batch_id: str) -> dict:
     """
     删除批量绘图任务及其所有 job。
     
     Args:
-        batch_id: 批次ID（查询参数）
+        batch_id: 批次ID（路径参数）
     
     Returns:
         删除的批次ID（batch_id）

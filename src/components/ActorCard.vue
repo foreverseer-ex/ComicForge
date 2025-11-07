@@ -18,16 +18,17 @@
       ]"
     >
       <img 
-        v-if="firstExampleImage"
-        :src="firstExampleImage"
+        v-if="firstExampleImage && !privacyMode"
+        :src="firstExampleImageWithRetry"
         :alt="actor.name"
         class="w-full h-full object-cover"
         @error="handleImageError"
+        @load="handleImageLoad"
       />
       <div v-else class="flex flex-col items-center justify-center">
         <PhotoIcon class="w-12 h-12" :class="isDark ? 'text-gray-600' : 'text-gray-400'" />
         <span :class="['text-xs mt-1', isDark ? 'text-gray-500' : 'text-gray-500']">
-          {{ exampleCount > 0 ? '点击查看' : '无立绘' }}
+          {{ privacyMode ? '隐私模式' : (exampleCount > 0 ? '点击查看' : '无立绘') }}
         </span>
       </div>
     </div>
@@ -77,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { PhotoIcon, TagIcon } from '@heroicons/vue/24/outline'
@@ -96,9 +97,12 @@ interface Actor {
 interface Props {
   actor: Actor
   onDelete?: (actor: Actor) => void
+  privacyMode?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  privacyMode: false
+})
 
 const emit = defineEmits<{
   (e: 'openDetail', actor: Actor): void
@@ -126,11 +130,46 @@ const firstExampleImage = computed(() => {
   // 如果是相对路径，需要通过actor-example端点
   // 但这里我们不知道example_index，所以暂时返回null
   // 实际上应该通过 /file/actor-example?actor_id=...&example_index=0 获取
-  return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=0`
+  // 使用 image_path 作为缓存破坏参数，确保不同图片使用不同的 URL
+  return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=0&path=${encodeURIComponent(firstExample.image_path)}`
 })
 
-const handleImageError = () => {
-  // 图片加载失败时，不显示图片
+// 图片重试相关状态
+const imageRetryCount = ref(0)
+const imageLoadKey = ref(0) // 用于强制重新加载图片
+const imageTimestamp = ref(Date.now()) // 初始时间戳
+
+// 带重试的图片URL
+const firstExampleImageWithRetry = computed(() => {
+  if (!firstExampleImage.value) return null
+  // 添加时间戳和重试次数作为查询参数，避免浏览器缓存
+  const separator = firstExampleImage.value.includes('?') ? '&' : '?'
+  return `${firstExampleImage.value}${separator}_t=${imageTimestamp.value}&_retry=${imageRetryCount.value}&_key=${imageLoadKey.value}`
+})
+
+const handleImageError = (event: Event) => {
+  const img = event.target as HTMLImageElement
+  // 如果重试次数小于3，尝试重新加载
+  if (imageRetryCount.value < 3) {
+    imageRetryCount.value++
+    imageLoadKey.value++
+    imageTimestamp.value = Date.now() // 更新时间戳，强制重新加载
+    // 强制重新加载图片
+    setTimeout(() => {
+      if (img && firstExampleImage.value) {
+        img.src = firstExampleImageWithRetry.value || ''
+      }
+    }, 500) // 延迟500ms后重试
+  } else {
+    // 重试3次后仍然失败，隐藏图片
+    console.error('图片加载失败，已重试3次:', firstExampleImage.value)
+  }
+}
+
+const handleImageLoad = () => {
+  // 图片加载成功，重置重试计数
+  imageRetryCount.value = 0
+  imageLoadKey.value = 0
 }
 
 const openDetailDialog = () => {

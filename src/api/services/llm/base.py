@@ -7,7 +7,7 @@ import functools
 import json
 import uuid
 from abc import ABC, abstractmethod
-from typing import Optional, List, AsyncGenerator, Any, Dict
+from typing import Optional, List, AsyncGenerator, Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolMessage, AIMessage
@@ -26,7 +26,7 @@ from api.constants.llm import (
 from api.routers.actor import (
     create_actor, get_actor, get_all_actors, update_actor,
     remove_actor, get_tag_description, get_all_tag_descriptions,
-    add_example, remove_example, add_portrait_from_job_tool
+    add_example, remove_example, add_portrait_from_batch_tool
 )
 from api.routers.draw import (
     create_draw_job, get_draw_job, delete_draw_job, get_image,
@@ -127,11 +127,6 @@ class AbstractLlmService(ABC):
         self.tools: List[BaseTool] = []
         self._initialize_tools()
 
-        # 尝试初始化 LLM 服务（默认无结构化输出）
-        try:
-            self.initialize_llm(response_format=None)
-        except Exception as e:
-            logger.exception(f"LLM 服务初始化失败（将在首次使用时重试）: {e}")
 
     def _initialize_tools(self):
         """初始化工具函数列表。"""
@@ -141,7 +136,7 @@ class AbstractLlmService(ABC):
             get_project, update_project,
             # Actor 管理
             create_actor, get_actor, get_all_actors, update_actor,
-            remove_actor, add_example, remove_example, add_portrait_from_job_tool,
+            remove_actor, add_example, remove_example, add_portrait_from_batch_tool,
             get_tag_description, get_all_tag_descriptions,
             # Memory 管理
             create_memory, get_memory, get_all_memories, update_memory,
@@ -260,38 +255,32 @@ class AbstractLlmService(ABC):
         :param output_schema: 输出模式（可选，Pydantic 模型类，如果不指定则默认返回文本）
         :return: LLM 的回复内容（如果是结构化输出，返回 JSON 字符串；否则返回文本）
         """
-        logger.info(f"🔧 工具调用 LLM: {message[:200]}{'...' if len(message) > 200 else ''}")
+        logger.info(f"🔧 工具调用 LLM: {message[:1000]}{'...' if len(message) > 1000 else ''}")
 
         try:
             # 1. 构建系统消息（不包含历史消息和摘要）
             messages = self.build_system_messages()
-
+            
             # 2. 如果提供了 project_id，添加项目上下文信息
             if project_id:
                 session_info = self.get_session_context(project_id)
                 if session_info:
                     messages.append(("system", session_info))
-
+            
             # 3. 添加工具使用说明（如果没有 project_id，告知某些工具可能不可用）
             if not project_id:
-                no_project_warning = (
-                    "\n⚠️ 注意：当前没有提供 project_id，以下工具可能不可用：\n"
-                    "- 读取/操作记忆（create_memory, get_all_memories 等）\n"
-                    "- 读取项目内容（get_project_content 等）\n"
-                    "- 查询/操作角色（get_all_actors 等需要 project_id 的工具）\n"
-                    "请根据实际情况选择合适的工具。"
-                )
-                messages.append(("system", no_project_warning))
-
+                from api.constants.llm import NO_PROJECT_ID_WARNING
+                messages.append(("system", NO_PROJECT_ID_WARNING))
+            
             # 4. 添加用户消息
             messages.append(("human", message))
-
+            
             # 5. 如果有输出 schema，需要重新初始化 agent 以支持结构化输出
             if output_schema is not None:
                 logger.info(
                     f"使用结构化输出，schema: {output_schema.__name__ if hasattr(output_schema, '__name__') else type(output_schema)}")
                 # 重新初始化 agent 以支持结构化输出（同时保留工具调用能力）
-                self.initialize_llm(response_format=output_schema)
+            self.initialize_llm(response_format=output_schema)
 
             # 6. 调用 agent（使用异步调用）
             logger.info(f"开始调用 LLM，使用 {len(self.tools)} 个工具" + (
@@ -310,7 +299,7 @@ class AbstractLlmService(ABC):
             logger.info(f"✅ LLM 调用完成，返回长度={len(context)}")
             logger.debug(f"最终提取的内容: {context[:500] if context else '(空)'}")
             return context
-
+            
         except Exception as e:
             logger.exception(f"LLM 调用失败: {e}")
             return f"错误：LLM 调用失败 - {str(e)}"
@@ -329,12 +318,12 @@ class AbstractLlmService(ABC):
                 # 获取最近的消息
                 start_index = count - app_settings.llm.summary_epoch
                 messages = self.build_system_messages()
-
+                
                 # 添加项目上下文信息
                 session_info = self.get_session_context(project_id)
                 if session_info:
                     messages.append(("system", session_info))
-
+                
                 recent_messages = HistoryService.get_all(project_id, start_index=start_index, end_index=count)
 
                 # 获取现有摘要
@@ -381,6 +370,7 @@ class AbstractLlmService(ABC):
         :param project_id: 项目 ID
         :yield: 事件字典，包含 type 和相应的数据
         """
+        self.initialize_llm()
         logger.info(f"👤 用户消息: {message[:200]}{'...' if len(message) > 200 else ''}")
 
         # 创建助手消息的 ID（提前创建，用于实时更新）
@@ -392,12 +382,12 @@ class AbstractLlmService(ABC):
         try:
             # 1. 构建系统消息和历史消息
             messages = self.build_system_messages()
-
+            
             # 添加项目上下文信息
             session_info = self.get_session_context(project_id)
             if session_info:
                 messages.append(("system", session_info))
-
+            
             self.summary_history(project_id)
             chat_summary_memory = MemoryService.get_summary(project_id)
 
@@ -593,6 +583,7 @@ class AbstractLlmService(ABC):
         :param project_id: 项目 ID
         :yield: LLM 响应的文本片段
         """
+        self.initialize_llm()
         async for event in self.chat_streamed(message, project_id):
             if event.get('type') == 'content':
                 yield event.get('content', '')
@@ -619,6 +610,7 @@ class AbstractLlmService(ABC):
         :param project_id: 项目ID
         :yield: LLM响应的文本片段
         """
+        self.initialize_llm()
         # 1. 获取或创建迭代消息
         if "message_id" in iteration_data:
             # 从数据库读取现有迭代消息

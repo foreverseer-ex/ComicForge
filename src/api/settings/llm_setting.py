@@ -82,10 +82,11 @@ class LlmSettings(BaseModel):
         description="LangGraph 递归限制：工具调用的最大次数（25-1000）。迭代模式可能需要更高的值"
     )
     
-    # 迭代模式相关（全局状态，用于工具函数和LLM服务之间的通信）
+    # 迭代模式相关（已弃用：现在使用 ChatMessage 的 data 字段存储 ChatIteration）
+    # 保留此字段以保持向后兼容性，但不再使用
     pending_iteration: dict | None = Field(
         default=None,
-        description="待处理的迭代消息（dict格式，可序列化为IterationChatMessage）"
+        description="待处理的迭代消息（已弃用：现在使用 ChatMessage 的 data 字段存储 ChatIteration）"
     )
 
     model_config = ConfigDict(

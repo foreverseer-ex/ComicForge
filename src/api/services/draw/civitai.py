@@ -120,10 +120,31 @@ class CivitaiDrawService(AbstractDrawService):
         # 处理 additionalNetworks（LoRA 和 VAE）
         additional: Dict[str, Any] = {}
         
+        # 分离正面和负面 LoRA
+        positive_loras: Dict[str, float] = {}
+        negative_loras: Dict[str, float] = {}
+        
         # 添加 LoRA
         if loras:
             for air, strength in loras.items():
-                additional[air] = {"type": "Lora", "strength": float(strength)}
+                if strength < 0:
+                    # 负数权重表示负面 LoRA，正化后添加到负面提示词
+                    negative_loras[air] = abs(strength)
+                else:
+                    # 正数权重表示正面 LoRA，添加到 additionalNetworks
+                    positive_loras[air] = strength
+        
+        # 添加正面 LoRA 到 additionalNetworks
+        for air, strength in positive_loras.items():
+            additional[air] = {"type": "Lora", "strength": float(strength)}
+        
+        # 如果有负面 LoRA，需要添加到负面提示词
+        # 注意：Civitai API 可能不支持在 negativePrompt 中使用 LoRA
+        # 这里我们先记录日志，如果 Civitai API 不支持，可能需要其他处理方式
+        if negative_loras:
+            logger.warning(f"检测到负面 LoRA: {negative_loras}，但 Civitai API 可能不支持在负面提示词中使用 LoRA")
+            # TODO: 如果 Civitai API 支持负面 LoRA，可以在这里处理
+            # 目前先记录警告，暂时忽略负面 LoRA
         
         # 添加 VAE
         if vae:
@@ -352,15 +373,22 @@ class CivitaiDrawService(AbstractDrawService):
         logger.debug(f"模型 AIR: {model_air}")
         
         # 转换 LoRAs 名称为 AIR（通过 version_name 查找）
-        lora_airs: Dict[str, float] = {}
+        # 分离正面和负面 LoRA
+        positive_lora_airs: Dict[str, float] = {}
+        negative_lora_airs: Dict[str, float] = {}
         if args.loras:
             for lora_name, strength in args.loras.items():
                 lora_meta = local_model_meta_service.get_by_version_name(lora_name)
                 if not lora_meta:
                     logger.warning(f"未找到 LoRA 元数据: {lora_name}，跳过")
                     continue
-                lora_airs[lora_meta.air] = strength
-                logger.debug(f"LoRA AIR: {lora_meta.air}")
+                if strength < 0:
+                    # 负数权重表示负面 LoRA
+                    negative_lora_airs[lora_meta.air] = abs(strength)
+                else:
+                    # 正数权重表示正面 LoRA
+                    positive_lora_airs[lora_meta.air] = strength
+                logger.debug(f"LoRA AIR: {lora_meta.air}, strength: {strength}")
         
         # 转换 VAE 名称为 AIR（通过 version_name 查找）
         vae_air: Optional[str] = None
@@ -371,6 +399,24 @@ class CivitaiDrawService(AbstractDrawService):
             else:
                 vae_air = vae_meta.air
                 logger.debug(f"VAE AIR: {vae_air}")
+        
+        # 如果有负面 LoRA，需要添加到负面提示词
+        # 注意：Civitai API 的 negativePrompt 是纯文本，不支持 LoRA 语法
+        # 我们需要将负面 LoRA 的名称添加到 negativePrompt 中（作为文本）
+        final_negative_prompt = args.negative_prompt or ""
+        if negative_lora_airs:
+            # 获取负面 LoRA 的名称，添加到负面提示词
+            negative_lora_names = []
+            for lora_air, strength in negative_lora_airs.items():
+                # 从 AIR 中提取 LoRA 名称（如果可能）
+                # AIR 格式：urn:air:sd1:lora:civitai:328553@368189
+                # 我们可以尝试从元数据中获取名称
+                lora_name_for_prompt = lora_air  # 暂时使用 AIR，后续可以优化
+                negative_lora_names.append(f"{lora_name_for_prompt} (strength: {strength})")
+            if negative_lora_names:
+                negative_lora_text = ", ".join(negative_lora_names)
+                final_negative_prompt = f"{final_negative_prompt}, {negative_lora_text}".strip(", ")
+                logger.info(f"已将负面 LoRA 添加到负面提示词: {negative_lora_names}")
         
         # Civitai API 要求宽高必须在 1-1024 之间
         width = args.width
@@ -390,7 +436,7 @@ class CivitaiDrawService(AbstractDrawService):
         result = self._create_text2image(
             model=model_air,  # 使用 AIR 标识符而不是名称
             prompt=args.prompt,
-            negative_prompt=args.negative_prompt,
+            negative_prompt=final_negative_prompt,  # 使用包含负面 LoRA 的负面提示词
             scheduler=self._map_sampler_to_scheduler(args.sampler),  # 映射 sampler 到 scheduler
             steps=args.steps,
             cfg_scale=args.cfg_scale,
@@ -398,7 +444,7 @@ class CivitaiDrawService(AbstractDrawService):
             height=height,  # 使用调整后的高度
             seed=args.seed,
             clip_skip=args.clip_skip or 2,
-            loras=lora_airs,  # 使用 AIR 字典
+            loras=positive_lora_airs,  # 只传递正面 LoRA
             vae=vae_air,  # 使用 VAE AIR
         )
 

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
+import httpx
 
 from api.services.model_meta import civitai_model_meta_service, local_model_meta_service
 from api.utils.civitai import AIR
@@ -26,6 +27,7 @@ router = APIRouter(
 class ImportModelRequest(BaseModel):
     """导入单个模型的请求"""
     air: str
+    parallel_download: bool = False  # 是否并行下载示例图片，默认 False（串行下载）
 
 
 class ImportModelResponse(BaseModel):
@@ -84,7 +86,27 @@ async def import_model(request: ImportModelRequest) -> ImportModelResponse:
         logger.info(f"开始导入模型: {request.air} (version_id={air.version_id})")
         
         # 从 Civitai 获取模型元数据
-        model_meta = await civitai_model_meta_service.get_by_id(air.version_id)
+        try:
+            model_meta = await civitai_model_meta_service.get_by_id(air.version_id)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            # 网络连接错误
+            error_msg = f"网络连接失败，无法连接到 Civitai API。请检查网络连接。"
+            logger.error(f"导入模型失败 ({request.air}): {error_msg} - {e}")
+            return ImportModelResponse(
+                success=False,
+                air=request.air,
+                error=error_msg
+            )
+        except httpx.TimeoutException as e:
+            # 请求超时
+            error_msg = f"请求超时，无法从 Civitai API 获取数据。请稍后重试。"
+            logger.error(f"导入模型失败 ({request.air}): {error_msg} - {e}")
+            return ImportModelResponse(
+                success=False,
+                air=request.air,
+                error=error_msg
+            )
+        
         if not model_meta:
             return ImportModelResponse(
                 success=False,
@@ -92,8 +114,8 @@ async def import_model(request: ImportModelRequest) -> ImportModelResponse:
                 error=f"未找到版本 ID: {air.version_id}"
             )
         
-        # 保存到本地（包括下载示例图片，串行下载）
-        saved_meta = await civitai_model_meta_service.save(model_meta)
+        # 保存到本地（包括下载示例图片，支持并行或串行下载）
+        saved_meta = await civitai_model_meta_service.save(model_meta, parallel_download=request.parallel_download)
         if not saved_meta:
             return ImportModelResponse(
                 success=False,
@@ -305,3 +327,46 @@ async def get_model_image(image_url: str) -> FileResponse:
     except Exception as e:
         logger.exception(f"获取图片失败: {image_url}")
         raise HTTPException(status_code=500, detail=f"获取图片失败: {str(e)}")
+
+
+# ==================== 删除端点 ====================
+
+@router.delete("/{version_id}", summary="删除模型元数据")
+async def delete_model(version_id: int) -> dict:
+    """
+    删除指定版本ID的模型元数据及其关联的示例图片。
+    
+    Args:
+        version_id: Civitai 模型版本 ID（路径参数）
+    
+    Returns:
+        删除结果，包含版本ID和模型名称
+    
+    Raises:
+        404: 模型元数据不存在
+    """
+    try:
+        # 从本地缓存中查找模型
+        model_meta = local_model_meta_service.get_by_id(version_id)
+        if not model_meta:
+            raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
+        
+        # 删除模型元数据（异步删除，不会阻塞）
+        success = await local_model_meta_service.delete(model_meta)
+        if not success:
+            raise HTTPException(status_code=500, detail="删除模型元数据失败")
+        
+        # 刷新本地缓存
+        await asyncio.to_thread(local_model_meta_service.flush)
+        
+        logger.info(f"删除模型元数据成功: {model_meta.name} (version_id={version_id})")
+        return {
+            "version_id": version_id,
+            "model_name": model_meta.name
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"删除模型元数据失败 (version_id={version_id}): {e}")
+        raise HTTPException(status_code=500, detail=f"删除模型元数据失败: {str(e)}")

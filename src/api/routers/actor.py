@@ -8,7 +8,7 @@ import uuid
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 import asyncio
@@ -233,8 +233,8 @@ async def remove_actor(actor_id: str) -> dict:
             image_path = example.get('image_path')
             if image_path:
                 try:
-                    # 图片文件路径：projects/{project_id}/actor/{filename}
-                    image_file_path = project_home / actor.project_id / "actor" / image_path
+                    # 图片文件路径：projects/{project_id}/actors/{filename}
+                    image_file_path = project_home / actor.project_id / "actors" / image_path
                     if image_file_path.exists():
                         image_file_path.unlink()
                         logger.info(f"已删除角色示例图文件: {image_file_path}")
@@ -372,26 +372,37 @@ async def remove_example(
     if project_id and actor.project_id != project_id:
         raise HTTPException(status_code=403, detail=f"Actor 不属于该项目: {project_id}")
     
-    # 在删除数据库记录前，先删除图片文件
-    if 0 <= example_index < len(actor.examples):
-        example = actor.examples[example_index]
-        image_path = example.get('image_path')
-        
-        # 如果存在图片文件，删除它
-        if image_path:
-            try:
-                # 图片文件路径：projects/{project_id}/actor/{filename}
-                image_file_path = project_home / actor.project_id / "actor" / image_path
-                if image_file_path.exists():
-                    image_file_path.unlink()
-                    logger.info(f"已删除示例图文件: {image_file_path}")
-                else:
-                    logger.warning(f"示例图文件不存在: {image_file_path}")
-            except Exception as e:
-                logger.exception(f"删除示例图文件失败: {image_file_path}, 错误: {e}")
-                # 即使删除文件失败，也继续删除数据库记录
+    # 验证索引
+    if not (0 <= example_index < len(actor.examples)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"示例图索引越界: index={example_index}, 总数={len(actor.examples)}"
+        )
     
-    # 删除数据库记录
+    # 记录删除前的状态（用于调试）
+    logger.debug(f"[Router] 删除前 examples 列表: {[ex.get('title', '未命名') for ex in actor.examples]}")
+    logger.debug(f"[Router] 要删除的索引: {example_index}, 对应的标题: {actor.examples[example_index].get('title', '未命名')}")
+    
+    # 在删除数据库记录前，先删除图片文件
+    # 注意：必须在删除数据库记录之前获取要删除的示例信息
+    example = actor.examples[example_index]
+    image_path = example.get('image_path')
+    
+    # 如果存在图片文件，删除它
+    if image_path:
+        try:
+            # 图片文件路径：projects/{project_id}/actors/{filename}
+            image_file_path = project_home / actor.project_id / "actors" / image_path
+            if image_file_path.exists():
+                image_file_path.unlink()
+                logger.info(f"已删除示例图文件: {image_file_path}")
+            else:
+                logger.warning(f"示例图文件不存在: {image_file_path}")
+        except Exception as e:
+            logger.exception(f"删除示例图文件失败: {image_file_path}, 错误: {e}")
+            # 即使删除文件失败，也继续删除数据库记录
+    
+    # 删除数据库记录（重新获取 actor 以确保数据是最新的）
     updated = ActorService.remove_example(actor_id, example_index)
     if not updated:
         raise HTTPException(status_code=500, detail=f"删除示例失败: {actor_id}, index={example_index}")
@@ -452,9 +463,128 @@ async def swap_examples(
     return updated
 
 
+@router.delete("/{actor_id}/examples/clear", response_model=Actor, summary="清空所有示例图")
+async def clear_examples(
+    actor_id: str,
+    project_id: Optional[str] = None
+) -> Actor:
+    """
+    清空 Actor 的所有示例图。
+    
+    Args:
+        actor_id: Actor ID（路径参数）
+        project_id: 项目ID（查询参数，可选，用于权限校验）
+    
+    Returns:
+        更新后的 Actor 对象
+    
+    Raises:
+        404: Actor 不存在
+        403: Actor 不属于该项目（如果提供了project_id）
+    """
+    # 权限校验
+    actor = ActorService.get(actor_id)
+    if not actor:
+        raise HTTPException(status_code=404, detail=f"Actor 不存在: {actor_id}")
+    if project_id and actor.project_id != project_id:
+        raise HTTPException(status_code=403, detail=f"Actor 不属于该项目: {project_id}")
+    
+    # 在清空数据库记录前，先删除所有示例图的图片文件
+    if actor.examples:
+        for example in actor.examples:
+            image_path = example.get('image_path')
+            if image_path:
+                try:
+                    # 图片文件路径：projects/{project_id}/actors/{filename}
+                    image_file_path = project_home / actor.project_id / "actors" / image_path
+                    if image_file_path.exists():
+                        image_file_path.unlink()
+                        logger.info(f"已删除示例图文件: {image_file_path}")
+                    else:
+                        logger.warning(f"示例图文件不存在: {image_file_path}")
+                except Exception as e:
+                    logger.exception(f"删除示例图文件失败: {image_file_path}, 错误: {e}")
+                    # 即使删除文件失败，也继续清空数据库记录
+    
+    # 清空数据库记录
+    updated = ActorService.clear_examples(actor_id)
+    if not updated:
+        raise HTTPException(status_code=500, detail=f"清空示例失败: {actor_id}")
+    
+    logger.success(f"清空 Actor 所有示例成功: {actor_id}")
+    return updated
+
+
+@router.post("/{actor_id}/examples/batch-remove", response_model=Actor, summary="批量删除示例图")
+async def batch_remove_examples(
+    actor_id: str,
+    example_indices: list[int],
+    project_id: Optional[str] = None
+) -> Actor:
+    """
+    批量删除 Actor 的示例图。
+    
+    Args:
+        actor_id: Actor ID（路径参数）
+        example_indices: 要删除的示例图索引列表（请求体）
+        project_id: 项目ID（查询参数，可选，用于权限校验）
+    
+    Returns:
+        更新后的 Actor 对象
+    
+    Raises:
+        404: Actor 不存在
+        403: Actor 不属于该项目（如果提供了project_id）
+        400: 索引无效
+    """
+    # 权限校验
+    actor = ActorService.get(actor_id)
+    if not actor:
+        raise HTTPException(status_code=404, detail=f"Actor 不存在: {actor_id}")
+    if project_id and actor.project_id != project_id:
+        raise HTTPException(status_code=403, detail=f"Actor 不属于该项目: {project_id}")
+    
+    if not actor.examples:
+        logger.debug(f"Actor 没有示例图，无需删除: {actor_id}")
+        return actor
+    
+    # 验证索引有效性
+    valid_indices = [idx for idx in example_indices if 0 <= idx < len(actor.examples)]
+    if not valid_indices:
+        raise HTTPException(
+            status_code=400,
+            detail=f"没有有效的示例图索引: indices={example_indices}, 总数={len(actor.examples)}"
+        )
+    
+    # 在删除数据库记录前，先删除所有要删除的示例图的图片文件
+    for idx in valid_indices:
+        example = actor.examples[idx]
+        image_path = example.get('image_path')
+        if image_path:
+            try:
+                # 图片文件路径：projects/{project_id}/actors/{filename}
+                image_file_path = project_home / actor.project_id / "actors" / image_path
+                if image_file_path.exists():
+                    image_file_path.unlink()
+                    logger.info(f"已删除示例图文件: {image_file_path}")
+                else:
+                    logger.warning(f"示例图文件不存在: {image_file_path}")
+            except Exception as e:
+                logger.exception(f"删除示例图文件失败: {image_file_path}, 错误: {e}")
+                # 即使删除文件失败，也继续删除数据库记录
+    
+    # 批量删除数据库记录
+    updated = ActorService.batch_remove_examples(actor_id, valid_indices)
+    if not updated:
+        raise HTTPException(status_code=500, detail=f"批量删除示例失败: {actor_id}, indices={valid_indices}")
+    
+    logger.success(f"批量删除 Actor 示例成功: {actor_id}, 删除了 {len(valid_indices)} 个示例")
+    return updated
+
+
 # ==================== 立绘生成 ====================
 
-async def _monitor_job_and_add_portrait(
+async def _monitor_single_job_and_update_portrait(
     job_id: str,
     actor_id: str,
     project_id: str,
@@ -464,10 +594,19 @@ async def _monitor_job_and_add_portrait(
     example_index: int
 ):
     """
-    监控 job 状态，完成后从 jobs 文件夹复制图片到 actor 文件夹并更新 ActorExample。
+    监控单个 job 状态，完成后更新对应的 ActorExample。
     
     这是一个后台任务函数，会轮询检查 job 状态，直到完成或超时。
-    如果超时或失败，会删除之前创建的 ActorExample。
+    如果超时或失败，会删除对应的 ActorExample。
+    
+    Args:
+        job_id: 要监控的 job ID
+        actor_id: Actor ID
+        project_id: 项目 ID
+        title: 立绘标题
+        desc: 立绘描述
+        draw_args: 绘图参数
+        example_index: 要更新的 example 索引
     """
     from api.services.db import JobService
     from api.settings import app_settings
@@ -493,7 +632,7 @@ async def _monitor_job_and_add_portrait(
             job_image_path = jobs_home / f"{job_id}.png"
             
             if job_image_path.exists():
-                # 图片已缓存，可以复制到 actor 文件夹
+                # 图片已生成，可以复制到 actors 文件夹
                 
                 # 设置完成时间（如果未设置）
                 job = JobService.get(job_id)
@@ -504,40 +643,39 @@ async def _monitor_job_and_add_portrait(
                 actor = ActorService.get(actor_id)
                 if not actor:
                     logger.error(f"监控任务失败: Actor 不存在 {actor_id}")
-                    # 删除 ActorExample
-                    ActorService.remove_example(actor_id, example_index)
+                    try:
+                        ActorService.remove_example(actor_id, example_index)
+                    except Exception:
+                        pass
                     return
                 
-                # 验证示例索引是否有效
-                if example_index >= len(actor.examples):
-                    logger.error(f"监控任务失败: 示例索引越界 {actor_id}, index={example_index}")
-                    return
-                
-                # 复制图片到 projects/{project_id}/actor/{filename}.png
-                out_dir: Path = project_home / project_id / "actor"
+                # 复制图片到 projects/{project_id}/actors/{filename}.png
+                out_dir: Path = project_home / project_id / "actors"
                 out_dir.mkdir(parents=True, exist_ok=True)
                 
-                # 确保文件名安全（移除特殊字符）
-                safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
-                if not safe_title:
-                    safe_title = "portrait"
-                filename = f"{safe_title}.png"
+                # 获取 job 名称（如果不存在则使用默认值）
+                job_name = job.name if job and job.name else "portrait"
+                
+                # 确保文件名安全（移除特殊字符，只保留字母数字、空格、连字符和下划线）
+                safe_job_name = "".join(c for c in job_name if c.isalnum() or c in (' ', '-', '_')).strip()
+                if not safe_job_name:
+                    safe_job_name = "portrait"
+                
+                # 生成时间戳（格式：YYYYMMDDHHMMSS，例如：20231201123453）
+                ts = datetime.now().strftime("%Y%m%d%H%M%S")
+                
+                # 为了确保文件名唯一性，添加 job_id 的前8位（即使 job 名称和时间戳相同，job_id 也不同）
+                job_id_short = job_id[:8]
+                
+                # 文件名格式：{job名称}_{时间字符串}_{job_id前8位}.png
+                filename = f"{safe_job_name}_{ts}_{job_id_short}.png"
                 out_path = out_dir / filename
                 
-                # 如果文件已存在，添加时间戳
-                if out_path.exists():
-                    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-                    filename = f"{safe_title}-{ts}.png"
-                    out_path = out_dir / filename
-                
-                # 从 jobs 文件夹复制图片到 actor 文件夹
+                # 从 jobs 文件夹复制图片到 actors 文件夹
                 shutil.copy2(job_image_path, out_path)
                 logger.info(f"已复制任务图像: {job_image_path} -> {out_path}")
                 
-                # image_path 只保存文件名（不包含路径）
-                # 实际文件保存在 projects/{project_id}/actor/{filename}
-                
-                # 更新 ActorExample 的 image_path（只保存文件名）
+                # 更新对应的 ActorExample
                 example = ActorExample(
                     title=title,
                     desc=desc,
@@ -547,12 +685,13 @@ async def _monitor_job_and_add_portrait(
                 
                 updated = ActorService.update_example(actor_id, example_index, example)
                 if updated:
-                    logger.success(f"监控任务完成: 为 Actor {actor.name} 更新立绘成功, title={title}, file={filename}")
+                    logger.success(f"监控任务完成: 为 Actor {actor.name} 更新立绘成功, title={title}, file={filename}, job_id={job_id}, example_index={example_index}")
                 else:
-                    logger.error(f"监控任务失败: 更新立绘示例失败 {actor_id}")
-                return
+                    logger.error(f"监控任务失败: 更新立绘示例失败 {actor_id}, example_index={example_index}")
+                
+                return  # 成功完成，退出循环
             
-            # 图片文件不存在，等待 1 秒后重试
+            # Job 未完成，等待 1 秒后重试
             await asyncio.sleep(1)
             attempt += 1
             
@@ -562,8 +701,8 @@ async def _monitor_job_and_add_portrait(
             await asyncio.sleep(1)
             attempt += 1
     
-    # 超时或失败，删除 ActorExample
-    logger.error(f"监控任务超时/失败: job_id={job_id}, actor_id={actor_id}, attempt={attempt}, error={last_error}")
+    # 超时或失败，删除对应的 ActorExample
+    logger.error(f"监控任务超时/失败: job_id={job_id}, actor_id={actor_id}, example_index={example_index}, attempt={attempt}, error={last_error}")
     try:
         ActorService.remove_example(actor_id, example_index)
         logger.info(f"已删除失败的 ActorExample: {actor_id}, index={example_index}")
@@ -571,37 +710,39 @@ async def _monitor_job_and_add_portrait(
         logger.exception(f"删除失败的 ActorExample 时出错: {e}")
 
 
-@router.post("/{actor_id}/add_portrait_from_job", summary="从 job_id 添加立绘到 Actor")
-async def add_portrait_from_job(
+@router.post("/{actor_id}/add_portrait_from_batch", summary="从 batch_id 添加立绘到 Actor")
+async def add_portrait_from_batch(
     actor_id: str,
     project_id: str,
-    job_id: str,
+    batch_id: str,
     title: str,
-    background_tasks: BackgroundTasks,
     desc: str = "",
 ) -> Dict[str, Any]:
     """
-    从已存在的 job_id 添加立绘到 Actor。
+    从已存在的 batch_id 添加立绘到 Actor。
     
     此函数会：
     1. 校验 Actor 归属
-    2. 启动后台任务监控 job 状态
-    3. 当 job 完成时，保存图片并添加到 Actor.examples
+    2. 立即创建 N 个 placeholder ActorExample（N = batch 中的 job 数量）
+    3. 为每个 job 启动独立的监控任务，当 job 完成时更新对应的 ActorExample
     
     Args:
         actor_id: Actor ID（路径参数）
         project_id: 项目ID（查询参数，用于权限校验）
-        job_id: 绘图任务 ID（查询参数）
-        title: 立绘标题（会用作文件名，即 {title}.png）
+        batch_id: 批量绘图任务 ID（查询参数）
+        title: 立绘标题
         desc: 立绘说明/描述
-        background_tasks: FastAPI 后台任务管理器
     
     Returns:
-        包含 job_id、actor_id、title 的字典
+        包含 batch_id、actor_id、title 的字典
     
     Raises:
-        404: Actor 不存在或 job 不存在
+        404: Actor 不存在或 batch 不存在
         403: Actor 不属于该项目
+    
+    Note:
+        图片文件名格式为：{job名称}_{时间字符串}_{job_id前8位}.png（例如：角色立绘-南云_20231201123453_abc12345.png）
+        会为 batch 中的每个 job 创建独立的监控任务，每个任务负责更新对应的 ActorExample
     """
     # 校验 actor 归属
     actor = ActorService.get(actor_id)
@@ -610,78 +751,108 @@ async def add_portrait_from_job(
     if actor.project_id != project_id:
         raise HTTPException(status_code=403, detail=f"Actor 不属于该项目: {project_id}")
     
-    # 检查 job 是否存在，并获取 draw_args
-    from api.services.db import JobService
-    job = JobService.get(job_id)
+    # 检查 batch 是否存在，并获取 draw_args
+    from api.services.db import BatchJobService, JobService
+    batch_job = BatchJobService.get(batch_id)
+    if not batch_job:
+        raise HTTPException(status_code=404, detail=f"批量任务不存在: {batch_id}")
+    
+    if not batch_job.job_ids:
+        raise HTTPException(status_code=400, detail=f"批量任务中没有 job: {batch_id}")
+    
+    # 从第一个 job 中获取 draw_args（所有 job 使用相同的参数）
+    first_job_id = batch_job.job_ids[0]
+    job = JobService.get(first_job_id)
     if not job:
-        raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
+        raise HTTPException(status_code=404, detail=f"任务不存在: {first_job_id}")
     
     # 从 job 中获取 draw_args
     if not job.draw_args:
-        raise HTTPException(status_code=400, detail=f"任务没有保存绘图参数: {job_id}")
+        raise HTTPException(status_code=400, detail=f"任务没有保存绘图参数: {first_job_id}")
     
     # 解析 DrawArgs
     draw_args = DrawArgs(**job.draw_args)
     
-    # 立即创建 ActorExample（image_path 为 None，表示正在生成中）
-    example = ActorExample(
-        title=title,
-        desc=desc,
-        draw_args=draw_args,
-        image_path=None  # 正在生成中
-    )
+    # 获取 job 列表
+    job_ids = batch_job.job_ids
+    job_count = len(job_ids)
     
-    # 添加到 Actor
-    updated = ActorService.add_example(actor_id, example)
-    if not updated:
-        raise HTTPException(status_code=500, detail=f"添加示例失败: {actor_id}")
+    # 立即创建 N 个 ActorExample（image_path 为 None，表示正在生成中）
+    # 每个 example 对应一个 job
+    example_indices = []
+    for i in range(job_count):
+        example = ActorExample(
+            title=title,
+            desc=desc,
+            draw_args=draw_args,
+            image_path=None  # 正在生成中
+        )
+        
+        # 添加到 Actor
+        updated = ActorService.add_example(actor_id, example)
+        if not updated:
+            # 如果添加失败，删除之前已创建的 example
+            for idx in example_indices:
+                try:
+                    ActorService.remove_example(actor_id, idx)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=500, detail=f"添加示例失败: {actor_id}")
+        
+        # 获取刚添加的示例的索引（最后一个）
+        example_index = len(updated.examples) - 1
+        example_indices.append(example_index)
     
-    # 获取刚添加的示例的索引（最后一个）
-    example_index = len(updated.examples) - 1
+    # 为每个 job 启动独立的监控任务
+    for i, job_id in enumerate(job_ids):
+        asyncio.create_task(
+            _monitor_single_job_and_update_portrait(
+                job_id=job_id,
+                actor_id=actor_id,
+                project_id=project_id,
+                title=title,
+                desc=desc,
+                draw_args=draw_args,
+                example_index=example_indices[i]  # 每个 job 对应一个 example index
+            )
+        )
     
-    # 启动后台任务监控 job 状态
-    background_tasks.add_task(
-        _monitor_job_and_add_portrait,
-        job_id=job_id,
-        actor_id=actor_id,
-        project_id=project_id,
-        title=title,
-        desc=desc,
-        draw_args=draw_args,
-        example_index=example_index  # 传递示例索引
-    )
-    
-    logger.info(f"已启动监控任务: job_id={job_id}, actor_id={actor_id}, title={title}")
+    logger.info(f"已启动 {job_count} 个监控任务: batch_id={batch_id}, actor_id={actor_id}, title={title}, job_count={job_count}")
     return {
-        "job_id": job_id,
+        "batch_id": batch_id,
         "actor_id": actor_id,
         "title": title,
-        "message": f"已启动监控任务，立绘将在 job 完成后自动添加到角色 {actor.name}"
+        "job_count": job_count,
+        "message": f"已启动 {job_count} 个监控任务，立绘将在 job 完成后自动添加到角色 {actor.name}"
     }
 
 
-async def add_portrait_from_job_tool(
+async def add_portrait_from_batch_tool(
     actor_id: str,
     project_id: str,
-    job_id: str,
+    batch_id: str,
     title: str,
     desc: str = "",
 ) -> Dict[str, Any]:
     """
-    从已存在的 job_id 添加立绘到 Actor（工具函数版本，不包含 BackgroundTasks）。
+    从已存在的 batch_id 添加立绘到 Actor（工具函数版本）。
     
-    这是 add_portrait_from_job 的工具函数包装版本，移除了 BackgroundTasks 参数，
-    直接使用 asyncio 创建后台任务。
+    这是 add_portrait_from_batch 的工具函数包装版本，使用 asyncio.create_task 来完成后台任务。
+    
+    此函数会：
+    1. 校验 Actor 归属
+    2. 立即创建 N 个 placeholder ActorExample（N = batch 中的 job 数量）
+    3. 为每个 job 启动独立的监控任务，当 job 完成时更新对应的 ActorExample
     
     Args:
         actor_id: Actor ID
         project_id: 项目ID（用于权限校验）
-        job_id: 绘图任务 ID
-        title: 立绘标题（会用作文件名，即 {title}.png）
+        batch_id: 批量绘图任务 ID
+        title: 立绘标题
         desc: 立绘说明/描述
     
     Returns:
-        包含 job_id、actor_id、title 的字典
+        包含 batch_id、actor_id、title 的字典
     """
     # 校验 actor 归属
     actor = ActorService.get(actor_id)
@@ -690,52 +861,77 @@ async def add_portrait_from_job_tool(
     if actor.project_id != project_id:
         raise HTTPException(status_code=403, detail=f"Actor 不属于该项目: {project_id}")
     
-    # 检查 job 是否存在，并获取 draw_args
-    from api.services.db import JobService
-    job = JobService.get(job_id)
+    # 检查 batch 是否存在，并获取 draw_args
+    from api.services.db import BatchJobService, JobService
+    batch_job = BatchJobService.get(batch_id)
+    if not batch_job:
+        raise HTTPException(status_code=404, detail=f"批量任务不存在: {batch_id}")
+    
+    if not batch_job.job_ids:
+        raise HTTPException(status_code=400, detail=f"批量任务中没有 job: {batch_id}")
+    
+    # 从第一个 job 中获取 draw_args（所有 job 使用相同的参数）
+    first_job_id = batch_job.job_ids[0]
+    job = JobService.get(first_job_id)
     if not job:
-        raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
+        raise HTTPException(status_code=404, detail=f"任务不存在: {first_job_id}")
     
     # 从 job 中获取 draw_args
     if not job.draw_args:
-        raise HTTPException(status_code=400, detail=f"任务没有保存绘图参数: {job_id}")
+        raise HTTPException(status_code=400, detail=f"任务没有保存绘图参数: {first_job_id}")
     
     # 解析 DrawArgs
     draw_args = DrawArgs(**job.draw_args)
     
-    # 立即创建 ActorExample（image_path 为 None，表示正在生成中）
-    example = ActorExample(
-        title=title,
-        desc=desc,
-        draw_args=draw_args,
-        image_path=None  # 正在生成中
-    )
+    # 获取 job 列表
+    job_ids = batch_job.job_ids
+    job_count = len(job_ids)
     
-    # 添加到 Actor
-    updated = ActorService.add_example(actor_id, example)
-    if not updated:
-        raise HTTPException(status_code=500, detail=f"添加示例失败: {actor_id}")
-    
-    # 获取刚添加的示例的索引（最后一个）
-    example_index = len(updated.examples) - 1
-    
-    # 使用 asyncio 创建后台任务（不依赖 FastAPI 的 BackgroundTasks）
-    asyncio.create_task(
-        _monitor_job_and_add_portrait(
-            job_id=job_id,
-            actor_id=actor_id,
-            project_id=project_id,
+    # 立即创建 N 个 ActorExample（image_path 为 None，表示正在生成中）
+    # 每个 example 对应一个 job
+    example_indices = []
+    for i in range(job_count):
+        example = ActorExample(
             title=title,
             desc=desc,
             draw_args=draw_args,
-            example_index=example_index
+            image_path=None  # 正在生成中
         )
-    )
+        
+        # 添加到 Actor
+        updated = ActorService.add_example(actor_id, example)
+        if not updated:
+            # 如果添加失败，删除之前已创建的 example
+            for idx in example_indices:
+                try:
+                    ActorService.remove_example(actor_id, idx)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=500, detail=f"添加示例失败: {actor_id}")
+        
+        # 获取刚添加的示例的索引（最后一个）
+        example_index = len(updated.examples) - 1
+        example_indices.append(example_index)
     
-    logger.info(f"已启动监控任务: job_id={job_id}, actor_id={actor_id}, title={title}")
+    # 为每个 job 启动独立的监控任务
+    for i, job_id in enumerate(job_ids):
+        asyncio.create_task(
+            _monitor_single_job_and_update_portrait(
+                job_id=job_id,
+                actor_id=actor_id,
+                project_id=project_id,
+                title=title,
+                desc=desc,
+                draw_args=draw_args,
+                example_index=example_indices[i]  # 每个 job 对应一个 example index
+            )
+        )
+    
+    logger.info(f"已启动 {job_count} 个监控任务: batch_id={batch_id}, actor_id={actor_id}, title={title}, job_count={job_count}")
     return {
-        "job_id": job_id,
+        "batch_id": batch_id,
         "actor_id": actor_id,
         "title": title,
-        "message": f"已启动监控任务，立绘将在 job 完成后自动添加到角色 {actor.name}"
+        "job_count": job_count,
+        "message": f"已启动 {job_count} 个监控任务，立绘将在 job 完成后自动添加到角色 {actor.name}"
     }

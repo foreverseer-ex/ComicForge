@@ -194,7 +194,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         async with aiofiles.open(meta_file, 'w', encoding='utf-8') as f:
             await f.write(meta.model_dump_json(indent=2))
     
-    async def save(self, model_meta: ModelMeta) -> ModelMeta:
+    async def save(self, model_meta: ModelMeta, parallel_download: bool = False) -> ModelMeta:
         """
         将模型元数据本地化并保存。
         
@@ -204,6 +204,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         3. 序列化 ModelMeta 到本地 metadata.json
         
         :param model_meta: 模型元数据（必须包含 type 字段，可以是远程的或本地的）
+        :param parallel_download: 是否并行下载示例图片，默认 False（串行下载）
         :return: 本地化后的 ModelMeta
         """
         # 确定基础路径与重名处理（使用内存缓存匹配同名文件）
@@ -220,36 +221,78 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         base_path = home / Path(model_meta.filename).stem
         base_path.mkdir(parents=True, exist_ok=True)
         
-        # 处理示例图片（串行下载）
+        # 处理示例图片（支持串行或并行下载）
         localized_examples: list[Example] = []
         
+        # 分离本地和远程的示例图片
+        local_examples = []
+        remote_examples = []
         for example in model_meta.examples:
             if is_local_url(example.url):
-                # 已经是本地 URL，直接使用
-                localized_examples.append(example)
-                logger.debug(f"示例图片已是本地: {example.filename}")
+                local_examples.append(example)
             else:
-                # 远程 URL，需要下载（串行下载）
-                save_path = base_path / example.filename
-                logger.debug(f"下载示例图片: {example.filename}")
+                remote_examples.append(example)
+        
+        # 本地示例直接添加
+        for example in local_examples:
+            localized_examples.append(example)
+            logger.debug(f"示例图片已是本地: {example.filename}")
+        
+        # 下载远程示例图片
+        if remote_examples:
+            if parallel_download:
+                # 并行下载
+                logger.debug(f"并行下载 {len(remote_examples)} 张示例图片")
+                download_tasks = []
+                for example in remote_examples:
+                    save_path = base_path / example.filename
+                    download_tasks.append(
+                        self._download_example_image(example, save_path)
+                    )
                 
-                try:
-                    success = await download_file(example.url, save_path, app_settings.civitai.timeout)
-                    if success:
-                        # 创建新的 Example，替换 URL 为本地 file:// URL
+                # 等待所有下载任务完成
+                results = await asyncio.gather(*download_tasks, return_exceptions=True)
+                
+                # 处理下载结果
+                for example, result in zip(remote_examples, results):
+                    if isinstance(result, Exception):
+                        logger.exception(f"下载示例图片失败 ({example.filename}): {result}")
+                        continue
+                    elif result:
+                        # 下载成功
+                        save_path = base_path / example.filename
                         local_example = Example(
-                            url=save_path.as_uri(),  # 转换为 file:// URL
+                            url=save_path.as_uri(),
                             args=example.args
                         )
                         localized_examples.append(local_example)
                         logger.debug(f"成功下载示例图片: {example.filename}")
                     else:
-                        # 下载失败，保留原 URL（或跳过）
                         logger.warning(f"下载失败，跳过示例图片: {example.filename}")
-                except Exception as e:
-                    logger.exception(f"下载示例图片失败 ({example.filename}): {e}")
-                    # 下载失败，跳过这张图片
-                    continue
+            else:
+                # 串行下载（原有逻辑）
+                logger.debug(f"串行下载 {len(remote_examples)} 张示例图片")
+                for example in remote_examples:
+                    save_path = base_path / example.filename
+                    logger.debug(f"下载示例图片: {example.filename}")
+                    
+                    try:
+                        success = await download_file(example.url, save_path, app_settings.civitai.timeout)
+                        if success:
+                            # 创建新的 Example，替换 URL 为本地 file:// URL
+                            local_example = Example(
+                                url=save_path.as_uri(),  # 转换为 file:// URL
+                                args=example.args
+                            )
+                            localized_examples.append(local_example)
+                            logger.debug(f"成功下载示例图片: {example.filename}")
+                        else:
+                            # 下载失败，保留原 URL（或跳过）
+                            logger.warning(f"下载失败，跳过示例图片: {example.filename}")
+                    except Exception as e:
+                        logger.exception(f"下载示例图片失败 ({example.filename}): {e}")
+                        # 下载失败，跳过这张图片
+                        continue
         
         # 创建本地化的 ModelMeta
         localized_meta = ModelMeta(
@@ -276,9 +319,23 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         
         return localized_meta
     
-    def delete(self, model_meta: ModelMeta) -> bool:
+    async def _download_example_image(self, example: Example, save_path: Path) -> bool:
         """
-        删除模型元数据及其关联的示例图片。
+        下载单个示例图片（内部方法，用于并行下载）。
+        
+        :param example: 示例图片对象
+        :param save_path: 保存路径
+        :return: 下载成功返回 True，失败返回 False
+        """
+        try:
+            return await download_file(example.url, save_path, app_settings.civitai.timeout)
+        except Exception as e:
+            logger.exception(f"下载示例图片失败 ({example.filename}): {e}")
+            return False
+    
+    async def delete(self, model_meta: ModelMeta) -> bool:
+        """
+        删除模型元数据及其关联的示例图片（异步版本）。
         
         此方法会：
         1. 删除元数据目录（包括 metadata.json 和所有示例图片）
@@ -299,9 +356,9 @@ class LocalModelModelMetaService(AbstractModelMetaService):
                 logger.error(f"不支持的模型类型: {model_meta.type}")
                 return False
             
-            # 删除目录（包括所有内容）
+            # 异步删除目录（包括所有内容），使用线程池避免阻塞事件循环
             if meta_dir.exists():
-                shutil.rmtree(meta_dir)
+                await asyncio.to_thread(shutil.rmtree, meta_dir)
                 logger.info(f"已删除元数据目录: {meta_dir}")
             else:
                 logger.warning(f"元数据目录不存在: {meta_dir}")

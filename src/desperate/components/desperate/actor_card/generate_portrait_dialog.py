@@ -510,11 +510,11 @@ class GeneratePortraitDialog(ft.AlertDialog):
                 if lora_name and weight_str:
                     try:
                         weight = float(weight_str)
-                        if 0.0 <= weight <= 2.0:
+                        if -2.0 <= weight <= 2.0:
                             loras[lora_name] = weight
                         else:
                             if self.on_error:
-                                self.on_error(f"❌ LoRA 权重必须在 0.0-2.0 之间: {lora_name}")
+                                self.on_error(f"❌ LoRA 权重必须在 -2.0 到 2.0 之间: {lora_name}")
                             return
                     except ValueError:
                         if self.on_error:

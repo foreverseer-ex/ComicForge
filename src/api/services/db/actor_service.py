@@ -157,17 +157,41 @@ class ActorService:
                 logger.warning(f"Actor 不存在，无法删除示例: {actor_id}")
                 return None
             
-            if 0 <= example_index < len(actor.examples):
-                removed = actor.examples.pop(example_index)
-                db.add(actor)
-                db.flush()
-                db.refresh(actor)
-                db.expunge(actor)
-                logger.info(f"删除 Actor 示例: {actor_id}, index={example_index}, title={removed.get('title')}")
-                return actor
-            else:
-                logger.warning(f"示例图索引越界: {actor_id}, index={example_index}")
+            if not (0 <= example_index < len(actor.examples)):
+                logger.warning(f"示例图索引越界: {actor_id}, index={example_index}, 总数={len(actor.examples)}")
                 return None
+            
+            # 记录删除前的状态（用于调试）
+            logger.debug(f"删除前 examples 列表: {[ex.get('title', '未命名') for ex in actor.examples]}")
+            logger.debug(f"要删除的索引: {example_index}, 对应的标题: {actor.examples[example_index].get('title', '未命名')}")
+            
+            # 记录要删除的示例信息（用于日志）
+            removed_example = actor.examples[example_index]
+            
+            # 重新构建列表，排除指定索引的元素
+            # 这样可以确保 MutableList 正确检测到变化
+            new_examples = [
+                actor.examples[i] 
+                for i in range(len(actor.examples)) 
+                if i != example_index
+            ]
+            
+            # 使用切片赋值来替换整个列表，确保 MutableList 检测到变化
+            actor.examples[:] = new_examples
+            
+            # 标记对象为已修改（确保 SQLAlchemy 检测到变化）
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(actor, "examples")
+            
+            db.add(actor)
+            db.flush()
+            db.refresh(actor)
+            db.expunge(actor)
+            
+            # 记录删除后的状态（用于调试）
+            logger.debug(f"删除后 examples 列表: {[ex.get('title', '未命名') for ex in actor.examples]}")
+            logger.info(f"删除 Actor 示例: {actor_id}, index={example_index}, title={removed_example.get('title')}, 剩余数量={len(actor.examples)}")
+            return actor
     
     @classmethod
     def swap_examples(cls, actor_id: str, index1: int, index2: int) -> Optional[Actor]:
@@ -230,4 +254,83 @@ class ActorService:
             else:
                 logger.warning(f"示例图索引越界: {actor_id}, index={example_index}")
                 return None
+    
+    @classmethod
+    def clear_examples(cls, actor_id: str) -> Optional[Actor]:
+        """
+        清空 Actor 的所有示例图。
+        
+        :param actor_id: Actor ID
+        :return: 更新后的 Actor 对象，如果不存在则返回 None
+        """
+        with DatabaseSession() as db:
+            actor = db.get(Actor, actor_id)
+            if not actor:
+                logger.warning(f"Actor 不存在，无法清空示例: {actor_id}")
+                return None
+            
+            # 清空 examples 列表
+            actor.examples.clear()
+            
+            # 标记对象为已修改（确保 SQLAlchemy 检测到变化）
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(actor, "examples")
+            
+            db.add(actor)
+            db.flush()
+            db.refresh(actor)
+            db.expunge(actor)
+            logger.info(f"清空 Actor 所有示例: {actor_id}")
+            return actor
+    
+    @classmethod
+    def batch_remove_examples(cls, actor_id: str, example_indices: list[int]) -> Optional[Actor]:
+        """
+        批量删除 Actor 的示例图。
+        
+        :param actor_id: Actor ID
+        :param example_indices: 要删除的示例图索引列表（按降序排列，避免删除时索引变化）
+        :return: 更新后的 Actor 对象，如果不存在则返回 None
+        """
+        with DatabaseSession() as db:
+            actor = db.get(Actor, actor_id)
+            if not actor:
+                logger.warning(f"Actor 不存在，无法批量删除示例: {actor_id}")
+                return None
+            
+            if not actor.examples:
+                logger.debug(f"Actor 没有示例图，无需删除: {actor_id}")
+                return actor
+            
+            # 验证索引有效性
+            valid_indices = [idx for idx in example_indices if 0 <= idx < len(actor.examples)]
+            if not valid_indices:
+                logger.warning(f"没有有效的示例图索引: {actor_id}, indices={example_indices}")
+                return actor
+            
+            # 去重并排序（降序，从后往前删除，避免索引变化）
+            valid_indices = sorted(set(valid_indices), reverse=True)
+            
+            # 记录删除前的状态（用于调试）
+            logger.debug(f"批量删除前 examples 列表: {[ex.get('title', '未命名') for ex in actor.examples]}")
+            logger.debug(f"要删除的索引: {valid_indices}")
+            
+            # 从后往前删除，避免索引变化
+            for idx in valid_indices:
+                if 0 <= idx < len(actor.examples):
+                    actor.examples.pop(idx)
+            
+            # 标记对象为已修改（确保 SQLAlchemy 检测到变化）
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(actor, "examples")
+            
+            db.add(actor)
+            db.flush()
+            db.refresh(actor)
+            db.expunge(actor)
+            
+            # 记录删除后的状态（用于调试）
+            logger.debug(f"批量删除后 examples 列表: {[ex.get('title', '未命名') for ex in actor.examples]}")
+            logger.info(f"批量删除 Actor 示例: {actor_id}, 删除了 {len(valid_indices)} 个示例, 剩余数量={len(actor.examples)}")
+            return actor
 

@@ -66,6 +66,15 @@ def _migrate_job_table() -> None:
         logger.success("已为 job 表添加 desc 列")
         has_changes = True
     
+    # 添加 status 列（如果不存在）
+    if "status" not in columns:
+        logger.info("正在为 job 表添加 status 列...")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE job ADD COLUMN status TEXT"))
+            conn.commit()
+        logger.success("已为 job 表添加 status 列")
+        has_changes = True
+    
     # 添加 completed_at 列（如果不存在）
     if "completed_at" not in columns:
         logger.info("正在为 job 表添加 completed_at 列...")

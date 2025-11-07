@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-4">
     <!-- 任务名称和描述 -->
-    <div class="grid grid-cols-2 gap-4">
+    <div>
       <div>
         <label :class="['block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700']">
           任务名称
@@ -18,22 +18,79 @@
           ]"
         />
       </div>
-      <div>
+      <div class="mt-4">
         <label :class="['block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700']">
           任务描述
         </label>
-        <input
+        <textarea
           v-model="formData.desc"
-          type="text"
-          placeholder="可选"
+          rows="4"
+          placeholder="可选，填写额外的生成要求..."
           :class="[
-            'w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500',
+            'w-full px-3 py-2 rounded-lg border resize-none focus:outline-none focus:ring-2 focus:ring-blue-500',
             isDark
               ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
               : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
           ]"
-        />
+        ></textarea>
+        <!-- 附加信息（只读，可关闭） -->
+        <div v-if="additionalInfo && showAdditionalInfo" class="mt-2 p-3 rounded-lg border relative" :class="isDark ? 'bg-gray-800 border-gray-600' : 'bg-gray-50 border-gray-200'">
+          <button
+            @click="showAdditionalInfo = false"
+            :class="[
+              'absolute top-2 right-2 p-1 rounded transition-colors',
+              isDark
+                ? 'hover:bg-gray-700 text-gray-400 hover:text-gray-300'
+                : 'hover:bg-gray-200 text-gray-500 hover:text-gray-700'
+            ]"
+            title="关闭附加信息"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <div class="text-xs font-medium mb-1 pr-6" :class="isDark ? 'text-gray-400' : 'text-gray-600'">
+            附加信息（来自角色设定）：
+          </div>
+          <div class="text-sm whitespace-pre-wrap pr-6" :class="isDark ? 'text-gray-300' : 'text-gray-700'">
+            {{ additionalInfo }}
+          </div>
+        </div>
       </div>
+    </div>
+
+    <!-- 批量大小 -->
+    <div>
+      <label :class="['block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700']">
+        批量大小
+      </label>
+      <div class="flex gap-2 flex-wrap">
+        <label
+          v-for="size in [1, 2, 4, 8]"
+          :key="size"
+          :class="[
+            'flex-1 min-w-[60px] px-3 py-2 rounded-lg border cursor-pointer transition-colors text-center text-sm font-medium',
+            formData.batch_size === size
+              ? isDark
+                ? 'bg-blue-600 border-blue-500 text-white'
+                : 'bg-blue-600 border-blue-600 text-white'
+              : isDark
+                ? 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
+                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+          ]"
+        >
+          <input
+            v-model.number="formData.batch_size"
+            type="radio"
+            :value="size"
+            class="hidden"
+          />
+          {{ size }}
+        </label>
+      </div>
+      <p :class="['mt-1 text-xs', isDark ? 'text-gray-400' : 'text-gray-500']">
+        生成图片的数量
+      </p>
     </div>
 
     <!-- 基础模型选择 -->
@@ -316,7 +373,7 @@
           <input
             v-model.number="lora.weight"
             type="number"
-            min="0"
+            min="-2"
             max="2"
             step="0.1"
             placeholder="权重"
@@ -363,6 +420,8 @@ import { showToast } from '../utils/toast'
 interface Props {
   // 用于 AI 生成参数的上下文信息（如角色名称）
   contextInfo?: string
+  // 附加信息（只读，显示在任务描述下方）
+  additionalInfo?: string
 }
 
 const props = defineProps<Props>()
@@ -383,6 +442,7 @@ const emit = defineEmits<{
     clip_skip?: number
     vae?: string
     loras: Record<string, number>
+    batch_size?: number
   }): void
   (e: 'generate-params'): void
   (e: 'paste-params', params: any): void
@@ -431,7 +491,8 @@ const formData = ref({
   height: 1024,
   seed: -1,
   clip_skip: 2,
-  vae: ''
+  vae: '',
+  batch_size: 1
 })
 
 const loras = ref<LoraItem[]>([])
@@ -441,6 +502,9 @@ const models = ref<any[]>([])
 const availableLoras = ref<any[]>([])
 const loadingModels = ref(false)
 const loadingLoras = ref(false)
+
+// 附加信息显示状态
+const showAdditionalInfo = ref(true)
 
 // 绘图后端设置
 const drawBackend = ref<'sd_forge' | 'civitai'>('sd_forge')
@@ -652,9 +716,11 @@ const resetForm = () => {
     height: 1024,
     seed: -1,
     clip_skip: 2,
-    vae: ''
+    vae: '',
+    batch_size: 1
   }
   loras.value = []
+  showAdditionalInfo.value = true // 重置附加信息显示状态
 }
 
 // 提交处理（由父组件调用）
@@ -678,9 +744,19 @@ const handleSubmit = () => {
     }
   })
   
+  // 合并附加信息到任务描述（只有在显示附加信息时才合并）
+  let finalDesc = formData.value.desc || ''
+  if (props.additionalInfo && showAdditionalInfo.value) {
+    if (finalDesc) {
+      finalDesc = `${finalDesc}\n\n${props.additionalInfo}`
+    } else {
+      finalDesc = props.additionalInfo
+    }
+  }
+  
   emit('submit', {
     name: formData.value.name || undefined,
-    desc: formData.value.desc || undefined,
+    desc: finalDesc || undefined,
     model: formData.value.model,
     prompt: formData.value.prompt,
     negative_prompt: formData.value.negative_prompt,
@@ -692,7 +768,8 @@ const handleSubmit = () => {
     seed: formData.value.seed,
     clip_skip: formData.value.clip_skip || undefined,
     vae: formData.value.vae || undefined,
-    loras: lorasDict
+    loras: lorasDict,
+    batch_size: formData.value.batch_size || 1
   })
 }
 
@@ -720,5 +797,12 @@ onMounted(async () => {
 watch(() => drawBackend.value, () => {
   loadModels()
 })
+
+// 当 additionalInfo prop 变化时，重置显示状态
+watch(() => props.additionalInfo, (newVal) => {
+  // 如果有新的附加信息，显示它；如果没有，隐藏
+  showAdditionalInfo.value = !!newVal
+}, { immediate: true })
+
 </script>
 

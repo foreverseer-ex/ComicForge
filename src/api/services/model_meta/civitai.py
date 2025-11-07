@@ -214,6 +214,8 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         
         :param version_id: Civitai 模型版本 ID
         :return: 模型元数据，未找到返回 None
+        :raises httpx.ConnectError: 网络连接失败
+        :raises httpx.TimeoutException: 请求超时
         """
         url = f"{CIVITAI_BASE_URL}/api/v1/model-versions/{version_id}"
         
@@ -232,6 +234,14 @@ class CivitaiModelMetaService(AbstractModelMetaService):
             logger.success(f"从 Civitai 获取模型元数据成功: {model_meta.name} (Version ID: {version_id})")
             return model_meta
             
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            # 网络连接错误，需要向上抛出，让调用者知道是网络问题
+            logger.error(f"连接 Civitai API 失败 (version_id={version_id}): {e}")
+            raise
+        except httpx.TimeoutException as e:
+            # 请求超时，需要向上抛出
+            logger.error(f"请求 Civitai API 超时 (version_id={version_id}): {e}")
+            raise
         except (KeyError, IndexError, TypeError) as e:
             logger.exception(f"解析 Civitai API 响应失败: {e}")
             return None
@@ -239,7 +249,7 @@ class CivitaiModelMetaService(AbstractModelMetaService):
             logger.exception(f"从 Civitai 获取模型元数据失败: {e}")
             return None
     
-    async def save(self, model_meta: ModelMeta) -> ModelMeta:
+    async def save(self, model_meta: ModelMeta, parallel_download: bool = False) -> ModelMeta:
         """
         保存模型元数据（委托给本地服务）。
         
@@ -249,13 +259,14 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         - Local 负责本地存储管理
         
         :param model_meta: 模型元数据（必须包含 type 字段）
+        :param parallel_download: 是否并行下载示例图片，默认 False（串行下载）
         :return: 保存后的模型元数据
         """
         # 延迟导入，避免循环依赖
-
         
-        logger.debug(f"Civitai 服务委托本地服务保存: {model_meta.name}")
-        return await local_model_meta_service.save(model_meta)
+        
+        logger.debug(f"Civitai 服务委托本地服务保存: {model_meta.name} (parallel_download={parallel_download})")
+        return await local_model_meta_service.save(model_meta, parallel_download=parallel_download)
     
     async def sync_from_sd_forge(self):
         """

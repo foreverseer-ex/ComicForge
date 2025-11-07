@@ -62,6 +62,20 @@
             >
               <ClipboardIcon class="w-5 h-5" />
             </button>
+            <!-- 切换到已有任务选择按钮 -->
+            <button
+              v-if="showSwitchToJobs"
+              @click="$emit('switch-to-jobs')"
+              :class="[
+                'p-2 rounded-lg transition-colors',
+                isDark
+                  ? 'bg-orange-600 hover:bg-orange-700 text-white'
+                  : 'bg-orange-500 hover:bg-orange-600 text-white'
+              ]"
+              title="从已有任务选择图像"
+            >
+              <PhotoIcon class="w-5 h-5" />
+            </button>
             <button
               @click="handleClose"
               :class="[
@@ -82,6 +96,7 @@
           <DrawTaskForm
             ref="drawFormRef"
             :context-info="contextInfo"
+            :additional-info="additionalInfo"
             @submit="handleSubmit"
             @generate-params="handleGenerateParams"
             @paste-params="handlePasteParams"
@@ -125,7 +140,7 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
-import { XMarkIcon, BoltIcon, ClipboardIcon } from '@heroicons/vue/24/outline'
+import { XMarkIcon, BoltIcon, ClipboardIcon, PhotoIcon } from '@heroicons/vue/24/outline'
 import api from '../api'
 import { showToast } from '../utils/toast'
 import DrawTaskForm from './DrawTaskForm.vue'
@@ -137,22 +152,27 @@ interface Props {
   submitButtonText?: string
   submitButtonLoadingText?: string
   showCancel?: boolean
+  showSwitchToJobs?: boolean // 是否显示切换到已有任务选择的按钮
   onSubmit?: (data: any) => Promise<void> // 自定义提交处理函数
   initialName?: string // 初始任务名称
   initialDesc?: string // 初始任务描述
+  projectId?: string // 项目ID（可选），用于立绘生成时查询角色信息
+  additionalInfo?: string // 附加信息（只读，显示在任务描述下方）
 }
 
 const props = withDefaults(defineProps<Props>(), {
   title: '新建绘图任务',
   submitButtonText: '创建任务',
   submitButtonLoadingText: '创建中...',
-  showCancel: false
+  showCancel: false,
+  showSwitchToJobs: false
 })
 
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'submit', data: any): void
   (e: 'submitted'): void
+  (e: 'switch-to-jobs'): void
 }>()
 
 const themeStore = useThemeStore()
@@ -182,10 +202,17 @@ const handleGenerateWithAI = async () => {
     }
     
     // 调用后端 API 生成参数
-    const response = await api.post('/llm/generate-draw-params', {
+    const requestBody: any = {
       name: name,
       desc: desc || undefined
-    })
+    }
+    
+    // 如果是立绘生成（提供了 projectId），传递 project_id 参数
+    if (props.projectId) {
+      requestBody.project_id = props.projectId
+    }
+    
+    const response = await api.post('/llm/generate-draw-params', requestBody)
     
     if (response.success && response.params && drawFormRef.value.formData) {
       // 回填所有参数

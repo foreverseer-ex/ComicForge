@@ -109,18 +109,29 @@ class SdForgeDrawService(AbstractDrawService):
         
         :return: 包含 images、parameters 等字段的响应
         """
-        # 处理 LoRA
+        # 处理 LoRA：分离正面和负面 LoRA
         final_prompt = prompt
+        final_negative_prompt = negative_prompt or ""
+        
         if loras:
-            tags = []
+            positive_tags = []
+            negative_tags = []
             for name, weight in loras.items():
-                tags.append(f"<lora:{name}:{weight}>")
-            if tags:
-                final_prompt = " ".join(tags) + " " + (prompt or "")
+                if weight < 0:
+                    # 负数权重表示负面 LoRA，正化后添加到负面提示词
+                    negative_tags.append(f"<lora:{name}:{abs(weight)}>")
+                else:
+                    # 正数权重表示正面 LoRA，添加到正向提示词
+                    positive_tags.append(f"<lora:{name}:{weight}>")
+            
+            if positive_tags:
+                final_prompt = " ".join(positive_tags) + " " + (prompt or "")
+            if negative_tags:
+                final_negative_prompt = " ".join(negative_tags) + " " + (negative_prompt or "")
 
         payload: Dict[str, Any] = {
             "prompt": final_prompt,
-            "negative_prompt": negative_prompt or "",
+            "negative_prompt": final_negative_prompt,
             "width": width,
             "height": height,
             "steps": steps,

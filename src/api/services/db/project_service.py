@@ -26,7 +26,7 @@ class ProjectService:
         
         创建以下目录：
         - images/: 存放生成的图片
-        - actor/: 存放角色立绘
+        - actors/: 存放角色立绘
         
         如果有原始小说文件，会自动解析并存入数据库。
         
@@ -45,10 +45,10 @@ class ProjectService:
             images_dir.mkdir(exist_ok=True)
             logger.info(f"创建 images 目录: {images_dir}")
             
-            # 创建 actor 文件夹（存放角色立绘）
-            actor_dir = project_path / "actor"
+            # 创建 actors 文件夹（存放角色立绘）
+            actor_dir = project_path / "actors"
             actor_dir.mkdir(exist_ok=True)
-            logger.info(f"创建 actor 目录: {actor_dir}")
+            logger.info(f"创建 actors 目录: {actor_dir}")
             
             # 如果有小说文件，解析并存入数据库
             if project.novel_path:

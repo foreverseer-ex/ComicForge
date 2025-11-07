@@ -113,10 +113,10 @@ async def get_actor_example_image(actor_id: str, example_index: int) -> FileResp
     if example.image_path is None:
         raise HTTPException(status_code=404, detail="示例图正在生成中")
     
-    # image_path 只保存文件名，实际文件保存在 projects/{project_id}/actor/{filename}
+    # image_path 只保存文件名，实际文件保存在 projects/{project_id}/actors/{filename}
     # 需要从 actor 获取 project_id，然后构建完整路径
     project_id = actor.project_id
-    image_path = project_home / project_id / "actor" / example.image_path
+    image_path = project_home / project_id / "actors" / example.image_path
     
     if not image_path.exists():
         raise HTTPException(status_code=404, detail=f"示例图文件不存在: {example.image_path}")

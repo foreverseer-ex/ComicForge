@@ -25,7 +25,7 @@ class DrawArgs(BaseModel):
     height: int = 512
     clip_skip: int | None = 2
     vae: str | None = None  # VAE 模型名称
-    loras: dict[str, float] | None = None  # LoRA 字典 {name: strength}
+    loras: dict[str, float] | None = None  # LoRA 字典 {name: weight}，权重可以是负数（负数表示负面 LoRA，会被添加到负面提示词）
 
 
 class Job(SQLModel, table=True):
@@ -38,7 +38,8 @@ class Job(SQLModel, table=True):
     name: Optional[str] = Field(default=None, description="任务名称")
     desc: Optional[str] = Field(default=None, description="任务描述")
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
-    completed_at: Optional[datetime] = Field(default=None, description="完成时间")
+    completed_at: Optional[datetime] = Field(default=None, description="完成时间（成功或失败都会设置）")
+    status: Optional[str] = Field(default=None, description="任务状态：completed（成功）、failed（失败）、pending（进行中）")
     draw_args: Optional[Dict[str, Any]] = Field(
         default=None,
         sa_column=Column(JSON()),

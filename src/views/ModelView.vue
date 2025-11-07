@@ -115,18 +115,6 @@
           <ClipboardDocumentIcon class="w-5 h-5" />
         </button>
 
-        <!-- 刷新元数据 -->
-        <button
-          @click="showRefreshDialog = true"
-          :class="[
-            'p-2 rounded-lg transition-colors text-blue-500',
-            isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-          ]"
-          title="重新下载所有模型元数据"
-        >
-          <ArrowPathIcon class="w-5 h-5" />
-        </button>
-
         <!-- 清空元数据 -->
         <button
           @click="showClearDialog = true"
@@ -423,69 +411,6 @@
       </div>
     </Teleport>
 
-    <!-- 刷新元数据确认对话框 -->
-    <Teleport to="body">
-      <div
-        v-if="showRefreshDialog"
-        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        @click.self="showRefreshDialog = false"
-      >
-        <div
-          :class="[
-            'w-full max-w-md rounded-lg shadow-xl',
-            'mx-4 md:mx-0', // 移动端添加左右边距
-            isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border-gray-200'
-          ]"
-          @click.stop
-        >
-          <div class="p-4 md:p-6">
-            <h2 class="text-xl font-bold mb-4 text-blue-600">确认重新下载</h2>
-            <div class="text-center mb-4">
-              <svg class="w-12 h-12 mx-auto text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <p :class="['font-bold text-center mb-4', isDark ? 'text-white' : 'text-gray-900']">
-              即将重新下载 {{ allModels.length }} 个模型的元数据
-            </p>
-            <div :class="['text-sm mb-4', isDark ? 'text-gray-300' : 'text-gray-700']">
-              <p>此操作将：</p>
-              <ul class="list-disc list-inside mt-2">
-                <li>从 Civitai 重新获取最新的模型信息</li>
-                <li>更新所有示例图片</li>
-                <li>覆盖现有的本地元数据</li>
-              </ul>
-            </div>
-            <p class="text-sm text-orange-600 font-bold text-center mb-4">
-              ⚠️ 此过程可能需要较长时间
-            </p>
-            <div class="flex justify-end gap-3">
-              <button
-                @click="showRefreshDialog = false"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  isDark
-                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                ]"
-              >
-                取消
-              </button>
-              <button
-                @click="refreshAllMetadata"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  'bg-blue-600 hover:bg-blue-700 text-white'
-                ]"
-              >
-                确认刷新
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
     <!-- 右键菜单 -->
     <div
       v-if="contextMenu.show"
@@ -526,15 +451,17 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
+import { usePrivacyStore } from '../stores/privacy'
 import { storeToRefs } from 'pinia'
 import { 
   XMarkIcon, EyeIcon, EyeSlashIcon, CloudArrowDownIcon, 
   ClipboardDocumentIcon, 
-  ArrowPathIcon, TrashIcon 
+  TrashIcon 
 } from '@heroicons/vue/24/outline'
 import ModelCard from '../components/ModelCard.vue'
 import ModelDetailDialog from '../components/ModelDetailDialog.vue'
 import api from '../api'
+import { showToast } from '../utils/toast'
 
 interface ModelMeta {
   model_id: number
@@ -559,6 +486,9 @@ const { isDark } = storeToRefs(themeStore)
 const projectStore = useProjectStore()
 const { selectedProjectId } = storeToRefs(projectStore)
 
+const privacyStore = usePrivacyStore()
+const { privacyMode } = storeToRefs(privacyStore)
+
 // 状态
 const loading = ref(false)
 const checkpoints = ref<ModelMeta[]>([])
@@ -568,26 +498,9 @@ const loras = ref<ModelMeta[]>([])
 const ecosystemFilter = ref('')
 const baseModelFilter = ref('')
 
-// 隐私模式 - 从 localStorage 读取
-const privacyMode = ref(false)
-
-// 初始化隐私模式（从 localStorage 读取）
-const initPrivacyMode = () => {
-  const saved = localStorage.getItem('modelPrivacyMode')
-  if (saved !== null) {
-    privacyMode.value = saved === 'true'
-  }
-}
-
-// 监听隐私模式变化，保存到 localStorage
-watch(privacyMode, (newVal) => {
-  localStorage.setItem('modelPrivacyMode', String(newVal))
-})
-
 // 对话框
 const showImportDialog = ref(false)
 const showClearDialog = ref(false)
-const showRefreshDialog = ref(false)
 const importAirInput = ref('')
 const importStatus = ref('')
 const importStatusColor = ref('')
@@ -665,8 +578,7 @@ const clearFilters = () => {
 
 // 切换隐私模式
 const togglePrivacyMode = () => {
-  privacyMode.value = !privacyMode.value
-  // TODO: 保存到 settings API
+  privacyStore.togglePrivacyMode()
 }
 
 // 导出所有 AIR
@@ -730,14 +642,15 @@ const batchImport = async () => {
   }
   
   // 并发导入函数
-  const importSingleModel = async (air: string, index: number) => {
+  const importSingleModel = async (air: string, index: number, parallelDownload: boolean = false) => {
     if (cancelImportFlag.value) {
       return { success: false, air, error: '已取消' }
     }
     
     try {
       const response = await api.post('/model-meta/import', {
-        air: air
+        air: air,
+        parallel_download: parallelDownload
       })
       
       if (response.success) {
@@ -766,6 +679,9 @@ const batchImport = async () => {
   
   // 并发控制导入
   const importWithConcurrency = async () => {
+    // 如果只有一行AIR，使用并行下载示例图片
+    const useParallelDownload = lines.length === 1
+    
     // 分批处理，每批最多 maxConcurrency 个
     for (let i = 0; i < lines.length; i += maxConcurrency) {
       if (cancelImportFlag.value) {
@@ -774,7 +690,7 @@ const batchImport = async () => {
       
       const batch = lines.slice(i, i + maxConcurrency)
       const batchPromises = batch.map((air, batchIndex) => 
-        importSingleModel(air, i + batchIndex)
+        importSingleModel(air, i + batchIndex, useParallelDownload)
       )
       
       await Promise.allSettled(batchPromises)
@@ -796,23 +712,29 @@ const batchImport = async () => {
       importStatusColor.value = 'text-green-600'
       // 导入成功后刷新模型列表
       await loadModels()
-      // 3秒后关闭对话框
-      setTimeout(() => {
-        if (importProgress.value.current === importProgress.value.total) {
-          showImportDialog.value = false
-          importAirInput.value = ''
-          importStatus.value = ''
-          importErrors.value = []
-        }
-      }, 3000)
+      // 导入完成后立即关闭对话框
+      showImportDialog.value = false
+      importAirInput.value = ''
+      importStatus.value = ''
+      importErrors.value = []
     } else if (successCount === 0) {
       importStatus.value = `❌ 全部导入失败（${failedCount} 个）`
       importStatusColor.value = 'text-red-600'
+      // 全部失败时也关闭对话框
+      showImportDialog.value = false
+      importAirInput.value = ''
+      importStatus.value = ''
+      importErrors.value = []
     } else {
       importStatus.value = `⚠️ 成功 ${successCount} 个，失败 ${failedCount} 个`
       importStatusColor.value = 'text-orange-600'
       // 部分成功也刷新模型列表
       await loadModels()
+      // 部分成功时也关闭对话框
+      showImportDialog.value = false
+      importAirInput.value = ''
+      importStatus.value = ''
+      importErrors.value = []
     }
   }
 }
@@ -908,18 +830,6 @@ const clearAllMetadata = async () => {
   }
 }
 
-// 刷新所有元数据
-const refreshAllMetadata = async () => {
-  showRefreshDialog.value = false
-  const airList = allModels.value.map(m => m.air)
-  importAirInput.value = airList.join('\n')
-  showImportDialog.value = true
-  // 自动开始导入
-  setTimeout(() => {
-    batchImport()
-  }, 100)
-}
-
 // 详情对话框
 const detailModel = ref<ModelMeta | null>(null)
 
@@ -943,13 +853,15 @@ const deleteModel = async () => {
   if (!contextMenu.value.model) return
   
   try {
-    // TODO: 调用删除 API
+    // 调用删除 API
+    await api.delete(`/model-meta/${contextMenu.value.model.version_id}`)
     contextMenu.value.show = false
-    alert(`✅ 已删除: ${contextMenu.value.model.name}`)
+    showToast(`✅ 已删除: ${contextMenu.value.model.name}`, 'success')
     await loadModels()
-  } catch (error) {
+  } catch (error: any) {
     console.error('删除失败:', error)
-    alert('❌ 删除失败')
+    const errorMsg = error.response?.data?.detail || error.message || '删除失败'
+    showToast(`❌ ${errorMsg}`, 'error')
     contextMenu.value.show = false
   }
 }
@@ -981,8 +893,8 @@ onMounted(async () => {
   // 初始化 store
   projectStore.init()
   
-  // 初始化隐私模式
-  initPrivacyMode()
+  // 初始化隐私模式（从 store 中读取）
+  privacyStore.initPrivacyMode()
   
   // 确保项目列表已加载
   if (projectStore.projects.length === 0) {

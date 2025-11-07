@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+import logging
 
 from api.routers import (
     project,
@@ -25,6 +26,20 @@ from api.routers import (
 )
 from api.services.db.base import init_db
 from api.settings import AppSettings
+
+# 配置 uvicorn.access logger：过滤掉 /health 端点的访问日志
+class HealthCheckFilter(logging.Filter):
+    """过滤掉 /health 端点的访问日志"""
+    def filter(self, record):
+        # 检查日志消息中是否包含 /health
+        message = record.getMessage()
+        if "/health" in message:
+            return False
+        return True
+
+# 获取 uvicorn.access logger 并添加过滤器
+uvicorn_access_logger = logging.getLogger("uvicorn.access")
+uvicorn_access_logger.addFilter(HealthCheckFilter())
 
 # 加载配置
 app_settings = AppSettings.load()

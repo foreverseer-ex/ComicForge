@@ -160,12 +160,12 @@
             <div class="flex-1 min-w-0">
               <div 
                 v-if="job.name"
-                @click="copyToClipboard(job.name)"
+                @click="openParamsDialog(job)"
                 :class="[
                   'text-xs truncate cursor-pointer hover:underline',
                   isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-600 hover:text-gray-900'
                 ]"
-                :title="job.name + ' (点击复制)'"
+                :title="job.name + ' (点击查看参数)'"
               >
                 {{ job.name }}
               </div>
@@ -222,7 +222,18 @@
           <!-- 状态标识 -->
           <div class="col-span-2 md:col-span-1 flex items-center">
             <span
-              v-if="jobStatuses[job.job_id] === true"
+              v-if="job.status === 'failed'"
+              @click="showErrorDialog(job)"
+              :class="[
+                'px-2 py-1 text-xs rounded cursor-pointer transition-opacity hover:opacity-80 whitespace-nowrap',
+                isDark ? 'bg-red-600 text-white' : 'bg-red-100 text-red-800'
+              ]"
+              title="任务失败，点击查看详情"
+            >
+              失败
+            </span>
+            <span
+              v-else-if="job.status === 'completed' || jobStatuses[job.job_id] === true"
               @click="handlePreviewImage(job.job_id)"
               :class="[
                 'px-2 py-1 text-xs rounded cursor-pointer transition-opacity hover:opacity-80 whitespace-nowrap',
@@ -233,7 +244,7 @@
               已完成
             </span>
             <span
-              v-else-if="jobStatuses[job.job_id] === false"
+              v-else-if="jobStatuses[job.job_id] === false || !job.completed_at"
               :class="[
                 'px-2 py-1 text-xs rounded whitespace-nowrap',
                 isDark ? 'bg-yellow-600 text-white' : 'bg-yellow-100 text-yellow-800'
@@ -300,12 +311,23 @@
       @submitted="handleTaskCreated"
     />
 
+    <!-- 生成参数对话框 -->
+    <ModelParamsDialog
+      v-if="selectedJobForParams"
+      :params="selectedJobForParams.draw_args || null"
+      :title="selectedJobForParams.name ? `生成参数 - ${selectedJobForParams.name}` : '生成参数'"
+      :job-id="selectedJobForParams.job_id"
+      @close="selectedJobForParams = null"
+    />
+
     <!-- 图片预览对话框 -->
     <ImageGalleryDialog
       :visible="previewJobId !== null"
       :images="completedJobImageUrls"
       :initial-index="previewJobIndex"
+      :job-ids="completedJobIds"
       @close="previewJobId = null"
+      @show-params="handleShowParamsFromGallery"
     />
 
     <!-- 确认对话框 -->
@@ -345,6 +367,7 @@ import CreateDrawTaskDialog from '../components/CreateDrawTaskDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import AlertDialog from '../components/AlertDialog.vue'
 import ImageGalleryDialog from '../components/ImageGalleryDialog.vue'
+import ModelParamsDialog from '../components/ModelParamsDialog.vue'
 
 const themeStore = useThemeStore()
 const { isDark } = storeToRefs(themeStore)
@@ -355,6 +378,7 @@ interface Job {
   desc?: string
   created_at: string
   completed_at?: string
+  status?: string  // 'completed' | 'failed' | 'pending'
   draw_args?: {
     model?: string
     prompt?: string
@@ -373,9 +397,10 @@ const jobs = ref<Job[]>([])
 const loading = ref(false)
 const showCreateDialog = ref(false)
 const previewJobId = ref<string | null>(null)
-const jobStatuses = ref<Record<string, boolean | null>>({})
+const jobStatuses = ref<Record<string, boolean | null>>({})  // true=完成, false=生成中, null=未知（兼容旧逻辑）
 const refreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const selectedJobIds = ref<Set<string>>(new Set()) // 选中的任务ID集合
+const selectedJobForParams = ref<Job | null>(null) // 选中的任务（用于显示参数）
 
 // 对话框状态
 const confirmDialog = ref({
@@ -417,8 +442,18 @@ const loadJobs = async () => {
 const updateJobStatusesFromData = () => {
   jobStatuses.value = {}
   for (const job of jobs.value) {
-    // 如果有 completed_at，说明已完成
-    jobStatuses.value[job.job_id] = !!job.completed_at
+    // 根据 status 字段判断状态
+    if (job.status === 'completed') {
+      jobStatuses.value[job.job_id] = true
+    } else if (job.status === 'failed') {
+      jobStatuses.value[job.job_id] = false  // 失败的任务不算完成，但已完成（有 completed_at）
+    } else if (job.completed_at) {
+      // 兼容旧数据：如果有 completed_at 但没有 status，默认为完成
+      jobStatuses.value[job.job_id] = true
+    } else {
+      // 否则是生成中
+      jobStatuses.value[job.job_id] = false
+    }
   }
 }
 
@@ -429,12 +464,23 @@ const checkPendingJobStatuses = async () => {
   // 并行检查所有待处理任务
   const promises = pendingJobs.map(async (job) => {
     try {
-      const isComplete = await checkJobStatus(job.job_id)
-      jobStatuses.value[job.job_id] = isComplete
-      return isComplete
+      const jobData = await api.get('/draw', { params: { job_id: job.job_id } })
+      // 更新任务数据（可能包含 status 或 completed_at）
+      const index = jobs.value.findIndex(j => j.job_id === job.job_id)
+      if (index >= 0) {
+        jobs.value[index] = jobData
+      }
+      // 更新状态
+      if (jobData.status === 'completed') {
+        jobStatuses.value[job.job_id] = true
+      } else if (jobData.status === 'failed') {
+        jobStatuses.value[job.job_id] = false
+      } else if (jobData.completed_at) {
+        // 兼容旧数据
+        jobStatuses.value[job.job_id] = true
+      }
     } catch (error) {
       console.debug(`检查任务状态失败: ${job.job_id}`, error)
-      return false
     }
   })
   
@@ -588,6 +634,13 @@ const handleDownload = async (jobId: string) => {
   }
 }
 
+// 已完成任务的 job_id 列表（用于图片画廊）
+const completedJobIds = computed(() => {
+  return jobs.value
+    .filter(job => jobStatuses.value[job.job_id] === true)
+    .map(job => job.job_id)
+})
+
 // 已完成任务的图片 URL 列表（用于图片画廊）
 const completedJobImageUrls = computed(() => {
   const baseURL = getApiBaseURL()
@@ -603,11 +656,7 @@ const completedJobImageUrls = computed(() => {
 const previewJobIndex = computed(() => {
   if (!previewJobId.value) return 0
   
-  const completedJobIds = jobs.value
-    .filter(job => jobStatuses.value[job.job_id] === true)
-    .map(job => job.job_id)
-  
-  const index = completedJobIds.indexOf(previewJobId.value)
+  const index = completedJobIds.value.indexOf(previewJobId.value)
   return index >= 0 ? index : 0
 })
 
@@ -628,6 +677,28 @@ const copyToClipboard = async (text: string) => {
   }
 }
 
+// 打开参数对话框
+const openParamsDialog = (job: Job) => {
+  selectedJobForParams.value = job
+}
+
+// 从图片画廊打开参数对话框
+const handleShowParamsFromGallery = (jobId: string) => {
+  const job = jobs.value.find(j => j.job_id === jobId)
+  if (job) {
+    selectedJobForParams.value = job
+  }
+}
+
+// 显示错误对话框
+const showErrorDialog = (job: Job) => {
+  alertDialog.value = {
+    show: true,
+    title: '任务失败',
+    message: `任务执行失败（${job.job_id.substring(0, 8)}...），请检查参数或重试`
+  }
+}
+
 // 提交任务
 const handleTaskSubmit = async (data: any) => {
   try {
@@ -635,7 +706,7 @@ const handleTaskSubmit = async (data: any) => {
     const lorasDict: Record<string, number> = data.loras || {}
     
     // 调用创建任务 API
-    await api.post('/draw', null, {
+    const result = await api.post('/draw', null, {
       params: {
         name: data.name || undefined,
         desc: data.desc || undefined,
@@ -650,11 +721,24 @@ const handleTaskSubmit = async (data: any) => {
         seed: data.seed,
         clip_skip: data.clip_skip || undefined,
         vae: data.vae || undefined,
-        loras: Object.keys(lorasDict).length > 0 ? JSON.stringify(lorasDict) : undefined
+        loras: Object.keys(lorasDict).length > 0 ? JSON.stringify(lorasDict) : undefined,
+        batch_size: data.batch_size || 1
       }
     })
     
-    showToast('任务创建成功', 'success')
+    if (!result?.batch_id) {
+      throw new Error('创建绘图任务失败：未返回 batch_id')
+    }
+    
+    // 检查是否有部分失败
+    if (result.partial_success) {
+      showToast(
+        `批量任务部分成功：成功创建 ${result.success_count}/${result.total_requested} 个任务，${result.failed_count} 个任务创建失败`,
+        'warning'
+      )
+    } else {
+      showToast(`已创建批量任务（batch_id: ${result.batch_id.substring(0, 8)}...，包含 ${result.job_ids?.length || 1} 个任务）`, 'success')
+    }
   } catch (error: any) {
     console.error('创建任务失败:', error)
     const errorMessage = error.response?.data?.detail || error.message || '未知错误'

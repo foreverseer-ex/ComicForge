@@ -25,6 +25,16 @@
         <ArrowDownTrayIcon class="w-5 h-5 md:w-6 md:h-6" />
       </button>
 
+      <!-- 生成参数按钮 -->
+      <button
+        v-if="currentImageUrl && jobIds && jobIds.length > currentIndex"
+        @click.stop="handleShowParams"
+        class="absolute top-4 right-28 md:right-36 z-50 p-3 rounded-full bg-black bg-opacity-50 hover:bg-opacity-70 text-white transition-colors pointer-events-auto"
+        title="查看生成参数"
+      >
+        <Cog6ToothIcon class="w-5 h-5 md:w-6 md:h-6" />
+      </button>
+
       <!-- 左右切换按钮 -->
       <div class="absolute inset-0 pointer-events-none z-10">
         <!-- 左侧按钮（上一张） -->
@@ -52,9 +62,9 @@
         class="relative w-full h-full flex items-center justify-center overflow-hidden"
         @mousedown="handleMouseDown"
       >
-        <!-- 图片（大图始终显示，不受隐私模式影响） -->
+        <!-- 图片（隐私模式时隐藏） -->
         <img
-          v-if="currentImageUrl && !loading"
+          v-if="currentImageUrl && !loading && !privacyMode"
           v-show="!imageLoading"
           ref="imageElement"
           :src="currentImageUrl"
@@ -68,6 +78,14 @@
           @load="handleImageLoad"
           @error="handleImageError"
         />
+        <!-- 隐私模式占位符 -->
+        <div
+          v-if="privacyMode && !loading"
+          class="flex flex-col items-center justify-center"
+        >
+          <PhotoIcon class="w-24 h-24 mb-4 text-white opacity-50" />
+          <span class="text-white text-lg opacity-75">隐私模式</span>
+        </div>
         <!-- Loading 状态 -->
         <div
           v-if="loading || imageLoading"
@@ -91,24 +109,31 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { XMarkIcon, ChevronLeftIcon, ChevronRightIcon, ArrowDownTrayIcon } from '@heroicons/vue/24/outline'
+import { XMarkIcon, ChevronLeftIcon, ChevronRightIcon, ArrowDownTrayIcon, PhotoIcon, Cog6ToothIcon } from '@heroicons/vue/24/outline'
 import { getImageUrl } from '../utils/imageUtils'
+import { usePrivacyStore } from '../stores/privacy'
+import { storeToRefs } from 'pinia'
 
 interface Props {
   images: string[]  // 图片 URL 数组
   initialIndex?: number  // 初始显示的图片索引
   visible: boolean  // 是否显示
-  // 注意：大图始终显示，不受隐私模式影响（隐私模式只影响列表中的缩略图）
+  jobIds?: string[]  // 每个图片对应的 job_id 数组（可选）
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialIndex: 0,
-  visible: false
+  visible: false,
+  jobIds: undefined
 })
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'show-params', jobId: string): void  // 显示生成参数对话框
 }>()
+
+const privacyStore = usePrivacyStore()
+const { privacyMode } = storeToRefs(privacyStore)
 
 const currentIndex = ref(props.initialIndex)
 const scale = ref(1)
@@ -275,6 +300,14 @@ const handleDownload = async () => {
   } catch (error) {
     console.error('下载图片失败:', error)
     alert('下载失败，请重试')
+  }
+}
+
+// 显示生成参数对话框
+const handleShowParams = () => {
+  if (props.jobIds && props.jobIds.length > currentIndex.value) {
+    const jobId = props.jobIds[currentIndex.value]
+    emit('show-params', jobId)
   }
 }
 
