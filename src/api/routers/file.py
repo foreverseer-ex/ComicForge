@@ -115,8 +115,9 @@ async def get_actor_example_image(actor_id: str, example_index: int) -> FileResp
     
     # image_path 只保存文件名，实际文件保存在 projects/{project_id}/actors/{filename}
     # 需要从 actor 获取 project_id，然后构建完整路径
-    project_id = actor.project_id
-    image_path = project_home / project_id / "actors" / example.image_path
+    # 如果 project_id 为 None，使用 "default" 作为目录名
+    actual_project_id = actor.project_id if actor.project_id is not None else "default"
+    image_path = project_home / actual_project_id / "actors" / example.image_path
     
     if not image_path.exists():
         raise HTTPException(status_code=404, detail=f"示例图文件不存在: {example.image_path}")

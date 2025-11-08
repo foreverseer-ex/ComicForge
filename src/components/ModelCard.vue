@@ -28,6 +28,21 @@
         </svg>
       </div>
       
+      <!-- 偏好按钮（右上角） -->
+      <button
+        @click.stop="togglePreference"
+        :class="[
+          'absolute right-2 bg-white/80 rounded-full p-1.5 z-10 transition-all hover:bg-white hover:scale-110',
+          showWarning ? 'top-10' : 'top-2',  // 如果有警告图标，向下移动
+          preferenceColorClass
+        ]"
+        :title="preferenceTitle"
+      >
+        <HeartIconSolid v-if="model.preference === 'liked'" class="w-5 h-5" />
+        <XMarkIcon v-else-if="model.preference === 'disliked'" class="w-5 h-5" />
+        <HeartIcon v-else class="w-5 h-5" />
+      </button>
+      
       <img 
         v-if="previewImageUrl && !privacyMode && !imageLoading"
         :src="previewImageUrl"
@@ -88,7 +103,11 @@
 import { computed, ref, onMounted, watch } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
+import { HeartIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { HeartIcon as HeartIconSolid } from '@heroicons/vue/24/solid'
 import { getImageUrl } from '../utils/imageUtils'
+import api from '../api'
+import { showToast } from '../utils/toast'
 
 interface ModelMeta {
   model_id: number
@@ -102,6 +121,7 @@ interface ModelMeta {
   base_model: string | null
   examples: any[]
   web_page_url: string | null
+  preference?: 'liked' | 'neutral' | 'disliked'  // 模型偏好：喜欢、中性、不喜欢
 }
 
 interface Props {
@@ -118,6 +138,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'openDetail', model: ModelMeta): void
   (e: 'contextMenu', event: MouseEvent, model: ModelMeta): void
+  (e: 'preferenceChanged', model: ModelMeta): void  // 偏好状态改变事件
 }>()
 
 const themeStore = useThemeStore()
@@ -232,6 +253,60 @@ const openDetail = () => {
 
 const showContextMenu = (event: MouseEvent) => {
   emit('contextMenu', event, props.model)
+}
+
+// 计算偏好状态的颜色类
+const preferenceColorClass = computed(() => {
+  const pref = props.model.preference || 'neutral'
+  if (pref === 'liked') return 'text-red-500'
+  if (pref === 'disliked') return 'text-gray-600'
+  return 'text-gray-400'
+})
+
+// 计算偏好状态的提示文本
+const preferenceTitle = computed(() => {
+  const pref = props.model.preference || 'neutral'
+  if (pref === 'liked') return '已设为喜欢（点击切换）'
+  if (pref === 'disliked') return '已设为不喜欢（点击切换）'
+  return '中性（点击切换）'
+})
+
+// 切换偏好状态（循环：neutral -> liked -> disliked -> neutral）
+const togglePreference = async () => {
+  try {
+    const currentPreference = props.model.preference || 'neutral'
+    let newPreference: 'liked' | 'neutral' | 'disliked'
+    
+    // 循环切换：neutral -> liked -> disliked -> neutral
+    if (currentPreference === 'neutral') {
+      newPreference = 'liked'
+    } else if (currentPreference === 'liked') {
+      newPreference = 'disliked'
+    } else {
+      newPreference = 'neutral'
+    }
+    
+    await api.patch(`/model-meta/${props.model.version_id}/preference`, null, {
+      params: { preference: newPreference }
+    })
+    
+    // 更新本地模型状态
+    props.model.preference = newPreference
+    
+    // 通知父组件更新
+    emit('preferenceChanged', props.model)
+    
+    const messages = {
+      liked: '已设为喜欢',
+      disliked: '已设为不喜欢',
+      neutral: '已设为中性'
+    }
+    showToast(messages[newPreference], 'success')
+  } catch (error: any) {
+    console.error('设置偏好状态失败:', error)
+    const errorMsg = error.response?.data?.detail || error.message || '设置失败'
+    showToast(`❌ ${errorMsg}`, 'error')
+  }
 }
 </script>
 

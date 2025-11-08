@@ -11,10 +11,8 @@ from api.components.desperate.async_media import AsyncMedia
 from api.components.desperate.editable_text import EditableText
 from api.services.model_meta import local_model_meta_service
 from api.constants.ui import (
-    # 向后兼容的默认值
-    # 向后兼容的默认值
-    DETAIL_LABEL_WIDTH,  # 向后兼容的默认值
-    SPACING_SMALL, DETAIL_INFO_MIN_WIDTH,  # 向后兼容的默认值
+    DETAIL_LABEL_WIDTH,
+    SPACING_SMALL, DETAIL_INFO_MIN_WIDTH,
 )
 from api.utils.responsive import ResponsiveHelper, get_responsive_helper
 

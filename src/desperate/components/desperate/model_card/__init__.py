@@ -10,7 +10,6 @@ from api.schemas.model_meta import ModelMeta
 from api.constants.color import BaseModelColor
 from api.constants.ui import (
     CARD_TITLE_MAX_LINES,
-    # 向后兼容的默认值
 )
 from api.components.desperate.async_media import AsyncMedia
 from api.utils.responsive import ResponsiveHelper, get_responsive_helper

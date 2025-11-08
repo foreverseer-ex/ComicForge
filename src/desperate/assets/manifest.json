@@ -1,7 +1,7 @@
 {
-  "name": "NovelPanel",
-  "short_name": "NovelPanel",
-  "description": "AI 驱动的小说创作与可视化工具：对话、绘图、模型元数据，一体化桌面/Web 体验",
+  "name": "ComicForge",
+  "short_name": "ComicForge",
+  "description": "AI 驱动的漫画创作与可视化工具：对话、绘图、模型元数据，一体化桌面/Web 体验",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",

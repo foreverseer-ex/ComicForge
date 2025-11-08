@@ -4,10 +4,12 @@ Actor 相关的数据模型。
 Actor 不仅指角色，也指小说中出现的要素（如国家、组织等）。
 每个 Actor 可以有多个示例图（立绘）。
 """
+import uuid
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Column, JSON
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlmodel import SQLModel, Field
+from typing import Optional
 from .draw import DrawArgs
 
 
@@ -49,8 +51,8 @@ class Actor(SQLModel, table=True):
     - tags: 标签字典（键建议使用 constants.actor 中定义的标签）
     - examples: 示例图列表（立绘）
     """
-    actor_id: str = Field(description="Actor 唯一标识", primary_key=True)
-    project_id: str = Field(description="所属项目ID", index=True)
+    actor_id: Optional[str] = Field(description="Actor 唯一标识", primary_key=True, default_factory=lambda: str(uuid.uuid4()))
+    project_id: Optional[str] = Field(default=None, description="所属项目ID（None 表示默认工作空间）", index=True)
     name: str = Field(description="名称", index=True)
     desc: str = Field(default="", description="基本描述")
     color: str = Field(default="#808080", description="卡片颜色（如 #FF69B4）")

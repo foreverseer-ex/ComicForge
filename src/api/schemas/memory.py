@@ -7,6 +7,7 @@
 所有 value 统一使用纯文本字符串，不使用 JSON 格式。
 对于列表类型的数据（如标签列表），使用逗号分隔的字符串存储，例如 "tag1, tag2, tag3"。
 """
+import uuid
 from datetime import datetime
 from typing import Optional
 from sqlmodel import SQLModel, Field
@@ -25,8 +26,8 @@ class MemoryEntry(SQLModel, table=True):
     - 章节信息：通过 ChapterSummary 专门处理
     - 其他：自定义 key，如重要情节、角色笔记、用户反馈等
     """
-    memory_id: str = Field(description="记忆唯一标识", primary_key=True)
-    project_id: str = Field(description="所属项目ID", index=True)
+    memory_id: Optional[str] = Field(description="记忆唯一标识", primary_key=True, default_factory=lambda: str(uuid.uuid4()))
+    project_id: Optional[str] = Field(default=None, description="所属项目ID（None 表示默认工作空间）", index=True)
     key: str = Field(description="记忆键名（建议使用 constants.memory.memory_description 中定义的键）", index=True)
     value: str = Field(description="记忆值（纯文本字符串，列表类型使用逗号分隔）")
     description: Optional[str] = Field(default=None,
@@ -43,7 +44,7 @@ class ChapterSummary(SQLModel, table=True):
     小说按行解析，每行对应一个段落和一张图片。
     """
     id: Optional[int] = Field(default=None, primary_key=True)
-    project_id: str = Field(description="所属项目ID", index=True)
+    project_id: Optional[str] = Field(default=None, description="所属项目ID（None 表示默认工作空间）", index=True)
     chapter_index: int = Field(ge=0, description="章节索引（从0开始）", index=True)
     title: str = Field(description="章节标题")
     summary: Optional[str] = Field(default=None, description="章节故事梗概（AI生成）")
@@ -65,7 +66,7 @@ class ChatSummary(SQLModel, table=True):
 
 class MemoryCreateRequest(BaseModel):
     """创建记忆条目的请求模型"""
-    project_id: str
+    project_id: Optional[str] = None
     key: str
     value: str
     description: Optional[str] = None

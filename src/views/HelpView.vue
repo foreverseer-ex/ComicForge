@@ -654,7 +654,7 @@ watch(renderedContent, () => {
   overflow-x: auto;
 }
 
-/* 兼容旧的 pre 标签（没有包装器的代码块） */
+/* pre 标签样式（没有包装器的代码块） */
 .markdown-container :deep(.prose pre:not(.hljs)) {
   background-color: var(--code-bg-color);
   border-radius: 6px;

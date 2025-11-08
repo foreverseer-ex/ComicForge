@@ -51,6 +51,7 @@ class ModelMeta(BaseModel):
     url: str | None = None  # 下载链接（可选）
     web_page_url: str | None = None  # 模型网页链接（如 Civitai 页面）
     examples: list[Example] = []
+    preference: Literal['liked', 'neutral', 'disliked'] = 'neutral'  # 模型偏好：喜欢、中性、不喜欢（默认中性）
 
     @property
     def version_name(self) -> str:

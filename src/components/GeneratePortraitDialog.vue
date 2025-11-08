@@ -58,7 +58,7 @@ interface Props {
   show: boolean
   actorName: string
   actorId: string
-  projectId: string
+  projectId: string | null
   actorDesc?: string // 角色描述
   actorTags?: Record<string, string> // 角色标签
 }
@@ -114,7 +114,7 @@ const handleSubmit = async (data: any) => {
       }
     }
     
-    const result = await api.post('/draw', null, {
+    const response = await api.post('/draw', null, {
       params: {
         name: data.name || taskName.value,
         desc: finalDesc || undefined,
@@ -134,26 +134,21 @@ const handleSubmit = async (data: any) => {
       }
     })
     
-    if (!result?.batch_id) {
-      throw new Error('创建绘图任务失败：未返回 batch_id')
-    }
+    // 后端直接返回 batch_id 字符串
+    const batch_id = response.data || response
     
-    // 检查是否有部分失败
-    if (result.partial_success) {
-      showToast(
-        `批量任务部分成功：成功创建 ${result.success_count}/${result.total_requested} 个任务，${result.failed_count} 个任务创建失败`,
-        'warning'
-      )
+    if (!batch_id || typeof batch_id !== 'string') {
+      throw new Error('创建绘图任务失败：未返回 batch_id')
     }
     
     // 步骤2: 从 batch_id 添加立绘到 actor（使用任务名称和任务描述）
     showToast('正在添加立绘任务...', 'info')
     await api.post(`/actor/${props.actorId}/add_portrait_from_batch`, null, {
       params: {
-        project_id: props.projectId,
-        batch_id: result.batch_id,
+        batch_id: batch_id,
         title: data.name || taskName.value,
-        desc: finalDesc || undefined
+        desc: finalDesc || undefined,
+        project_id: props.projectId || null
       }
     })
     
@@ -174,13 +169,21 @@ const handleSelectJob = async (job: any) => {
   try {
     showToast('正在添加立绘...', 'info')
     
-    // 注意：从已有任务选择时，需要先找到 job 所属的 batch_id
-    // 这里需要调用 API 查询 job 所属的 batch
-    // 暂时先提示用户：从已有任务选择功能需要更新
-    showToast('从已有任务选择功能需要更新，请使用创建新任务', 'warning')
+    // 调用从 job 添加立绘的 API
+    const result = await api.post(`/actor/${props.actorId}/add_portrait_from_job`, null, {
+      params: {
+        job_id: job.job_id,
+        title: taskName.value,
+        desc: additionalInfo.value || undefined,
+        project_id: props.projectId || null
+      }
+    })
     
-    // TODO: 实现从 job_id 查询 batch_id 的逻辑
-    // 或者修改 JobImageSelector 返回 batch_id 而不是 job_id
+    if (result?.completed) {
+      showToast('立绘已成功添加到角色', 'success')
+    } else {
+      showToast('立绘生成任务已提交，完成后将自动添加到角色', 'success')
+    }
     
     emit('generated')
     close()

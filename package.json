@@ -17,7 +17,8 @@
     "marked": "^16.4.1",
     "pinia": "^2.2.6",
     "vue": "^3.5.22",
-    "vue-router": "^4.4.5"
+    "vue-router": "^4.4.5",
+    "workbox-window": "^7.3.0"
   },
   "devDependencies": {
     "@types/marked": "^6.0.0",
@@ -29,6 +30,7 @@
     "tailwindcss": "^3.4.17",
     "typescript": "~5.9.3",
     "vite": "npm:rolldown-vite@7.1.14",
+    "vite-plugin-pwa": "^1.1.0",
     "vue-tsc": "^3.1.0"
   },
   "pnpm": {

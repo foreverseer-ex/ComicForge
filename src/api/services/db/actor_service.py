@@ -53,24 +53,28 @@ class ActorService:
             return actor
     
     @classmethod
-    def list_by_session(cls, project_id: str, limit: Optional[int] = None, offset: int = 0) -> list[Actor]:
+    def list_by_session(cls, project_id: Optional[str], limit: Optional[int] = None, offset: int = 0) -> list[Actor]:
         """
         根据项目ID获取 Actor 列表。
         
-        :param project_id: 项目ID
+        :param project_id: 项目ID（None 表示默认工作空间）
         :param limit: 返回数量限制（None 表示无限制）
         :param offset: 跳过的记录数
         :return: Actor 列表
         """
         with DatabaseSession() as db:
-            statement = select(Actor).where(Actor.project_id == project_id).offset(offset)
+            # 如果 project_id 为 None，查询 project_id 为 None 的记录
+            if project_id is None:
+                statement = select(Actor).where(Actor.project_id.is_(None)).offset(offset)
+            else:
+                statement = select(Actor).where(Actor.project_id == project_id).offset(offset)
             if limit is not None:
                 statement = statement.limit(limit)
             
             actors = db.exec(statement).all()
             for actor in actors:
                 db.expunge(actor)
-            logger.debug(f"获取 Actor 列表: {len(actors)} 条")
+            logger.debug(f"获取 Actor 列表: {len(actors)} 条 (project_id={project_id})")
             return list(actors)
     
     @classmethod
@@ -134,7 +138,16 @@ class ActorService:
                 return None
             
             # 将 ActorExample 转换为字典并添加到 examples 列表
-            actor.examples.append(example.model_dump())
+            # 注意：不使用 exclude_none=True，因为我们需要保留所有字段（包括 None 值）
+            # 但需要确保 draw_args.loras 字段存在（即使是空字典）
+            example_dict = example.model_dump()
+            # 确保 draw_args.loras 字段存在
+            if 'draw_args' in example_dict and example_dict['draw_args']:
+                if isinstance(example_dict['draw_args'], dict):
+                    # 如果 loras 是 None 或不存在，设置为空字典
+                    if 'loras' not in example_dict['draw_args'] or example_dict['draw_args']['loras'] is None:
+                        example_dict['draw_args']['loras'] = {}
+            actor.examples.append(example_dict)
             db.add(actor)
             db.flush()
             db.refresh(actor)
@@ -244,7 +257,16 @@ class ActorService:
                 return None
             
             if 0 <= example_index < len(actor.examples):
-                actor.examples[example_index] = example.model_dump()
+                # 注意：不使用 exclude_none=True，因为我们需要保留所有字段（包括 None 值）
+                # 但需要确保 draw_args.loras 字段存在（即使是空字典）
+                example_dict = example.model_dump()
+                # 确保 draw_args.loras 字段存在
+                if 'draw_args' in example_dict and example_dict['draw_args']:
+                    if isinstance(example_dict['draw_args'], dict):
+                        # 如果 loras 是 None 或不存在，设置为空字典
+                        if 'loras' not in example_dict['draw_args'] or example_dict['draw_args']['loras'] is None:
+                            example_dict['draw_args']['loras'] = {}
+                actor.examples[example_index] = example_dict
                 db.add(actor)
                 db.flush()
                 db.refresh(actor)

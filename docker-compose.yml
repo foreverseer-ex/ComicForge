@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # 后端服务
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: comicforge-backend
+    ports:
+      - "7864:7864"
+    volumes:
+      # 挂载配置文件（可选，如果需要修改配置）
+      - ./config.json:/app/config.json:ro
+      # 挂载数据目录（持久化数据）
+      - ./storage:/app/storage
+    environment:
+      # 可以通过环境变量覆盖配置
+      - PYTHONPATH=/app/src
+      - PYTHONUNBUFFERED=1
+      # LLM API Key（如果需要）
+      # - XAI_API_KEY=${XAI_API_KEY}
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Civitai API Token（如果需要）
+      # - CIVITAI_API_TOKEN=${CIVITAI_API_TOKEN}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7864/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - comicforge-network
+
+  # 前端服务
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: comicforge-frontend
+    ports:
+      - "7863:80"
+    environment:
+      # 设置 API 基础 URL（使用相对路径，通过 nginx 代理）
+      # 注意：Vite 环境变量需要在构建时注入，运行时设置无效
+      # 这里我们通过 nginx 代理 /api 到后端，所以前端应该使用 /api
+      # 如果需要在运行时配置，需要修改前端代码支持运行时配置
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - comicforge-network
+
+networks:
+  comicforge-network:
+    driver: bridge
+
+volumes:
+  # 如果需要使用命名卷而不是绑定挂载，可以取消注释
+  # storage-data:
+  # storage-temp:
+

@@ -214,13 +214,16 @@ const handleGenerateWithAI = async () => {
     
     const response = await api.post('/llm/generate-draw-params', requestBody)
     
-    if (response.success && response.params && drawFormRef.value.formData) {
+    // 后端现在直接返回 DrawArgs 对象
+    const params = response.data || response
+    
+    if (params && drawFormRef.value.formData) {
       // 回填所有参数
-      const params = response.params
       drawFormRef.value.formData.model = params.model || ''
       drawFormRef.value.formData.prompt = params.prompt || ''
       drawFormRef.value.formData.negative_prompt = params.negative_prompt || drawFormRef.value.formData.negative_prompt
-      drawFormRef.value.formData.sampler = params.sampler_name || drawFormRef.value.formData.sampler
+      // DrawArgs 使用 sampler 字段，不是 sampler_name
+      drawFormRef.value.formData.sampler = params.sampler || drawFormRef.value.formData.sampler
       drawFormRef.value.formData.steps = params.steps || drawFormRef.value.formData.steps
       drawFormRef.value.formData.cfg_scale = params.cfg_scale || drawFormRef.value.formData.cfg_scale
       drawFormRef.value.formData.width = params.width || drawFormRef.value.formData.width

@@ -36,6 +36,9 @@ class ImportModelResponse(BaseModel):
     air: str
     model_name: Optional[str] = None
     error: Optional[str] = None
+    skipped: bool = False  # 是否跳过（已存在）
+    failed_image_count: int = 0  # 下载失败的图片数量
+    total_image_count: int = 0  # 总图片数量
 
 
 class BatchImportModelRequest(BaseModel):
@@ -85,21 +88,23 @@ async def import_model(request: ImportModelRequest) -> ImportModelResponse:
         
         logger.info(f"开始导入模型: {request.air} (version_id={air.version_id})")
         
+        # 检查模型是否已存在（通过 version_id）
+        existing_meta = local_model_meta_service.get_by_id(air.version_id)
+        if existing_meta is not None:
+            logger.info(f"模型已存在，跳过导入: {existing_meta.name} ({request.air})")
+            return ImportModelResponse(
+                success=True,
+                air=request.air,
+                model_name=existing_meta.name,
+                skipped=True
+            )
+        
         # 从 Civitai 获取模型元数据
         try:
             model_meta = await civitai_model_meta_service.get_by_id(air.version_id)
-        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-            # 网络连接错误
-            error_msg = f"网络连接失败，无法连接到 Civitai API。请检查网络连接。"
-            logger.error(f"导入模型失败 ({request.air}): {error_msg} - {e}")
-            return ImportModelResponse(
-                success=False,
-                air=request.air,
-                error=error_msg
-            )
-        except httpx.TimeoutException as e:
-            # 请求超时
-            error_msg = f"请求超时，无法从 Civitai API 获取数据。请稍后重试。"
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.TimeoutException, httpx.ReadTimeout) as e:
+            # 网络连接错误或超时
+            error_msg = f"网络连接失败或请求超时，无法连接到 Civitai API。请检查网络连接或稍后重试。"
             logger.error(f"导入模型失败 ({request.air}): {error_msg} - {e}")
             return ImportModelResponse(
                 success=False,
@@ -115,7 +120,10 @@ async def import_model(request: ImportModelRequest) -> ImportModelResponse:
             )
         
         # 保存到本地（包括下载示例图片，支持并行或串行下载）
-        saved_meta = await civitai_model_meta_service.save(model_meta, parallel_download=request.parallel_download)
+        saved_meta, failed_image_count, total_image_count = await civitai_model_meta_service.save(
+            model_meta, 
+            parallel_download=request.parallel_download
+        )
         if not saved_meta:
             return ImportModelResponse(
                 success=False,
@@ -127,11 +135,21 @@ async def import_model(request: ImportModelRequest) -> ImportModelResponse:
         await asyncio.to_thread(local_model_meta_service.flush)
         
         logger.success(f"导入成功: {saved_meta.name} ({request.air})")
-        return ImportModelResponse(
+        
+        # 构建响应，如果有图片下载失败，添加警告信息
+        response = ImportModelResponse(
             success=True,
             air=request.air,
-            model_name=saved_meta.name
+            model_name=saved_meta.name,
+            failed_image_count=failed_image_count,
+            total_image_count=total_image_count
         )
+        
+        # 如果有图片下载失败，在 error 字段中添加警告信息（但不影响 success 状态）
+        if failed_image_count > 0:
+            response.error = f"部分图片下载失败：{failed_image_count}/{total_image_count} 张图片未能下载"
+        
+        return response
         
     except Exception as e:
         logger.exception(f"导入模型失败 ({request.air}): {e}")
@@ -166,7 +184,7 @@ async def batch_import_models(request: BatchImportModelRequest) -> BatchImportMo
     results: List[ImportModelResponse] = []
     
     # 创建信号量以控制并发数
-    max_concurrency = app_settings.civitai.max_concurrency
+    max_concurrency = app_settings.civitai.parallel_workers
     semaphore = asyncio.Semaphore(max_concurrency)
     
     async def import_with_semaphore(air: str) -> ImportModelResponse:
@@ -370,3 +388,125 @@ async def delete_model(version_id: int) -> dict:
     except Exception as e:
         logger.exception(f"删除模型元数据失败 (version_id={version_id}): {e}")
         raise HTTPException(status_code=500, detail=f"删除模型元数据失败: {str(e)}")
+
+
+@router.post("/{version_id}/reset", summary="重置模型元数据（重新从 Civitai 下载）")
+async def reset_model_meta(version_id: int, parallel_download: bool = False) -> Dict[str, Any]:
+    """
+    重置模型元数据，从 Civitai 重新下载元数据和示例图片。
+    
+    此端点用于重新下载模型元数据和图像，适用于图像下载失败的情况。
+    会先删除现有的元数据，然后重新从 Civitai 获取并保存。
+    
+    Args:
+        version_id: Civitai 模型版本 ID（路径参数）
+        parallel_download: 是否并行下载示例图片，默认 False（串行下载）
+    
+    Returns:
+        包含 version_id、model_name 和 success 状态的字典
+    
+    Raises:
+        HTTPException: 模型不存在或重置失败时返回相应错误
+    """
+    try:
+        # 检查模型是否存在
+        existing_meta = local_model_meta_service.get_by_id(version_id)
+        if not existing_meta:
+            raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
+        
+        # 获取 AIR 标识符（如果存在）
+        air_str = existing_meta.air if hasattr(existing_meta, 'air') and existing_meta.air else None
+        
+        logger.info(f"开始重置模型元数据: {existing_meta.name} (version_id={version_id})")
+        
+        # 删除现有模型元数据
+        success = await local_model_meta_service.delete(existing_meta)
+        if not success:
+            logger.warning(f"删除现有模型元数据失败，继续尝试重新下载 (version_id={version_id})")
+        
+        # 从 Civitai 重新获取模型元数据
+        try:
+            model_meta = await civitai_model_meta_service.get_by_id(version_id)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            error_msg = f"网络连接失败，无法连接到 Civitai API。请检查网络连接。"
+            logger.error(f"重置模型失败 (version_id={version_id}): {error_msg} - {e}")
+            raise HTTPException(status_code=502, detail=error_msg) from e
+        except httpx.TimeoutException as e:
+            error_msg = f"请求超时，无法从 Civitai API 获取数据。请稍后重试。"
+            logger.error(f"重置模型失败 (version_id={version_id}): {error_msg} - {e}")
+            raise HTTPException(status_code=504, detail=error_msg) from e
+        
+        if not model_meta:
+            raise HTTPException(status_code=404, detail=f"未找到版本 ID: {version_id}")
+        
+        # 保存到本地（包括重新下载示例图片）
+        saved_meta, failed_image_count, total_image_count = await civitai_model_meta_service.save(
+            model_meta, 
+            parallel_download=parallel_download
+        )
+        if not saved_meta:
+            raise HTTPException(status_code=500, detail="保存模型元数据失败")
+        
+        # 刷新本地缓存
+        await asyncio.to_thread(local_model_meta_service.flush)
+        
+        logger.success(f"重置成功: {saved_meta.name} (version_id={version_id})")
+        
+        result = {
+            "version_id": version_id,
+            "model_name": saved_meta.name,
+            "success": True,
+            "failed_image_count": failed_image_count,
+            "total_image_count": total_image_count
+        }
+        
+        # 如果有图片下载失败，添加警告信息
+        if failed_image_count > 0:
+            result["warning"] = f"部分图片下载失败：{failed_image_count}/{total_image_count} 张图片未能下载"
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"重置模型元数据失败 (version_id={version_id}): {e}")
+        raise HTTPException(status_code=500, detail=f"重置模型元数据失败: {str(e)}") from e
+
+
+@router.patch("/{version_id}/preference", summary="设置模型偏好状态")
+async def set_model_preference(version_id: int, preference: str) -> Dict[str, Any]:
+    """
+    设置模型的偏好状态。
+    
+    Args:
+        version_id: Civitai 模型版本 ID（路径参数）
+        preference: 偏好状态（查询参数，'liked', 'neutral', 'disliked'）
+    
+    Returns:
+        包含 version_id、model_name 和 preference 状态的字典
+    
+    Raises:
+        HTTPException: 模型不存在时返回 404，偏好值无效时返回 400
+    """
+    try:
+        # 验证偏好值
+        if preference not in ['liked', 'neutral', 'disliked']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"无效的偏好值: {preference}，必须是 'liked', 'neutral' 或 'disliked'"
+            )
+        
+        meta = await local_model_meta_service.set_preference(version_id, preference)
+        if not meta:
+            raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
+        
+        return {
+            "version_id": version_id,
+            "model_name": meta.name,
+            "preference": meta.preference
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"设置模型偏好状态失败 (version_id={version_id}): {e}")
+        raise HTTPException(status_code=500, detail=f"设置模型偏好状态失败: {str(e)}")

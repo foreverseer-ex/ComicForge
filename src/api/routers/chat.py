@@ -8,6 +8,8 @@
 """
 import asyncio
 import json
+from typing import Optional
+
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -27,12 +29,12 @@ router = APIRouter(
 class ChatRequest(BaseModel):
     """对话请求（用于 invoke 和 stream 模式）"""
     message: str = Field(description="用户消息")
-    project_id: str = Field(description="项目ID")
+    project_id: Optional[str] = Field(default=None, description="项目ID（None 表示默认工作空间）")
 
 
 class IterationRequest(BaseModel):
     """迭代式对话请求"""
-    project_id: str = Field(description="项目ID")
+    project_id: Optional[str] = Field(default=None, description="项目ID（None 表示默认工作空间）")
     target: str = Field(description="迭代目标")
     index: int = Field(description="起始索引", default=0)
     stop: int = Field(description="终止索引")
@@ -271,14 +273,14 @@ async def chat_iteration(request: IterationRequest):
 @router.get("/status/{message_id}", summary="获取消息状态")
 async def get_message_status(
     message_id: str,
-    project_id: str
+    project_id: Optional[str] = None
 ):
     """
     获取消息的当前状态（用于前端轮询）。
     
     Args:
         message_id: 消息ID
-        project_id: 项目ID
+        project_id: 项目ID（None 表示默认工作空间）
     
     Returns:
         消息状态信息

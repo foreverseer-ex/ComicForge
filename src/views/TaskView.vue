@@ -397,7 +397,7 @@ const jobs = ref<Job[]>([])
 const loading = ref(false)
 const showCreateDialog = ref(false)
 const previewJobId = ref<string | null>(null)
-const jobStatuses = ref<Record<string, boolean | null>>({})  // true=完成, false=生成中, null=未知（兼容旧逻辑）
+const jobStatuses = ref<Record<string, boolean | null>>({})  // true=完成, false=生成中, null=未知
 const refreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const selectedJobIds = ref<Set<string>>(new Set()) // 选中的任务ID集合
 const selectedJobForParams = ref<Job | null>(null) // 选中的任务（用于显示参数）
@@ -446,10 +446,7 @@ const updateJobStatusesFromData = () => {
     if (job.status === 'completed') {
       jobStatuses.value[job.job_id] = true
     } else if (job.status === 'failed') {
-      jobStatuses.value[job.job_id] = false  // 失败的任务不算完成，但已完成（有 completed_at）
-    } else if (job.completed_at) {
-      // 兼容旧数据：如果有 completed_at 但没有 status，默认为完成
-      jobStatuses.value[job.job_id] = true
+      jobStatuses.value[job.job_id] = false  // 失败的任务不算完成
     } else {
       // 否则是生成中
       jobStatuses.value[job.job_id] = false
@@ -475,9 +472,6 @@ const checkPendingJobStatuses = async () => {
         jobStatuses.value[job.job_id] = true
       } else if (jobData.status === 'failed') {
         jobStatuses.value[job.job_id] = false
-      } else if (jobData.completed_at) {
-        // 兼容旧数据
-        jobStatuses.value[job.job_id] = true
       }
     } catch (error) {
       console.debug(`检查任务状态失败: ${job.job_id}`, error)
@@ -679,6 +673,12 @@ const copyToClipboard = async (text: string) => {
 
 // 打开参数对话框
 const openParamsDialog = (job: Job) => {
+  // 调试：检查 draw_args 中是否有 loras 字段
+  if (job.draw_args) {
+    console.log('Job draw_args:', job.draw_args)
+    console.log('loras field:', job.draw_args.loras)
+    console.log('loras type:', typeof job.draw_args.loras)
+  }
   selectedJobForParams.value = job
 }
 
@@ -706,7 +706,7 @@ const handleTaskSubmit = async (data: any) => {
     const lorasDict: Record<string, number> = data.loras || {}
     
     // 调用创建任务 API
-    const result = await api.post('/draw', null, {
+    const response = await api.post('/draw', null, {
       params: {
         name: data.name || undefined,
         desc: data.desc || undefined,
@@ -726,19 +726,14 @@ const handleTaskSubmit = async (data: any) => {
       }
     })
     
-    if (!result?.batch_id) {
+    // 后端直接返回 batch_id 字符串
+    const batch_id = response.data || response
+    
+    if (!batch_id || typeof batch_id !== 'string') {
       throw new Error('创建绘图任务失败：未返回 batch_id')
     }
     
-    // 检查是否有部分失败
-    if (result.partial_success) {
-      showToast(
-        `批量任务部分成功：成功创建 ${result.success_count}/${result.total_requested} 个任务，${result.failed_count} 个任务创建失败`,
-        'warning'
-      )
-    } else {
-      showToast(`已创建批量任务（batch_id: ${result.batch_id.substring(0, 8)}...，包含 ${result.job_ids?.length || 1} 个任务）`, 'success')
-    }
+    showToast(`已创建批量任务（batch_id: ${batch_id.substring(0, 8)}...，包含 ${data.batch_size || 1} 个任务）`, 'success')
   } catch (error: any) {
     console.error('创建任务失败:', error)
     const errorMessage = error.response?.data?.detail || error.message || '未知错误'

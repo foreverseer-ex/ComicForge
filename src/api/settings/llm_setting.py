@@ -81,13 +81,6 @@ class LlmSettings(BaseModel):
         le=1000,
         description="LangGraph 递归限制：工具调用的最大次数（25-1000）。迭代模式可能需要更高的值"
     )
-    
-    # 迭代模式相关（已弃用：现在使用 ChatMessage 的 data 字段存储 ChatIteration）
-    # 保留此字段以保持向后兼容性，但不再使用
-    pending_iteration: dict | None = Field(
-        default=None,
-        description="待处理的迭代消息（已弃用：现在使用 ChatMessage 的 data 字段存储 ChatIteration）"
-    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -100,7 +93,7 @@ class LlmSettings(BaseModel):
                     "base_url": LlmBaseUrl.XAI,
                     "temperature": 0.7,
                     "developer_mode": True,
-                    "system_prompt": "你是 NovelPanel 的 AI 助手..."
+                    "system_prompt": "你是 ComicForge（漫画锻造）的 AI 助手..."
                 },
                 # OpenAI 配置
                 {

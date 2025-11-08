@@ -3,7 +3,6 @@
 
 提供聊天消息的 CRUD 操作：创建、查询、更新、删除。
 """
-import uuid
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from loguru import logger
@@ -40,23 +39,18 @@ def create_chat_message(
         status: 消息状态 （ready、error、success）
         data: 额外数据（可选）
         index: 消息索引，默认值为-1（自动计算）
-        project_id: 项目唯一标识，默认值为当前设置的项目ID
+        project_id: 项目唯一标识（None 表示默认工作空间）
     
     Returns:
         创建的消息ID（message_id）
     """
-    if project_id is None:
-        raise HTTPException(status_code=400, detail="project_id 是必需的参数")
     if index < 0:
         index = HistoryService.count(project_id) + index + 1
     if data is None:
         data = dict()
 
-    # 生成唯一消息ID
-    message_id = str(uuid.uuid4())
-
+    # 创建消息（ID 会自动生成）
     message = ChatMessage(
-        message_id=message_id,
         project_id=project_id,
         index=index,
         status=status,
@@ -66,16 +60,16 @@ def create_chat_message(
         data=data,
     )
     message = HistoryService.create(message)
-    logger.info(f"创建聊天消息: {message_id} (project: {project_id}, index: {index})")
-    return {"message_id": message_id}
+    logger.info(f"创建聊天消息: {message.message_id} (project: {project_id}, index: {index})")
+    return {"message_id": message.message_id}
 
 
 # ==================== 查询操作（固定路径必须放在动态路径之前） ====================
 
 @router.get("/by_index", response_model=ChatMessage, summary="根据索引获取聊天消息")
 def get_chat_message_by_index(
-    project_id: str,
-    index: int
+    project_id: Optional[str] = None,
+    index: int = 0
 ) -> ChatMessage:
     """
     根据项目ID和索引获取聊天消息。
@@ -107,7 +101,7 @@ def get_chat_message_by_index(
 
 @router.get("/all", response_model=List[ChatMessage], summary="列出项目的所有消息")
 def get_all_chat_messages(
-    project_id: str,
+    project_id: Optional[str] = None,
     limit: Optional[int] = None,
     offset: int = 0
 ) -> List[ChatMessage]:
@@ -133,7 +127,7 @@ def get_all_chat_messages(
 
 @router.get("/ids", summary="列出项目的所有消息ID")
 def list_chat_message_ids(
-    project_id: str
+    project_id: Optional[str] = None
 ) -> List[str]:
     """
     根据项目ID获取聊天消息ID列表。
@@ -150,7 +144,7 @@ def list_chat_message_ids(
 
 @router.get("/count", summary="获取项目的消息数量")
 def get_chat_message_count(
-    project_id: str
+    project_id: Optional[str] = None
 ) -> int:
     """
     根据项目ID获取聊天消息数量。
@@ -194,7 +188,7 @@ def get_chat_message(message_id: str) -> ChatMessage:
 
 @router.delete("/clear", summary="清空项目的所有消息")
 def clear_chat_messages(
-    project_id: str
+    project_id: Optional[str] = None
 ) -> dict:
     """
     根据项目ID删除所有聊天消息。
@@ -221,8 +215,8 @@ def clear_chat_messages(
 
 @router.delete("/by_index", summary="根据索引删除聊天消息")
 def remove_chat_message_by_index(
-    project_id: str,
-    index: int
+    project_id: Optional[str] = None,
+    index: int = 0
 ) -> dict:
     """
     根据项目ID和索引删除聊天消息。

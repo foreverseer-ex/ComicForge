@@ -1,0 +1,40 @@
+# 后端 Dockerfile
+FROM python:3.13-slim
+
+# 设置工作目录
+WORKDIR /app
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 uv（如果可用，否则使用 pip）
+RUN pip install --no-cache-dir uv || echo "uv not available, using pip"
+
+# 复制依赖文件和源代码（安装依赖需要源代码）
+COPY pyproject.toml uv.lock* ./
+COPY src/ ./src/
+COPY config.json* ./
+
+# 安装 Python 依赖
+# 优先使用 uv，如果失败则使用 pip
+RUN if command -v uv &> /dev/null; then \
+        uv pip install --system . || pip install --no-cache-dir .; \
+    else \
+        pip install --no-cache-dir .; \
+    fi
+
+# 创建必要的目录
+RUN mkdir -p storage/data storage/temp
+
+# 暴露端口
+EXPOSE 7864
+
+# 设置环境变量
+ENV PYTHONPATH=/app/src
+ENV PYTHONUNBUFFERED=1
+
+# 启动命令
+CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7864"]
+

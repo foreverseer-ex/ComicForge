@@ -8,7 +8,7 @@
  * 获取 API 基础 URL
  * 
  * 开发环境：返回 '/api'（通过 Vite 代理转发到后端）
- * 生产环境：使用环境变量 VITE_API_BASE_URL，如果没有则使用默认值
+ * 生产环境：使用环境变量 VITE_API_BASE_URL，如果没有则使用 '/api'（通过 nginx 代理）
  */
 export function getApiBaseURL(): string {
   // 开发环境：使用相对路径，通过 Vite 代理转发
@@ -16,7 +16,7 @@ export function getApiBaseURL(): string {
     return '/api'
   }
   
-  // 生产环境：使用环境变量或默认值
-  return import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:7864'
+  // 生产环境：使用环境变量或默认值 '/api'（通过 nginx 代理）
+  return import.meta.env.VITE_API_BASE_URL || '/api'
 }
 

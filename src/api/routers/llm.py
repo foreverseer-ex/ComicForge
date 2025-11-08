@@ -3,7 +3,7 @@ LLM 相关的路由。
 
 提供 LLM 交互过程中需要的辅助功能，如添加选项等。
 """
-import uuid
+import json
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Body
 from loguru import logger
@@ -13,6 +13,8 @@ from api.services.db.project_service import ProjectService
 from api.services.db import HistoryService
 from api.services.llm import get_current_llm_service
 from api.schemas.draw import DrawArgs
+from api.routers.model_meta import get_checkpoints, get_loras
+from api.routers.actor import get_all_actors
 from api.constants.llm import (
     GENERATE_DRAW_PARAMS_BASE_TEMPLATE,
     GENERATE_DRAW_PARAMS_DESC_SECTION,
@@ -45,7 +47,7 @@ async def add_choices(
     为当前项目的最后一条助手消息添加选项。
     
     用于 LLM 工具调用后，添加用户可选的选项：
-    - 图像选项：draw/draw_batch 工具调用后，展示生成的图像供用户选择
+    - 图像选项：draw 工具调用后，展示生成的图像供用户选择
     - 文字选项：提供快捷回复按钮
     
     Args:
@@ -223,7 +225,7 @@ async def generate_draw_params(
         name: str = Body(...),
         desc: str | None = Body(None),
         project_id: str | None = Body(None)
-) -> Dict[str, Any]:
+) -> DrawArgs:
     """
     使用 LLM 生成文生图参数。
     
@@ -241,22 +243,47 @@ async def generate_draw_params(
         project_id: 项目ID（可选），如果提供，LLM 可以查询角色信息和已生成的立绘参数
     
     Returns:
-        生成的绘图参数字典，格式与 DrawArgs 一致
+        生成的绘图参数（DrawArgs 对象）
+    
+    Raises:
+        HTTPException: 如果 LLM 服务未初始化、LLM 返回错误或参数验证失败
     """
     try:
         llm_service = get_current_llm_service()
         if not llm_service:
             raise HTTPException(status_code=503, detail="LLM 服务未初始化")
 
-        # 构建 LLM 提示消息
-        # 注意：DrawArgs 的生成规范已定义在 MCP_TOOLS_GUIDE 中，这里使用模板构建提示词
+        # 1. 直接调用函数获取可用资源
+        logger.info("正在获取可用模型和角色信息...")
+        checkpoints = await get_checkpoints()
+        loras = await get_loras()
+        # 查询 actor（支持 project_id=None，表示默认工作空间）
+        actors = await get_all_actors(project_id=project_id, limit=1000)
+        
+        # 2. 格式化资源信息为 JSON 字符串
+        resources_info = {
+            "checkpoints": checkpoints,
+            "loras": loras,
+        }
+        # 将 Actor 对象转换为字典（包括 examples），支持 project_id=None
+        if actors:
+            actors_dict = [actor.model_dump() for actor in actors]
+            resources_info["actors"] = actors_dict
+        
+        resources_json = json.dumps(resources_info, ensure_ascii=False, indent=2)
+        logger.info(f"已获取资源信息：{len(checkpoints)} 个 Checkpoint，{len(loras)} 个 LoRA，{len(actors)} 个角色")
+
+        # 3. 构建 LLM 提示消息
         desc_section = GENERATE_DRAW_PARAMS_DESC_SECTION.format(desc=desc) if desc else GENERATE_DRAW_PARAMS_NO_DESC
         
         # 根据是否有 project_id 选择不同的步骤说明
-        if project_id:
+        # 如果有 actor 信息，使用带项目的步骤说明（即使 project_id=None）
+        has_actors = len(actors) > 0
+        if project_id or has_actors:
             steps_section = GENERATE_DRAW_PARAMS_STEPS_WITH_PROJECT
-            # 添加角色查询要求
-            actor_context = GENERATE_DRAW_PARAMS_ACTOR_CONTEXT_TEMPLATE.format(project_id=project_id)
+            # 添加角色查询要求（支持 project_id=None）
+            actual_project_id = project_id if project_id is not None else "默认工作空间"
+            actor_context = GENERATE_DRAW_PARAMS_ACTOR_CONTEXT_TEMPLATE.format(project_id=actual_project_id)
             prompt = GENERATE_DRAW_PARAMS_BASE_TEMPLATE.format(
                 name=name,
                 desc_section=desc_section,
@@ -269,12 +296,32 @@ async def generate_draw_params(
                 desc_section=desc_section,
                 steps_section=steps_section
             )
+        
+        # 4. 将资源信息添加到系统提示词中
+        resources_prompt = f"""
+## 可用资源信息（已自动获取，无需调用工具）
 
-        # 导入 DrawArgs 模型
+以下是当前可用的模型和角色信息，请直接使用这些信息生成参数：
 
-        # 调用 LLM（异步），使用结构化输出
+```json
+{resources_json}
+```
+
+**重要提示**：
+- 必须使用 `version_name` 作为模型和 LoRA 名称（不是 `name`）
+- 所有 LoRA 的 `ecosystem` 和 `base_model` 必须与 Checkpoint 完全匹配
+- 如果提供了角色信息，请参考角色的 `examples` 中的 `draw_args` 保持一致性
+- LoRA 的 `trained_words` 必须在 prompt 中包含
+"""
+
+        # 5. 调用 LLM（异步），使用结构化输出
+        # 注意：我们需要将资源信息作为系统消息的一部分传递
+        # 由于 chat_invoke 会构建系统消息，我们需要通过自定义方式添加资源信息
+        # 这里我们将资源信息添加到用户消息的开头
+        full_prompt = resources_prompt + "\n\n" + prompt
+        
         result = await llm_service.chat_invoke(
-            message=prompt,
+            message=full_prompt,
             project_id=project_id,  # 传递 project_id，让 LLM 可以查询角色信息
             output_schema=DrawArgs  # 使用 DrawArgs 作为输出 schema
         )
@@ -293,7 +340,6 @@ async def generate_draw_params(
             raise HTTPException(status_code=500, detail=result)
 
         # 解析 JSON 结果（结构化输出应该直接返回 JSON）
-        import json
         import re
 
         # 尝试提取 JSON 部分（可能 LLM 返回了包含其他文本的内容）
@@ -313,51 +359,17 @@ async def generate_draw_params(
                 logger.error(f"解析 LLM 返回的 JSON 失败: {e}, 原始结果: {result[:500]}")
                 raise HTTPException(status_code=500, detail=f"LLM 返回的内容不包含有效的 JSON。LLM 返回: {result[:200]}")
 
-        # 处理字段名不一致：DrawArgs 使用 sampler，但 API 使用 sampler_name
-        if "sampler_name" in params and "sampler" not in params:
-            params["sampler"] = params.pop("sampler_name")
-        elif "sampler" in params and "sampler_name" not in params:
-            params["sampler_name"] = params["sampler"]
-
-        # 验证参数是否符合 DrawArgs 格式
+        # 验证参数是否符合 DrawArgs 格式，如果失败则报错
         try:
             draw_args = DrawArgs(**params)
-            params = draw_args.model_dump() if hasattr(draw_args, 'model_dump') else draw_args.dict()
         except Exception as e:
-            logger.warning(f"参数验证失败，使用原始参数: {e}")
-            # 如果验证失败，继续使用原始参数
-
-        # 验证并补充缺失的参数（注意：API 使用 sampler_name）
-        validated_params: Dict[str, Any] = {
-            "model": params.get("model", ""),
-            "prompt": params.get("prompt", ""),
-            "negative_prompt": params.get("negative_prompt", "bad quality, worst quality"),
-            "sampler_name": params.get("sampler_name") or params.get("sampler", "Euler a"),
-            "steps": params.get("steps", 30),
-            "cfg_scale": params.get("cfg_scale", 7.0),
-            "width": params.get("width", 1024),
-            "height": params.get("height", 1024),
-            "seed": params.get("seed", -1),
-            "clip_skip": params.get("clip_skip", 2),
-        }
-
-        # LoRA 是可选的
-        if "loras" in params and isinstance(params["loras"], dict):
-            validated_params["loras"] = params["loras"]
-        else:
-            validated_params["loras"] = {}
-
-        # VAE 是可选的
-        if "vae" in params and params["vae"]:
-            validated_params["vae"] = params["vae"]
+            logger.error(f"参数验证失败: {e}, 参数: {params}")
+            raise HTTPException(status_code=500, detail=f"LLM 返回的参数不符合 DrawArgs 格式: {str(e)}")
 
         logger.info(
-            f"✅ 已生成绘图参数：model={validated_params.get('model')}, prompt长度={len(validated_params.get('prompt', ''))}")
+            f"✅ 已生成绘图参数：model={draw_args.model}, prompt长度={len(draw_args.prompt)}")
 
-        return {
-            "success": True,
-            "params": validated_params
-        }
+        return draw_args
 
     except HTTPException:
         raise
@@ -440,10 +452,8 @@ async def start_iteration(
         summary=summary
     )
 
-    # 创建 ChatMessage 并存储到数据库
-    message_id = str(uuid.uuid4())
+    # 创建 ChatMessage 并存储到数据库（ID 会自动生成）
     iteration_message = ChatMessage(
-        message_id=message_id,
         project_id=project_id,
         role="assistant",
         context="",
@@ -453,7 +463,8 @@ async def start_iteration(
         tools=[],
         suggests=[]
     )
-    HistoryService.create(iteration_message)
+    iteration_message = HistoryService.create(iteration_message)
+    message_id = iteration_message.message_id
 
     logger.info(f"已启动迭代模式：{target}，范围：{index}-{stop}，步长：{step}")
 

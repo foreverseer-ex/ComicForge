@@ -5,6 +5,9 @@ import router from './router'
 import pinia from './stores'
 import { initImageCache } from './utils/imageCache'
 
+// PWA 注册
+import { registerSW } from 'virtual:pwa-register'
+
 // Vue app 初始化
 try {
   const app = createApp(App)
@@ -14,6 +17,17 @@ try {
   
   // 初始化图片缓存（从 localStorage 读取）
   initImageCache()
+  
+  // 注册 PWA Service Worker
+  registerSW({
+    immediate: true,
+    onNeedRefresh() {
+      console.log('新的内容可用，请刷新页面')
+    },
+    onOfflineReady() {
+      console.log('应用已准备好离线使用')
+    },
+  })
   
   app.mount('#app')
 } catch (error) {

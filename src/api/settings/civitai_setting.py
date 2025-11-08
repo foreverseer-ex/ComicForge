@@ -20,16 +20,16 @@ class CivitaiSettings(BaseModel):
     )
     
     timeout: float = Field(
-        default=30.0,
+        default=60.0,
         gt=0,
-        description="API 请求超时时间（秒）"
+        description="API 请求超时时间（秒），默认60秒"
     )
     
-    max_concurrency: int = Field(
-        default=3,
+    parallel_workers: int = Field(
+        default=4,
         ge=1,
         le=10,
-        description="导入模型时的最大并发数（1-10）"
+        description="并行下载元数据时的线程数（1-10），默认4"
     )
     
     draw_timeout: int = Field(
@@ -37,4 +37,18 @@ class CivitaiSettings(BaseModel):
         ge=60,
         le=3600,
         description="绘图任务超时时间（秒），60-3600秒，默认10分钟"
+    )
+    
+    retry_count: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="API 调用失败时的重试次数（1-10），默认5次"
+    )
+    
+    retry_delay: float = Field(
+        default=5.0,
+        gt=0,
+        le=60,
+        description="重试延迟时间（秒），0-60秒，默认5秒"
     )

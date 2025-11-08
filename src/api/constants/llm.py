@@ -179,6 +179,11 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 
 1. **强制使用当前 Project**：所有操作在当前 project_id 中进行，禁止创建/删除 project
 2. **记忆管理**：先查询再更新/创建，避免碎片化和重复，保持精炼
+3. **绘图核心原则（⚠️ 任何时候都必须遵循，不能被用户偏好、模型喜爱等功能覆盖）**：
+   - **生成尺寸强制限制**：`width` 和 `height` 必须始终为 1024，不允许超过 1024x1024
+   - **模型匹配强制要求**：Checkpoint 和 LoRA 的 `ecosystem`（sd1/sd2/sdxl）必须完全匹配
+   - **基础模型匹配强制要求**：Checkpoint 和 LoRA 的 `base_model`（如 Pony、Illustrious 等）必须完全匹配
+   - **优先级说明**：用户偏好、模型喜爱等功能只能在符合上述核心原则的前提下应用
 
 ## 工具分类
 
@@ -247,15 +252,19 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 
 **Actor 操作函数**：
 - `create_actor(project_id, name, desc, color, tags)`: 创建 Actor
+  - **⚠️ 重要**：必须根据用户输入的角色特点来设置 name、desc、color 和 tags
+  - name: 角色名称（必须使用用户提供的名称）
+  - desc: 角色描述（必须使用用户提供的描述和特点）
   - color: 根据特点选择（女性→粉色系，男性→蓝色/灰色系，地点→绿色/棕色系，组织→红色/紫色系）
-  - tags: 标签字典，**必须使用中文键名**（如 `"性别"`, `"年龄"`, `"发型"` 等）
+  - tags: 标签字典，**必须使用中文键名**（如 `"性别"`, `"年龄"`, `"发型"` 等），**必须包含用户提到的所有角色特点**
 - `get_all_actors(project_id)`: 查询所有 Actor
 - `get_actor(project_id, actor_id)`: 获取指定 Actor 详情
 - `update_actor(project_id, actor_id, name, desc, color, tags)`: 更新 Actor
 - `remove_actor(project_id, actor_id)`: 删除 Actor（不可恢复）
 - `add_example(actor_id, title, desc, image_path, ...)`: 添加示例图
 - `remove_example(actor_id, example_index)`: 删除示例图
-- `add_portrait_from_batch(project_id, actor_id, batch_id, title, desc)`: 从 batch 添加立绘（推荐）
+- `add_portrait_from_batch(actor_id, batch_id, title, desc, project_id)`: 从 batch 添加立绘（推荐）
+  - project_id 可选，None 表示默认工作空间
 
 **重要提示**：删除/创建前必须查询确认，避免重复或误删。
 
@@ -270,11 +279,31 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 
 ### 5. Draw（图像生成）
 
-**⚠️ 重要：生成参数前必须先调用工具了解可用资源**
-1. `get_checkpoints()`: 查询基础模型
-2. `get_loras()`: 查询 LoRA 模型
-3. 查看示例图像和生成参数（`args` 字段）
-4. **必须使用 `version_name` 而不是 `name`**（格式：`{name}-{version}`，如 `RealisticVision-5.1`）
+**⚠️ 重要：生成参数前需要了解可用资源**
+- 如果系统消息中已提供资源信息（checkpoints、loras、actors），直接使用这些信息
+- 否则，需要调用工具函数获取：
+  1. `get_checkpoints()`: 查询基础模型
+  2. `get_loras()`: 查询 LoRA 模型
+  3. 查看示例图像和生成参数（`args` 字段）
+- **必须使用 `version_name` 而不是 `name`**（格式：`{name}-{version}`，如 `RealisticVision-5.1`）
+
+**⚠️ 模型选择优先级（重要）**：
+- **⚠️ 核心原则（必须优先遵守，不能被任何其他因素覆盖）**：
+  - **必须匹配 `ecosystem`**（sd1/sd2/sdxl）- 这是强制要求，不符合的模型必须放弃
+  - **必须匹配 `base_model`**（如 Pony、Illustrious 等）- 这是强制要求，不符合的模型必须放弃
+  - **尺寸限制**：width 和 height 必须为 1024，不允许超过
+- **在符合核心原则的前提下，应用以下优先级**：
+  - **用户喜欢的模型优先使用**：查询模型时，`preference` 字段为 `'liked'` 的模型应优先考虑（但必须符合 ecosystem 和 base_model）
+  - **用户不喜欢的模型避免使用**：`preference` 字段为 `'disliked'` 的模型应避免使用（除非没有其他选择）
+  - **通用且喜爱的模型**：对于通用用途的喜爱模型（如"增加细节"类 LoRA），在大多数场景中应优先使用（但必须符合 ecosystem 和 base_model）
+  - **不通用但喜爱的模型**：对于特定用途的喜爱模型（如"按摩"类 LoRA），在相关场景中优先使用（但必须符合 ecosystem 和 base_model）
+  - **场景不相关时**：不使用不相关的喜爱模型（如按摩 LoRA 不应用于非按摩场景）
+- **选择逻辑（必须严格遵守）**：
+  1. **首先筛选符合 `ecosystem` 和 `base_model` 要求的模型**（不符合的必须放弃，即使是被喜爱的模型）
+  2. 在符合条件的模型中，优先选择 `preference='liked'` 的模型，避免选择 `preference='disliked'` 的模型
+  3. 如果多个喜爱模型都符合条件，优先选择通用性强的（根据 `trained_words` 和示例图判断）
+  4. 如果没有喜爱的模型符合条件，再选择其他模型
+  5. **最终检查**：确认所有选择的模型都符合 ecosystem 和 base_model 匹配要求
 
 **通用图像生成**：
 - `create_draw_job(project_id, model, prompt, negative_prompt, loras, steps, cfg_scale, ...)`: 创建绘图任务
@@ -284,36 +313,67 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 - `delete_draw_job(job_id)`: 删除任务
 
 **DrawArgs 生成规范**：
-- **重要原则**：首先遵循用户提示词和记忆偏好，冲突时以用户输入为准
-- **必须字段**：`model`（使用 `version_name`）、`prompt`、`negative_prompt`
-- **推荐字段**：`sampler`（不是 `sampler_name`）、`steps`（20-30）、`cfg_scale`（7.0）、`width`（1024）、`height`（1024）、`seed`（-1）、`clip_skip`（2）
-- **可选字段**：`loras`（字典，使用 `version_name`）、`vae`
+- **⚠️ 核心原则（必须严格遵守，不能被任何其他因素覆盖）**：
+  - **尺寸限制**：`width` 和 `height` 必须始终为 1024，不允许超过 1024x1024（即使示例图或用户偏好要求其他尺寸）
+  - **模型匹配**：Checkpoint 和 LoRA 的 `ecosystem` 和 `base_model` 必须完全匹配（即使模型喜爱功能建议其他模型）
+  - **LoRA 使用限制**：
+    - **画风类通用 LoRA**：通常只需要添加一个（或者不添加），因为画风 LoRA 之间会互相冲突。如果用户有特别喜爱的画风 LoRA，可以添加一个
+    - **特定类 LoRA**：同类 LoRA 最多只需要添加一个，不同类 LoRA 没有限制，但总数最好不要超过 10 个
+      * 例如：角色表情 LoRA 和按摩 LoRA 可以同时添加（不同类）
+      * 例如：两个角色表情 LoRA 最好不要同时添加（同类）
+      * 例如：两个按摩 LoRA 最好不要同时添加（同类）
+- **重要原则**：首先遵循用户提示词和记忆偏好，但核心原则（尺寸、模型匹配、LoRA 使用限制）必须优先
+- **必须字段**：`model`（使用 `version_name`）、`prompt`、`negative_prompt`、`width`（必须为1024）、`height`（必须为1024）
+- **推荐字段**：`sampler`（不是 `sampler_name`）、`steps`（20-30）、`cfg_scale`（7.0）、`seed`（-1）、`clip_skip`（2）
+- **可选字段**：`loras`（字典，使用 `version_name`，但必须匹配 ecosystem 和 base_model，且遵循 LoRA 使用限制）、`vae`
 
 **参数选择方法**：
-1. 基础模型和 LoRA：根据用户提示词或记忆偏好选择，必须匹配 `base_model` 和 `ecosystem`
+1. 基础模型和 LoRA：根据用户提示词或记忆偏好选择，**⚠️ 必须严格匹配 `base_model` 和 `ecosystem`**（这是核心原则，不能被用户偏好或模型喜爱覆盖）
+   - **优先选择 `preference='liked'` 的模型**（但仅在符合 ecosystem 和 base_model 的前提下，不符合的喜欢模型必须放弃）
+   - **避免选择 `preference='disliked'` 的模型**（除非没有其他选择）
+   - **⚠️ LoRA 选择限制（核心原则）**：
+     * **画风类通用 LoRA**：通常只需要添加一个（或者不添加），因为画风 LoRA 之间会互相冲突。如果用户有特别喜爱的画风 LoRA，可以添加一个
+     * **特定类 LoRA**：同类 LoRA 最多只需要添加一个，不同类 LoRA 没有限制，但总数最好不要超过 10 个
+       - 例如：角色表情 LoRA 和按摩 LoRA 可以同时添加（不同类）
+       - 例如：两个角色表情 LoRA 最好不要同时添加（同类）
+       - 例如：两个按摩 LoRA 最好不要同时添加（同类）
+   - 通用且喜爱的模型（如"增加细节"类 LoRA）在大多数场景中优先使用（但必须匹配 ecosystem 和 base_model，且遵循 LoRA 使用限制）
+   - 不通用但喜爱的模型（如"按摩"类 LoRA）在相关场景中优先使用（但必须匹配 ecosystem 和 base_model，且遵循 LoRA 使用限制）
+   - **如果用户偏好或记忆要求不匹配的模型，必须拒绝并选择匹配的模型**
 2. LoRA 权重：参考 LoRA 示例图的权重
 3. 提示词：查看 `trained_words`（特别是 LoRA 的），参考示例图的 prompt
 4. 技术参数：参考基础模型示例图的 `sampler`、`steps`、`cfg_scale`、`clip_skip`、`vae`
-5. 尺寸和种子：默认 1024x1024，seed=-1
+5. **⚠️ 尺寸强制要求**：`width` 和 `height` 必须始终为 1024，不允许超过（即使示例图显示其他尺寸，也必须使用 1024x1024），`seed` 默认为 -1
 
 **生成步骤**：
-1. 调用 `get_checkpoints()` 和 `get_loras()` 了解可用资源
+1. **获取可用资源**：
+   - 如果系统消息中已提供资源信息（checkpoints、loras、actors），直接使用这些信息
+   - 否则，调用 `get_checkpoints()` 和 `get_loras()` 了解可用资源
 2. **如果是角色立绘生成（提供了 project_id）**：
-   - 调用 `get_all_actors()` 和 `get_actor()` 查询角色信息和已生成的立绘参数
+   - 如果系统消息中已提供角色信息（actors），直接使用
+   - 否则，调用 `get_all_actors()` 和 `get_actor()` 查询角色信息和已生成的立绘参数
    - **参考已有立绘参数的原则**：
      - **提示词**：主要参考不可变内容（外貌特征），可变内容（视角、姿态、衣服等）只有场景相似时才参考
      - **LoRA**：通用 LoRA 主要参考，不通用的只有相似才参考
      - **技术参数**：优先使用相同的 model、sampler、steps、cfg_scale、clip_skip、vae
 3. 查看系统消息中的记忆条目，了解用户偏好
 4. 根据用户提示词和记忆偏好选择模型和 LoRA
+   - **⚠️ 必须遵循 LoRA 使用限制**：
+     * 画风类通用 LoRA：通常只需要添加一个（或者不添加）
+     * 特定类 LoRA：同类最多一个，不同类可以多个，但总数不超过 10 个
 5. 查看 LoRA 示例图确定权重
 6. 查看 `trained_words` 确保在 prompt 中包含
 7. 参考示例图的 prompt、sampler、steps 等参数
-8. 设置 width=1024、height=1024、seed=-1
-9. 返回符合 `DrawArgs` 格式的 JSON 对象
+8. **⚠️ 强制设置**：width=1024、height=1024（不允许超过，即使示例图或用户偏好要求其他尺寸）、seed=-1
+9. **⚠️ 最终检查**：
+   - 确认 width 和 height 都是 1024
+   - 确认所有 LoRA 的 ecosystem 和 base_model 与 Checkpoint 匹配
+   - 确认遵循 LoRA 使用限制（画风类最多一个，同类特定 LoRA 最多一个，总数不超过 10 个）
+10. 返回符合 `DrawArgs` 格式的 JSON 对象
 
 **角色立绘生成（推荐）**：
-- `add_portrait_from_batch(project_id, actor_id, batch_id, title, desc)`: 从 batch 添加立绘
+- `add_portrait_from_batch(actor_id, batch_id, title, desc, project_id)`: 从 batch 添加立绘
+  - project_id 可选，None 表示默认工作空间
   - 流程：1) `create_draw_job()` 创建任务（返回 batch_id） 2) `add_portrait_from_batch()` 添加立绘
   - 会监控 batch 下的所有 job，每当有一个 job 完成时就会保存一张图片
   - 参考已有立绘参数保持一致性（参考原则同上）
@@ -347,12 +407,12 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 # 默认系统提示词
 # ============================================================================
 
-DEFAULT_SYSTEM_PROMPT = """你是 NovelPanel 的 AI 助手，一个强大的小说创作与视觉化工具的智能大脑。
+DEFAULT_SYSTEM_PROMPT = """你是 ComicForge（漫画锻造）的 AI 助手，一个强大的漫画创作与视觉化工具的智能大脑。
 
 ## 你的核心使命
 
 你是用户的**创作伙伴**，可以：
-- 帮助用户构思和创作小说内容
+- 帮助用户构思和创作漫画内容
 - 分析和优化现有文本
 - 将文本视觉化为精美的图像
 - 管理项目信息和记忆
@@ -362,7 +422,7 @@ DEFAULT_SYSTEM_PROMPT = """你是 NovelPanel 的 AI 助手，一个强大的小�
 ### 1. 创作辅助（最重要！）
 - 剧情构思、人物塑造、对话优化、场景描写、文风建议、创意激发
 
-### 2. 小说理解与分析
+### 2. 漫画理解与分析
 - 理解情节、情感和节奏，识别关键场景，提取核心要素，分析叙事结构
 
 ### 3. 视觉化创作
@@ -402,29 +462,62 @@ GENERATE_DRAW_PARAMS_BASE_TEMPLATE = """请根据以下信息生成文生图参�
 {desc_section}
 
 请按照 MCP 工具使用指南中"DrawArgs 生成规范"的要求生成参数：
-1. 先调用 `get_checkpoints()` 和 `get_loras()` 了解可用的模型和 LoRA
+
+**注意**：可用资源信息（Checkpoint、LoRA、角色等）已经在上面的系统消息中提供，请直接使用这些信息，无需调用工具函数。
+
+**第一步：查看已提供的资源信息**
+- 查看 Checkpoint 模型列表，注意每个模型的 `version_name`、`ecosystem`、`base_model` 和 `examples`
+- 查看 LoRA 模型列表，注意每个 LoRA 的 `version_name`、`ecosystem`、`base_model`、`trained_words` 和 `examples`
+- 如果提供了角色信息，查看角色的 `examples` 中的 `draw_args`，参考已有立绘参数保持一致性
+
+**第二步：根据任务需求选择模型和参数**
 {steps_section}
+
+**第三步：生成符合 DrawArgs 格式的参数**
+- 必须使用 `version_name` 作为模型和 LoRA 名称（不是 `name`）
+- 必须使用 `sampler` 字段（不是 `sampler_name`）
+- `width` 和 `height` 必须为 1024
+- 所有 LoRA 的 `ecosystem` 和 `base_model` 必须与 Checkpoint 完全匹配
+- LoRA 的 `trained_words` 必须在 prompt 中包含
+- **⚠️ LoRA 使用限制（核心原则）**：
+  * **画风类通用 LoRA**：通常只需要添加一个（或者不添加），因为画风 LoRA 之间会互相冲突
+  * **特定类 LoRA**：同类 LoRA 最多只需要添加一个，不同类 LoRA 没有限制，但总数最好不要超过 10 个
+    - 例如：角色表情 LoRA 和按摩 LoRA 可以同时添加（不同类）
+    - 例如：两个角色表情 LoRA 最好不要同时添加（同类）
+    - 例如：两个按摩 LoRA 最好不要同时添加（同类）
 
 请仔细分析任务需求，学习示例图像的参数风格，然后生成合适的参数。"""
 
 GENERATE_DRAW_PARAMS_DESC_SECTION = "任务描述：{desc}"
 GENERATE_DRAW_PARAMS_NO_DESC = "无任务描述"
 
-GENERATE_DRAW_PARAMS_STEPS_WITHOUT_PROJECT = """2. 查看模型的示例图像（examples）和生成参数（args），学习最佳实践
-3. 根据任务名称和描述，选择合适的模型、LoRA、prompt、negative_prompt 等参数
-4. 返回符合 DrawArgs 格式的 JSON 对象（注意：必须使用 `version_name` 作为模型和 LoRA 名称，使用 `sampler` 字段而不是 `sampler_name`）"""
+GENERATE_DRAW_PARAMS_STEPS_WITHOUT_PROJECT = """1. 查看模型的示例图像（examples）和生成参数（args），学习最佳实践
+2. 根据任务名称和描述，选择合适的模型、LoRA、prompt、negative_prompt 等参数
+   ⚠️ **核心原则（必须严格遵守）**：
+   - **尺寸限制**：width 和 height 必须始终为 1024，不允许超过（即使示例图显示其他尺寸）
+   - **模型匹配**：所有 LoRA 的 ecosystem 和 base_model 必须与 Checkpoint 完全匹配
+   - **LoRA 使用限制**：
+     * 画风类通用 LoRA：通常只需要添加一个（或者不添加），因为画风 LoRA 之间会互相冲突
+     * 特定类 LoRA：同类 LoRA 最多只需要添加一个，不同类 LoRA 没有限制，但总数最好不要超过 10 个
+3. 返回符合 DrawArgs 格式的 JSON 对象（注意：必须使用 `version_name` 作为模型和 LoRA 名称，使用 `sampler` 字段而不是 `sampler_name`，width 和 height 必须为 1024）"""
 
-GENERATE_DRAW_PARAMS_STEPS_WITH_PROJECT = """2. 调用 `get_all_actors()` 和 `get_actor()` 查询角色信息和已生成的立绘参数（参考已有参数保持一致性）
+GENERATE_DRAW_PARAMS_STEPS_WITH_PROJECT = """1. 查看已提供的角色信息（actors），找到任务名称中提到的角色
+2. 查看该角色已生成的立绘（examples）及其生成参数（draw_args），参考已有参数保持一致性
 3. 查看模型的示例图像（examples）和生成参数（args），学习最佳实践
 4. 根据任务名称和描述，选择合适的模型、LoRA、prompt、negative_prompt 等参数
-5. 返回符合 DrawArgs 格式的 JSON 对象（注意：必须使用 `version_name` 作为模型和 LoRA 名称，使用 `sampler` 字段而不是 `sampler_name`）"""
+   ⚠️ **核心原则（必须严格遵守）**：
+   - **尺寸限制**：width 和 height 必须始终为 1024，不允许超过（即使已有立绘或示例图显示其他尺寸）
+   - **模型匹配**：所有 LoRA 的 ecosystem 和 base_model 必须与 Checkpoint 完全匹配（即使已有立绘使用了不匹配的模型）
+   - **LoRA 使用限制**：
+     * 画风类通用 LoRA：通常只需要添加一个（或者不添加），因为画风 LoRA 之间会互相冲突
+     * 特定类 LoRA：同类 LoRA 最多只需要添加一个，不同类 LoRA 没有限制，但总数最好不要超过 10 个
+5. 返回符合 DrawArgs 格式的 JSON 对象（注意：必须使用 `version_name` 作为模型和 LoRA 名称，使用 `sampler` 字段而不是 `sampler_name`，width 和 height 必须为 1024）"""
 
 GENERATE_DRAW_PARAMS_ACTOR_CONTEXT_TEMPLATE = """
 ⚠️ 重要：这是一个角色立绘生成任务（project_id={project_id}）。
-为了保持前后生成图像的一致性，你必须：
-1. 先调用 `get_all_actors(project_id="{project_id}")` 查询项目中的所有角色
-2. 根据任务名称中的角色名称，找到对应的角色（使用 `get_actor(project_id="{project_id}", actor_id=...)` 获取详细信息）
-3. **必须查看该角色已生成的立绘（examples）及其生成参数（draw_args）**，并按照以下原则参考：
+角色信息已经在上面的系统消息中提供，请直接使用。
+
+为了保持前后生成图像的一致性，请按照以下原则参考已有立绘参数：
    
    **（1）提示词（prompt）的参考原则**：
    - **主要参考不可变的内容**：外貌特征（发色、瞳色、脸型、身材、肤色等）应该保持一致
@@ -452,11 +545,19 @@ GENERATE_DRAW_PARAMS_ACTOR_CONTEXT_TEMPLATE = """
 # ============================================================================
 
 NO_PROJECT_ID_WARNING = """
-⚠️ 注意：当前没有提供 project_id，以下工具可能不可用：
-- 读取/操作记忆（create_memory, get_all_memories 等）
-- 读取项目内容（get_project_content 等）
-- 查询/操作角色（get_all_actors 等需要 project_id 的工具）
-请根据实际情况选择合适的工具。"""
+⚠️ 注意：当前 project_id 为 None（默认工作空间）。
+
+**重要说明**：
+- `project_id=None` 时，所有需要 project_id 的工具函数都应该传递 `None` 作为 project_id 参数
+- 记忆和角色查询：`get_all_memories(project_id=None)` 和 `get_all_actors(project_id=None)` 会查询默认工作空间的记忆和角色
+- 项目内容查询：`get_project_content` 等需要具体项目 ID 的工具在 project_id=None 时不可用
+- 创建操作：`create_memory(project_id=None, ...)` 和 `create_actor(project_id=None, ...)` 会在默认工作空间中创建
+
+**关键原则**：
+- project_id 可以是 None，表示默认工作空间
+- 所有工具函数都支持 project_id=None
+- 查询时使用 project_id=None 会查询默认工作空间的数据
+"""
 
 # ============================================================================
 # LLM 服务错误消息模板

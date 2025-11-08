@@ -3,6 +3,7 @@
 
 每次小说转漫画任务都是一个项目，包含项目配置、进度状态等信息。
 """
+import uuid
 from datetime import datetime
 from typing import Optional
 from sqlmodel import SQLModel, Field
@@ -10,7 +11,7 @@ from sqlmodel import SQLModel, Field
 
 class Project(SQLModel, table=True):
     """项目主体。"""
-    project_id: str = Field(description="项目唯一标识", primary_key=True)
+    project_id: Optional[str] = Field(description="项目唯一标识", primary_key=True, default_factory=lambda: str(uuid.uuid4()))
     title: str = Field(description="项目标题", index=True)
     novel_path: Optional[str] = Field(default=None, description="小说文件路径")
     project_path: str = Field(description="项目存储路径")

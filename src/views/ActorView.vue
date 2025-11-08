@@ -19,7 +19,7 @@
         </h1>
       </div>
       
-      <div v-if="selectedProjectId" class="flex items-center gap-2">
+      <div class="flex items-center gap-2">
         <!-- 隐私模式 -->
         <button
           @click="togglePrivacyMode"
@@ -65,50 +65,9 @@
 
     <!-- 内容区域 -->
     <div>
-      <!-- 无项目状态 -->
-      <div 
-        v-if="!selectedProjectId"
-        class="h-full flex items-center justify-center py-20"
-      >
-        <div 
-          :class="[
-            'text-center rounded-lg border p-8',
-            isDark 
-              ? 'bg-gray-800 border-gray-700' 
-              : 'bg-white border-gray-200'
-          ]"
-        >
-          <svg 
-            class="w-16 h-16 mx-auto mb-4"
-            :class="isDark ? 'text-gray-600' : 'text-gray-400'"
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <h3 
-            :class="[
-              'text-lg font-semibold mb-2',
-              isDark ? 'text-gray-300' : 'text-gray-700'
-            ]"
-          >
-            请先创建一个项目
-          </h3>
-          <p 
-            :class="[
-              'text-sm',
-              isDark ? 'text-gray-500' : 'text-gray-500'
-            ]"
-          >
-            在主页创建项目后，才能管理角色
-          </p>
-        </div>
-      </div>
-
       <!-- 加载状态 -->
       <div 
-        v-else-if="loading"
+        v-if="loading"
         class="flex justify-center items-center py-12"
       >
         <div class="text-center">
@@ -414,16 +373,11 @@ const actorForm = ref({
 
 // 加载角色列表
 const loadActors = async () => {
-  if (!selectedProjectId.value) {
-    actors.value = []
-    return
-  }
-
   loading.value = true
   try {
     const data = await api.get('/actor/all', {
       params: {
-        project_id: selectedProjectId.value,
+        project_id: selectedProjectId.value || null,
         limit: 1000
       }
     })
@@ -449,7 +403,7 @@ const closeCreateDialog = () => {
 
 // 保存角色（创建或更新）
 const saveActor = async () => {
-  if (!selectedProjectId.value || !actorForm.value.name.trim()) {
+  if (!actorForm.value.name.trim()) {
     return
   }
 
@@ -465,10 +419,10 @@ const saveActor = async () => {
       })
       actorId = editingActor.value.actor_id
     } else {
-      // 创建角色
+      // 创建角色（如果没有项目，使用 null 作为 project_id）
       const result = await api.post('/actor/create', null, {
         params: {
-          project_id: selectedProjectId.value,
+          project_id: selectedProjectId.value || null,
           name: actorForm.value.name.trim(),
           desc: actorForm.value.desc.trim(),
           color: actorForm.value.color.trim()
@@ -622,14 +576,15 @@ watch([hasGeneratingPortrait, selectedProjectId], ([hasGenerating, projectId]) =
     })))
   }
   
-  // 如果有正在生成的立绘且项目有效，启动定时检查（只检查状态变化，不刷新整个页面）
-  if (hasGenerating && projectId) {
+  // 如果有正在生成的立绘，启动定时检查（只检查状态变化，不刷新整个页面）
+  // 支持 project_id=None（默认工作空间）
+  if (hasGenerating) {
     refreshTimer = setInterval(async () => {
       try {
         // 只获取有正在生成立绘的 actor 列表，检查是否有变化
         const response = await api.get(`/actor/all`, {
           params: {
-            project_id: projectId,
+            project_id: projectId || null,
             limit: 1000
           }
         })

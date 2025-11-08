@@ -13,7 +13,6 @@
 - 所有 value 统一使用纯文本字符串（列表类型用逗号分隔）
 - 支持灵活的查询和聚合
 """
-import uuid
 from datetime import datetime
 from typing import List, Optional, Dict
 from fastapi import APIRouter, HTTPException
@@ -50,17 +49,13 @@ async def create_memory(
     - 自动记录时间戳
     - 如果 description 为空，自动从 constants.memory.memory_description 获取
     """
-    # 生成唯一记忆ID
-    memory_id = str(uuid.uuid4())
-    
     # 如果没有提供描述，从预定义字典获取
     description = request.description
     if description is None:
         description = memory_description.get(request.key, "")
     
-    # 创建记忆条目对象
+    # 创建记忆条目对象（ID 会自动生成）
     entry = MemoryEntry(
-        memory_id=memory_id,
         project_id=request.project_id,
         key=request.key,
         value=request.value,
@@ -70,15 +65,15 @@ async def create_memory(
     )
     
     # 保存到数据库
-    MemoryService.create(entry)
-    logger.info(f"创建记忆条目: {request.key} (project: {request.project_id})")
+    entry = MemoryService.create(entry)
+    logger.info(f"创建记忆条目: {request.key} (project: {request.project_id}, memory_id: {entry.memory_id})")
     
-    return {"memory_id": memory_id}
+    return {"memory_id": entry.memory_id}
 
 
 @router.get("/all", response_model=List[MemoryEntry], summary="列出记忆")
 async def get_all_memories(
-    project_id: str,
+    project_id: Optional[str] = None,
     key: Optional[str] = None,
     limit: int = 100,
     offset: int = 0
@@ -87,7 +82,7 @@ async def get_all_memories(
     列出项目的记忆条目，支持分页。
     
     Args:
-        project_id: 项目ID（查询参数）
+        project_id: 项目ID（查询参数，None 表示默认工作空间）
         key: 按键名过滤（可选，精确匹配）
         limit: 返回数量限制（默认100，最大1000）
         offset: 偏移量（默认0）
@@ -167,13 +162,13 @@ async def get_all_key_descriptions() -> Dict[str, str]:
 
 @router.delete("/clear", summary="清空项目的所有记忆")
 async def clear_memories(
-    project_id: str
+    project_id: Optional[str] = None
 ) -> dict:
     """
     清空指定项目的所有记忆条目。
     
     Args:
-        project_id: 项目ID（查询参数）
+        project_id: 项目ID（查询参数，None 表示默认工作空间）
     
     Returns:
         删除结果（包含删除的记录数）

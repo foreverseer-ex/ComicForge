@@ -46,30 +46,31 @@ class HistoryService:
             return message
 
     @classmethod
-    def get_by_index(cls, project_id: str, index: int) -> Optional[ChatMessage]:
+    def get_by_index(cls, project_id: Optional[str], index: int) -> Optional[ChatMessage]:
         """
         根据项目ID和索引获取聊天消息。
-
-        :param project_id: 会话唯一标识
+        
+        :param project_id: 会话唯一标识（None 表示默认工作空间）
         :param index: 消息索引
         :return: 聊天消息对象（如果存在）
         """
         with DatabaseSession() as db:
-            message = db.exec(
-                select(ChatMessage)
-                .where(ChatMessage.project_id == project_id)
-                .where(ChatMessage.index == index)
-            ).first()
+            statement = select(ChatMessage).where(ChatMessage.index == index)
+            if project_id is None:
+                statement = statement.where(ChatMessage.project_id.is_(None))
+            else:
+                statement = statement.where(ChatMessage.project_id == project_id)
+            message = db.exec(statement).first()
             if message:
                 db.expunge(message)
             return message
 
     @classmethod
-    def get_all(cls, project_id: str, start_index: int = 0, end_index: int = -1) -> list[ChatMessage]:
+    def get_all(cls, project_id: Optional[str], start_index: int = 0, end_index: int = -1) -> list[ChatMessage]:
         """
         根据项目ID获取聊天消息列表。
-
-        :param project_id: 会话唯一标识
+        
+        :param project_id: 会话唯一标识（None 表示默认工作空间）
         :param start_index: 起始索引，默认值为0
         :param end_index: 结束索引，默认值为-1（表示最后一条消息）
         :return: 聊天消息对象列表（按索引排序）
@@ -80,30 +81,32 @@ class HistoryService:
 
 
         with DatabaseSession() as db:
-            messages = db.exec(
-                select(ChatMessage)
-                .where(ChatMessage.project_id == project_id)
-                .where(ChatMessage.index >= start_index)
-                .where(ChatMessage.index <= end_index)
-                .order_by(ChatMessage.index)
-            ).all()
+            statement = select(ChatMessage).where(ChatMessage.index >= start_index).where(ChatMessage.index <= end_index)
+            if project_id is None:
+                statement = statement.where(ChatMessage.project_id.is_(None))
+            else:
+                statement = statement.where(ChatMessage.project_id == project_id)
+            statement = statement.order_by(ChatMessage.index)
+            messages = db.exec(statement).all()
             for message in messages:
                 db.expunge(message)
         return list(messages)
 
     @classmethod
-    def list_ids(cls, project_id: str) -> Sequence[str]:
+    def list_ids(cls, project_id: Optional[str]) -> Sequence[str]:
         """
         根据项目ID获取聊天消息ID列表。
-
-        :param project_id: 会话唯一标识
+        
+        :param project_id: 会话唯一标识（None 表示默认工作空间）
         :return: 聊天消息ID列表
         """
         with DatabaseSession() as db:
-            message_ids = db.exec(
-                select(ChatMessage.message_id)
-                .where(ChatMessage.project_id == project_id)
-            ).all()
+            statement = select(ChatMessage.message_id)
+            if project_id is None:
+                statement = statement.where(ChatMessage.project_id.is_(None))
+            else:
+                statement = statement.where(ChatMessage.project_id == project_id)
+            message_ids = db.exec(statement).all()
             return [message_id for message_id, in message_ids]
 
     @classmethod
@@ -124,26 +127,28 @@ class HistoryService:
                 logger.info(f"删除聊天消息: {message_id}")
 
     @classmethod
-    def count(cls, project_id: str) -> int:
+    def count(cls, project_id: Optional[str]) -> int:
         """
         根据项目ID获取聊天消息数量。
-
-        :param project_id: 会话唯一标识
+        
+        :param project_id: 会话唯一标识（None 表示默认工作空间）
         :return: 聊天消息数量
         """
         with DatabaseSession() as db:
-            count = db.exec(
-                select(func.count(ChatMessage.index))
-                .where(ChatMessage.project_id == project_id)
-            ).first()
+            statement = select(func.count(ChatMessage.index))
+            if project_id is None:
+                statement = statement.where(ChatMessage.project_id.is_(None))
+            else:
+                statement = statement.where(ChatMessage.project_id == project_id)
+            count = db.exec(statement).first()
             return count
 
     @classmethod
-    def remove_by_index(cls, project_id: str, index: int = -1):
+    def remove_by_index(cls, project_id: Optional[str], index: int = -1):
         """
         根据项目ID和索引删除聊天消息。
-
-        :param project_id: 会话唯一标识
+        
+        :param project_id: 会话唯一标识（None 表示默认工作空间）
         :param index: 消息索引
         :return: None
         """
@@ -154,15 +159,19 @@ class HistoryService:
             cls.remove(message.message_id)
 
     @classmethod
-    def clear(cls, project_id: str) -> int:
+    def clear(cls, project_id: Optional[str]) -> int:
         """
         根据项目ID删除所有聊天消息。
-
-        :param project_id: 会话唯一标识
+        
+        :param project_id: 会话唯一标识（None 表示默认工作空间）
         :return: 删除的记录数
         """
         with DatabaseSession() as db:
-            statement = select(ChatMessage).where(ChatMessage.project_id == project_id)
+            statement = select(ChatMessage)
+            if project_id is None:
+                statement = statement.where(ChatMessage.project_id.is_(None))
+            else:
+                statement = statement.where(ChatMessage.project_id == project_id)
             messages = db.exec(statement).all()
             count = len(messages)
             for message in messages:

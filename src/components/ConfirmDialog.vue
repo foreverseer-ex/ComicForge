@@ -24,7 +24,7 @@
           <h3
             :class="[
               'text-base md:text-lg font-semibold', // 移动端使用更小的字体
-              isDark ? 'text-white' : 'text-gray-900'
+              titleColor || (isDark ? 'text-white' : 'text-gray-900')
             ]"
           >
             {{ title }}
@@ -38,7 +38,30 @@
             isDark ? 'text-gray-300' : 'text-gray-700'
           ]"
         >
-          <p class="text-sm">{{ message }}</p>
+          <!-- 警告图标（如果 type 为 danger） -->
+          <div v-if="type === 'danger'" class="text-center mb-4">
+            <svg class="w-12 h-12 mx-auto text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          
+          <!-- 消息内容 -->
+          <div v-if="message" class="text-sm mb-2">
+            <p v-if="typeof message === 'string'">{{ message }}</p>
+            <div v-else v-html="message"></div>
+          </div>
+          
+          <!-- 列表内容（如果提供了 items） -->
+          <div v-if="items && items.length > 0" class="mt-4">
+            <ul class="list-disc list-inside space-y-1">
+              <li v-for="(item, index) in items" :key="index">{{ item }}</li>
+            </ul>
+          </div>
+          
+          <!-- 警告文本（如果 type 为 danger） -->
+          <p v-if="type === 'danger' && warningText" class="text-sm text-red-600 font-bold text-center mt-4">
+            {{ warningText }}
+          </p>
         </div>
 
         <!-- 底部按钮 -->
@@ -64,9 +87,11 @@
             @click="handleConfirm"
             :class="[
               'px-4 py-2 rounded-lg font-medium transition-colors',
-              isDark
+              type === 'danger'
                 ? 'bg-red-600 hover:bg-red-700 text-white'
-                : 'bg-red-600 hover:bg-red-700 text-white'
+                : isDark
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
             ]"
           >
             {{ confirmText }}
@@ -87,12 +112,17 @@ interface Props {
   message: string
   confirmText?: string
   cancelText?: string
+  type?: 'default' | 'danger'  // 对话框类型
+  items?: string[]  // 列表项（用于显示操作将删除的内容）
+  warningText?: string  // 警告文本（用于 danger 类型）
+  titleColor?: string  // 标题颜色类
 }
 
 const props = withDefaults(defineProps<Props>(), {
   title: '确认',
   confirmText: '确定',
-  cancelText: '取消'
+  cancelText: '取消',
+  type: 'default'
 })
 
 const emit = defineEmits<{

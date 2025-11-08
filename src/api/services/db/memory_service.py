@@ -54,17 +54,21 @@ class MemoryService:
             return entry
 
     @classmethod
-    def get_all(cls, project_id: str, limit: Optional[int] = None, offset: int = 0) -> list[MemoryEntry]:
+    def get_all(cls, project_id: Optional[str], limit: Optional[int] = None, offset: int = 0) -> list[MemoryEntry]:
         """
         根据会话 ID 获取记忆条目列表。
         
-        :param project_id: 会话 ID
+        :param project_id: 会话 ID（None 表示默认工作空间）
         :param limit: 返回数量限制（None 表示无限制）
         :param offset: 跳过的记录数
         :return: 记忆条目列表
         """
         with DatabaseSession() as db:
-            statement = select(MemoryEntry).where(MemoryEntry.project_id == project_id).offset(offset)
+            # 如果 project_id 为 None，查询 project_id 为 None 的记录
+            if project_id is None:
+                statement = select(MemoryEntry).where(MemoryEntry.project_id.is_(None)).offset(offset)
+            else:
+                statement = select(MemoryEntry).where(MemoryEntry.project_id == project_id).offset(offset)
             if limit is not None:
                 statement = statement.limit(limit)
 
@@ -120,15 +124,19 @@ class MemoryService:
             return True
 
     @classmethod
-    def clear(cls, project_id: str) -> int:
+    def clear(cls, project_id: Optional[str]) -> int:
         """
         删除指定会话的所有记忆条目。
         
-        :param project_id: 项目ID
+        :param project_id: 项目ID（None 表示默认工作空间）
         :return: 删除的记录数
         """
         with DatabaseSession() as db:
-            statement = select(MemoryEntry).where(MemoryEntry.project_id == project_id)
+            # 如果 project_id 为 None，查询 project_id 为 None 的记录
+            if project_id is None:
+                statement = select(MemoryEntry).where(MemoryEntry.project_id.is_(None))
+            else:
+                statement = select(MemoryEntry).where(MemoryEntry.project_id == project_id)
             entries = db.exec(statement).all()
 
             count = len(entries)

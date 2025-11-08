@@ -18,32 +18,15 @@ class AbstractDrawService(ABC):
     """
     
     @abstractmethod
-    def draw(self, args: DrawArgs) -> str:
+    def draw(self, args: DrawArgs, batch_size: int = 1, name: str | None = None, desc: str | None = None) -> str:
         """
-        执行单次绘图。
+        批量创建绘图任务并启动监控。
         
         :param args: 绘图参数
-        :return: job_id（任务 ID）
-        """
-        raise NotImplementedError
-    
-    @abstractmethod
-    def draw_batch(self, args_list: list[DrawArgs]) -> str:
-        """
-        批量绘图。
-        
-        :param args_list: 绘图参数列表
+        :param batch_size: 批量大小
+        :param name: 任务名称（可选）
+        :param desc: 任务描述（可选）
         :return: batch_id（批次 ID）
-        """
-        raise NotImplementedError
-    
-    @abstractmethod
-    def get_batch_status(self, batch_id: str) -> dict[str, bool]:
-        """
-        获取批次状态。
-        
-        :param batch_id: 批次 ID
-        :return: 字典 {job_id: 是否完成}
         """
         raise NotImplementedError
     

@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional, Any
+import uuid
 
 from sqlalchemy import Column, JSON
 from sqlmodel import SQLModel, Field
@@ -47,10 +48,10 @@ class ChatMessage(SQLModel, table=True):
     继承自 ChatMessagePydantic，添加数据库 ID 字段。
     """
     message_id: Optional[str] = Field(
-        default=None,
+        default_factory=lambda: str(uuid.uuid4()),
         description="消息唯一标识",
         primary_key=True)
-    project_id: str = Field(description="会话唯一标识", index=True)
+    project_id: Optional[str] = Field(default=None, description="会话唯一标识（None 表示默认工作空间）", index=True)
     index: int = Field(description="消息索引",
                        index=True,
                        default=-1,
@@ -88,12 +89,12 @@ class ChatMessage(SQLModel, table=True):
                 "建议3",
         ]
         
-        # 例子2，图片建议：如果在任务中，调用了生成图片，而且不止一个，会产生多个图片建议
+        # 例子2，图片建议：如果在任务中，调用了生成图片任务，产生了多个图片，会产生多个图片建议
         # 选择即表示，接受该建议作为图片
         >>> [
-            "image:example1.png",
-            "image:example2.png",
-            "image:example3.png",
+            "job:{job-id1}",
+            "job:{job-id2}",
+            "job:{job-id3}",
             ...
         ]
         """,

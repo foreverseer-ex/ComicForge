@@ -75,10 +75,16 @@ async def download_file(
             
             logger.debug(f"下载文件成功: {save_path.name}")
             return True
-    except httpx.ConnectTimeout as e:
-        logger.exception(f"下载文件超时 {url}: {e}")
-        raise
-    except (httpx.HTTPError, IOError, OSError) as e:
+    except (httpx.TimeoutException, httpx.ConnectTimeout, httpx.ReadTimeout) as e:
+        logger.warning(f"下载文件超时（{timeout}秒）: {url}")
+        return False
+    except (httpx.ConnectError, httpx.HTTPError) as e:
+        logger.warning(f"下载文件连接错误: {url} - {e}")
+        return False
+    except (IOError, OSError) as e:
+        logger.exception(f"下载文件IO错误 {url}: {e}")
+        return False
+    except Exception as e:
         logger.exception(f"下载文件异常 {url}: {e}")
         return False
 

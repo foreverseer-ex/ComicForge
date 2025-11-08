@@ -163,40 +163,91 @@ class SdForgeDrawService(AbstractDrawService):
 
     # ========== 实现抽象接口 ==========
 
-    def draw(self, args: DrawArgs) -> str:
+    def draw(self, args: DrawArgs, batch_size: int = 1, name: str | None = None, desc: str | None = None) -> str:
         """
-        执行单次绘图。
+        批量创建绘图任务并启动监控。
         
         注意：如果指定了model和vae，会自动检查当前选项，如果不同则设置。
         model 和 vae 参数应该是 version_name，需要通过模型元数据服务查找对应的 SD-Forge title。
         
         :param args: 绘图参数（model 和 vae 是 version_name）
-        :return: job_id
+        :param batch_size: 批量大小
+        :param name: 任务名称（可选）
+        :param desc: 任务描述（可选）
+        :return: batch_id
         """
-        import uuid
         from api.services.model_meta import local_model_meta_service
+        from api.services.db import JobService, BatchJobService
+        from api.schemas.draw import Job, BatchJob
+        from datetime import datetime
+        from api.utils.path import jobs_home
+        import asyncio
         
-        job_id = str(uuid.uuid4())
+        job_ids = []
+        
+        # 创建 batch_size 个 job
+        draw_args_dict = args.model_dump(exclude_none=True)
+        if 'loras' not in draw_args_dict:
+            draw_args_dict['loras'] = {}
+        
+        for i in range(batch_size):
+            # 创建 Job 记录（ID 会自动生成）
+            job = Job(
+                name=name,
+                desc=desc,
+                created_at=datetime.now(),
+                status="pending",
+                draw_args=draw_args_dict,
+                data={}
+            )
+            job = JobService.create(job)
+            job_ids.append(job.job_id)
+            
+            # 启动后台任务：执行绘图并监控
+            asyncio.create_task(self._draw_and_monitor_job_async(job.job_id, args))
+        
+        # 创建 BatchJob 记录（ID 会自动生成）
+        batch_job = BatchJob(
+            job_ids=job_ids,
+            created_at=datetime.now()
+        )
+        batch_job = BatchJobService.create(batch_job)
+        
+        logger.success(f"批量创建任务完成: batch_id={batch_job.batch_id}, job_count={len(job_ids)}")
+        return batch_job.batch_id
+
+    async def _draw_and_monitor_job_async(self, job_id: str, args: DrawArgs) -> None:
+        """
+        执行绘图并监控任务（后台任务）。
+        
+        :param job_id: 本地 job_id（UUID）
+        :param args: 绘图参数
+        """
+        from api.services.model_meta import local_model_meta_service
+        from api.services.db import JobService
+        from api.utils.path import jobs_home
+        from datetime import datetime
         
         try:
+            # SD-Forge 是同步的，直接执行
+            # 注意：这里需要调用旧的同步 draw 方法，但我们需要重构它
+            # 暂时先使用旧的逻辑
+            
             # 如果指定了 model 或 vae，先检查当前选项，如果不同则设置
             if args.model or args.vae:
                 current_options = self._get_options()
                 need_update = False
                 update_kwargs = {}
                 
-                # 检查 model（通过 version_name 查找模型元数据，然后获取 filename，再匹配 SD-Forge 的 title）
+                # 检查 model
                 if args.model:
                     model_meta = local_model_meta_service.get_by_version_name(args.model)
                     if not model_meta:
                         raise RuntimeError(f"未找到模型元数据: {args.model}")
                     
-                    # 获取 SD-Forge 的模型列表，找到匹配的 title
                     sd_models = self._get_sd_models()
                     sd_model_title = None
                     for sd_model in sd_models:
-                        # SD-Forge 返回的 title 通常是 filename（不含扩展名）或类似的格式
-                        # 尝试匹配 filename stem
                         from pathlib import Path
                         sd_model_filename_stem = Path(sd_model.get('title', '')).stem
                         if Path(model_meta.filename).stem == sd_model_filename_stem:
@@ -208,39 +259,26 @@ class SdForgeDrawService(AbstractDrawService):
                     
                     current_model = current_options.get("sd_model_checkpoint", "")
                     if current_model != sd_model_title:
-                        logger.debug(f"当前模型 {current_model} 与请求模型 {sd_model_title} 不同，需要切换")
                         update_kwargs["sd_model_checkpoint"] = sd_model_title
                         need_update = True
                 
-                # 检查 vae（通过 version_name 查找模型元数据）
+                # 检查 vae
                 if args.vae:
                     vae_meta = local_model_meta_service.get_by_version_name(args.vae)
                     if not vae_meta:
                         raise RuntimeError(f"未找到 VAE 元数据: {args.vae}")
                     
-                    # SD-Forge 的 VAE 选项来自 options，通常直接使用 filename（不含扩展名）
-                    # 获取当前可用的 VAE 列表（从 options 中）
-                    # 注意：SD-Forge 的 VAE 选项通常是文件名，我们需要匹配
                     from pathlib import Path
                     vae_filename_stem = Path(vae_meta.filename).stem
-                    # SD-Forge 的 sd_vae 选项通常就是文件名（不含扩展名）
-                    # 如果 options 中有对应的 VAE，则使用它
                     current_vae = current_options.get("sd_vae", "")
-                    # 尝试匹配：如果当前 VAE 的 stem 与请求的 VAE stem 相同，则不需要切换
-                    # 否则，尝试设置新的 VAE（使用 filename stem）
                     if current_vae != vae_filename_stem:
-                        # 注意：SD-Forge 的 VAE 选项可能包含扩展名，也可能不包含
-                        # 这里我们尝试使用 stem，如果失败，SD-Forge 会使用默认 VAE
-                        logger.debug(f"当前VAE {current_vae} 与请求VAE {vae_filename_stem} 不同，尝试切换")
                         update_kwargs["sd_vae"] = vae_filename_stem
                         need_update = True
                 
-                # 如果需要更新，则设置选项
                 if need_update:
-                    logger.info(f"切换SD选项: {update_kwargs}")
                     self._set_options(**update_kwargs)
             
-            # 转换 LoRAs：将 version_name 转换为 SD-Forge 使用的文件名（不含扩展名）
+            # 转换 LoRAs
             loras_for_sd_forge: Dict[str, float] = {}
             if args.loras:
                 for lora_version_name, strength in args.loras.items():
@@ -248,7 +286,6 @@ class SdForgeDrawService(AbstractDrawService):
                     if not lora_meta:
                         logger.warning(f"未找到 LoRA 元数据: {lora_version_name}，跳过")
                         continue
-                    # SD-Forge 使用文件名（不含扩展名）作为 LoRA 标识符
                     from pathlib import Path
                     lora_filename_stem = Path(lora_meta.filename).stem
                     loras_for_sd_forge[lora_filename_stem] = strength
@@ -268,40 +305,25 @@ class SdForgeDrawService(AbstractDrawService):
                 save_images=True,
             )
             
-            # 存储结果
-            self._jobs[job_id] = {
-                "completed": True,
-                "result": result,
-            }
+            # 保存图片
+            images = result.get("images", [])
+            if images:
+                job_image_path = jobs_home / f"{job_id}.png"
+                import base64
+                import aiofiles
+                img_base64 = images[0]
+                img_bytes = base64.b64decode(img_base64)
+                job_image_path.parent.mkdir(parents=True, exist_ok=True)
+                async with aiofiles.open(job_image_path, 'wb') as f:
+                    await f.write(img_bytes)
+                logger.success(f"任务图像已保存: {job_id} -> {job_image_path}")
             
-            logger.success(f"SD-Forge 绘图完成: job_id={job_id}")
-            return job_id
+            # 标记任务完成
+            JobService.update(job_id, completed_at=datetime.now(), status="completed")
             
         except Exception as e:
-            logger.exception(f"SD-Forge 绘图失败: {e}")
-            self._jobs[job_id] = {
-                "completed": False,
-                "error": str(e),
-            }
-            raise
-
-    def draw_batch(self, args_list: list[DrawArgs]) -> str:
-        """
-        批量绘图（暂未实现）。
-        
-        :param args_list: 绘图参数列表
-        :return: batch_id
-        """
-        raise NotImplementedError("SD-Forge 批量绘图功能暂未实现")
-
-    def get_batch_status(self, batch_id: str) -> dict[str, bool]:
-        """
-        获取批次状态（暂未实现）。
-        
-        :param batch_id: 批次 ID
-        :return: 字典 {job_id: 是否完成}
-        """
-        raise NotImplementedError("SD-Forge 批量绘图功能暂未实现")
+            logger.exception(f"SD-Forge 绘图失败: job_id={job_id}, error={e}")
+            JobService.update(job_id, status="failed", completed_at=datetime.now())
 
     async def get_job_status(self, job_id: str) -> bool:
         """

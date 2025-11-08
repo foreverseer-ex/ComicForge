@@ -6,7 +6,6 @@
 
 from loguru import logger
 from sqlmodel import SQLModel, create_engine, Session
-from sqlalchemy import inspect, text
 
 # noqa 标记：这些导入是必需的，用于注册表到 SQLModel.metadata
 from api.schemas import *
@@ -23,71 +22,6 @@ engine = create_engine(
 )
 
 
-def _migrate_job_table() -> None:
-    """
-    迁移 job 表，添加新列（如果不存在）。
-    
-    这是一个简单的迁移函数，用于向后兼容。
-    """
-    inspector = inspect(engine)
-    
-    # 检查 job 表是否存在
-    if "job" not in inspector.get_table_names():
-        logger.debug("job 表不存在，将在 init_db 中创建")
-        return
-    
-    columns = [col["name"] for col in inspector.get_columns("job")]
-    has_changes = False
-    
-    # 添加 draw_args 列（如果不存在）
-    if "draw_args" not in columns:
-        logger.info("正在为 job 表添加 draw_args 列...")
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE job ADD COLUMN draw_args TEXT"))
-            conn.commit()
-        logger.success("已为 job 表添加 draw_args 列")
-        has_changes = True
-    
-    # 添加 name 列（如果不存在）
-    if "name" not in columns:
-        logger.info("正在为 job 表添加 name 列...")
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE job ADD COLUMN name TEXT"))
-            conn.commit()
-        logger.success("已为 job 表添加 name 列")
-        has_changes = True
-    
-    # 添加 desc 列（如果不存在）
-    if "desc" not in columns:
-        logger.info("正在为 job 表添加 desc 列...")
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE job ADD COLUMN desc TEXT"))
-            conn.commit()
-        logger.success("已为 job 表添加 desc 列")
-        has_changes = True
-    
-    # 添加 status 列（如果不存在）
-    if "status" not in columns:
-        logger.info("正在为 job 表添加 status 列...")
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE job ADD COLUMN status TEXT"))
-            conn.commit()
-        logger.success("已为 job 表添加 status 列")
-        has_changes = True
-    
-    # 添加 completed_at 列（如果不存在）
-    if "completed_at" not in columns:
-        logger.info("正在为 job 表添加 completed_at 列...")
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE job ADD COLUMN completed_at TIMESTAMP"))
-            conn.commit()
-        logger.success("已为 job 表添加 completed_at 列")
-        has_changes = True
-    
-    if not has_changes:
-        logger.debug("job 表已包含所有必要列，无需迁移")
-
-
 def init_db() -> None:
     """
     初始化数据库，创建所有表。
@@ -98,13 +32,8 @@ def init_db() -> None:
 
     # 创建所有表
     SQLModel.metadata.create_all(engine)
-    logger.success(f"数据库已初始化: {database_path}")
     
-    # 执行迁移
-    try:
-        _migrate_job_table()
-    except Exception as e:
-        logger.warning(f"数据库迁移失败（可能表已存在）: {e}")
+    logger.success(f"数据库已初始化: {database_path}")
 
 
 def drop_all_tables() -> None:

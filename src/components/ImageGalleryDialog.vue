@@ -288,9 +288,29 @@ const handleDownload = async () => {
     const link = document.createElement('a')
     link.href = blobUrl
     
-    // 从 URL 中提取文件名，如果没有则使用默认名称
-    const url = new URL(currentImageUrl.value)
-    const jobId = url.searchParams.get('job_id') || 'image'
+    // 从 jobIds 中获取 job_id，或者从 URL 中提取，如果都没有则使用默认名称
+    let jobId = 'image'
+    if (props.jobIds && props.jobIds.length > currentIndex.value) {
+      // 优先使用 jobIds 中的 job_id
+      jobId = props.jobIds[currentIndex.value]
+    } else {
+      // 尝试从 URL 中提取 job_id（仅当 URL 是有效的 HTTP URL 时）
+      try {
+        // 检查是否是 blob URL，blob URL 不能直接用 new URL() 构造
+        if (currentImageUrl.value.startsWith('blob:')) {
+          // blob URL，无法解析，使用默认名称或索引
+          jobId = `image_${currentIndex.value + 1}`
+        } else {
+          // 尝试解析为 URL
+          const url = new URL(currentImageUrl.value)
+          jobId = url.searchParams.get('job_id') || `image_${currentIndex.value + 1}`
+        }
+      } catch (urlError) {
+        // URL 解析失败，使用索引作为后备
+        jobId = `image_${currentIndex.value + 1}`
+      }
+    }
+    
     link.download = `job_${jobId}.png`
     
     document.body.appendChild(link)

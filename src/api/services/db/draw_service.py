@@ -51,7 +51,6 @@ class JobService:
             job = db.get(Job, job_id)
             if job:
                 db.expunge(job)
-                logger.debug(f"获取任务: {job_id}")
             else:
                 logger.warning(f"任务不存在: {job_id}")
         return job
@@ -63,10 +62,10 @@ class JobService:
         
         :param limit: 返回数量限制（None 表示无限制）
         :param offset: 跳过的记录数
-        :return: 任务列表
+        :return: 任务列表（按创建时间降序排列，新的在前）
         """
         with DatabaseSession() as db:
-            statement = select(Job).offset(offset)
+            statement = select(Job).order_by(Job.created_at.desc()).offset(offset)
             if limit is not None:
                 statement = statement.limit(limit)
             

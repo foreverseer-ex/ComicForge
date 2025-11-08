@@ -30,6 +30,22 @@
             {{ versionName }}
           </h2>
           <div class="flex items-center gap-2">
+            <!-- 重置按钮 -->
+            <button
+              @click.stop="handleReset"
+              :disabled="resetting"
+              :class="[
+                'p-2 rounded-lg transition-colors',
+                resetting
+                  ? 'opacity-50 cursor-not-allowed'
+                  : isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'
+              ]"
+              title="重置：从 Civitai 重新下载元数据和图像"
+            >
+              <ArrowPathIcon v-if="!resetting" class="w-5 h-5" />
+              <div v-else class="animate-spin rounded-full h-5 w-5 border-b-2" 
+                   :class="isDark ? 'border-blue-400' : 'border-blue-600'"></div>
+            </button>
             <!-- 隐私模式开关 -->
             <button
               @click.stop="togglePrivacyMode"
@@ -344,6 +360,18 @@
       :visible="showImageGallery"
       @close="showImageGallery = false"
     />
+    
+    <!-- 确认对话框 -->
+    <ConfirmDialog
+      :show="confirmDialog.show"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :type="confirmDialog.type"
+      :items="confirmDialog.items"
+      :warning-text="confirmDialog.warningText"
+      @confirm="confirmDialog.onConfirm"
+      @cancel="confirmDialog.show = false"
+    />
   </Teleport>
 </template>
 
@@ -360,12 +388,15 @@ import {
   InformationCircleIcon,
   ClipboardIcon,
   EyeIcon,
-  EyeSlashIcon
+  EyeSlashIcon,
+  ArrowPathIcon
 } from '@heroicons/vue/24/outline'
 import { getImageUrl } from '../utils/imageUtils'
 import { showToast } from '../utils/toast'
+import api from '../api'
 import ModelParamsDialog from './ModelParamsDialog.vue'
 import ImageGalleryDialog from './ImageGalleryDialog.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 
 interface ModelMeta {
   model_id: number
@@ -396,6 +427,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'toggle-privacy-mode'): void
+  (e: 'model-updated'): void  // 模型更新后触发，用于刷新列表
 }>()
 
 const themeStore = useThemeStore()
@@ -417,6 +449,17 @@ const versionName = computed(() => {
 const currentExampleIndex = ref(0)
 const showParamsDialog = ref(false)
 const showImageGallery = ref(false)
+
+// 确认对话框状态
+const confirmDialog = ref({
+  show: false,
+  title: '',
+  message: '',
+  type: 'default' as 'default' | 'danger',
+  items: [] as string[],
+  warningText: '',
+  onConfirm: () => {}
+})
 
 // 计算example数量
 const exampleCount = computed(() => {
@@ -643,6 +686,51 @@ const close = () => {
 // 切换隐私模式
 const togglePrivacyMode = () => {
   emit('toggle-privacy-mode')
+}
+
+// 重置模型元数据
+const resetting = ref(false)
+const handleReset = () => {
+  if (!props.model || resetting.value) return
+  
+  confirmDialog.value = {
+    show: true,
+    title: '确认重置',
+    message: '确定要重置此模型的元数据吗？',
+    type: 'default',
+    items: ['将从 Civitai 重新下载元数据', '将重新下载所有示例图像'],
+    warningText: '',
+    onConfirm: async () => {
+      confirmDialog.value.show = false
+      resetting.value = true
+      try {
+        showToast('正在重置模型元数据...', 'info')
+        
+        // 调用重置 API
+        const response = await api.post(`/model-meta/${props.model!.version_id}/reset`, null, {
+          params: {
+            parallel_download: false  // 串行下载，避免并发过多
+          }
+        })
+        
+        if (response.success) {
+          showToast(`重置成功：${response.model_name}`, 'success')
+          // 触发模型更新事件，让父组件刷新模型列表
+          emit('model-updated')
+          // 关闭对话框，让用户重新打开查看更新后的数据
+          close()
+        } else {
+          throw new Error('重置失败')
+        }
+      } catch (error: any) {
+        console.error('重置模型失败:', error)
+        const errorMsg = error.response?.data?.detail || error.message || '重置失败，请重试'
+        showToast(errorMsg, 'error')
+      } finally {
+        resetting.value = false
+      }
+    }
+  }
 }
 </script>
 

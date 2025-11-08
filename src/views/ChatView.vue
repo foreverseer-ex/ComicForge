@@ -14,9 +14,9 @@
             'text-lg font-semibold truncate',
             isDark ? 'text-gray-100' : 'text-gray-900'
           ]"
-          :title="selectedProject?.title || '未选择项目'"
+          :title="selectedProject?.title || '默认工作空间'"
         >
-          {{ selectedProject?.title || '未选择项目' }}
+          {{ selectedProject?.title || '默认工作空间' }}
         </h1>
         <span 
           v-if="selectedProject"
@@ -32,10 +32,10 @@
       <!-- 右侧：清空按钮 -->
       <button
         @click="showClearHistoryDialog = true"
-        :disabled="!selectedProjectId || loadingHistory"
+        :disabled="loadingHistory"
         :class="[
           'px-4 py-2 rounded-lg transition-colors text-sm flex-shrink-0',
-          selectedProjectId && !loadingHistory
+          !loadingHistory
             ? isDark
               ? 'bg-gray-700 hover:bg-gray-600 text-white'
               : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
@@ -521,24 +521,24 @@
           ref="inputRef"
           v-model="inputText"
           @keydown="handleKeydown"
-          :disabled="!selectedProjectId || isStreaming"
-          :placeholder="selectedProjectId ? '输入消息...（按 Enter 发送，Shift+Enter 换行）' : '请先选择一个项目'"
+          :disabled="isStreaming"
+          placeholder="输入消息...（按 Enter 发送，Shift+Enter 换行）"
           :class="[
             'flex-1 px-4 py-2 rounded-lg border resize-none focus:outline-none focus:ring-2 focus:ring-blue-500',
             isDark
               ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
               : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500',
-            (!selectedProjectId || isStreaming) ? 'opacity-50 cursor-not-allowed' : ''
+            isStreaming ? 'opacity-50 cursor-not-allowed' : ''
           ]"
           rows="1"
           style="min-height: 40px; max-height: 200px;"
         ></textarea>
         <button
           @click="sendMessage"
-          :disabled="!selectedProjectId || !inputText.trim() || isStreaming"
+          :disabled="!inputText.trim() || isStreaming"
           :class="[
             'px-6 py-2 rounded-lg font-medium transition-colors',
-            selectedProjectId && inputText.trim() && !isStreaming
+            inputText.trim() && !isStreaming
               ? 'bg-blue-600 hover:bg-blue-700 text-white'
               : isDark
                 ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -629,23 +629,103 @@ const toolExpandState = ref<Record<string, Record<number, boolean>>>({})
 // 工具调用显示模式：messageId -> toolIndex -> { args: 'rendered'|'raw', result: 'rendered'|'raw' }
 const toolDisplayMode = ref<Record<string, Record<number, { args: 'rendered' | 'raw', result: 'rendered' | 'raw' }>>>({})
 
-// 加载历史记录
-const loadHistory = async () => {
-  if (!selectedProjectId.value) {
-    messages.value = []
+// 比较两条消息是否相同（用于差异刷新）
+const areMessagesEqual = (msg1: ChatMessage, msg2: ChatMessage): boolean => {
+  return (
+    msg1.message_id === msg2.message_id &&
+    msg1.context === msg2.context &&
+    msg1.status === msg2.status &&
+    JSON.stringify(msg1.tools) === JSON.stringify(msg2.tools) &&
+    JSON.stringify(msg1.suggests) === JSON.stringify(msg2.suggests) &&
+    msg1.role === msg2.role &&
+    msg1.message_type === msg2.message_type
+  )
+}
+
+// 智能合并消息列表：只更新有变化的项，保持未变化项的引用不变
+const mergeMessages = (oldMessages: ChatMessage[], newMessages: ChatMessage[]): ChatMessage[] => {
+  // 如果长度不同，直接返回新列表
+  if (oldMessages.length !== newMessages.length) {
+    return newMessages
+  }
+  
+  // 检查是否有临时消息需要替换
+  const hasTempMessages = oldMessages.some(msg => 
+    msg.message_id.startsWith('temp-') || msg.message_id.startsWith('streaming-')
+  )
+  
+  if (hasTempMessages) {
+    // 有临时消息，需要替换整个列表
+    return newMessages
+  }
+  
+  // 逐个比较并合并
+  let hasChanges = false
+  const mergedMessages: ChatMessage[] = []
+  
+  for (let i = 0; i < oldMessages.length; i++) {
+    const oldMsg = oldMessages[i]
+    const newMsg = newMessages[i]
+    
+    if (areMessagesEqual(oldMsg, newMsg)) {
+      // 内容相同，保持原对象引用（避免Vue重新渲染）
+      mergedMessages.push(oldMsg)
+    } else {
+      // 内容不同，使用新对象
+      mergedMessages.push(newMsg)
+      hasChanges = true
+    }
+  }
+  
+  // 如果没有任何变化，返回原数组（保持引用不变）
+  if (!hasChanges) {
+    return oldMessages
+  }
+  
+  return mergedMessages
+}
+
+// 加载历史记录（支持差异刷新）
+const loadHistory = async (forceReload: boolean = false) => {
+  if (selectedProjectId.value === undefined) {
     return
   }
-
-  loadingHistory.value = true
+  
+  // 如果强制重新加载，显示 loading
+  if (forceReload) {
+    loadingHistory.value = true
+  }
+  
   try {
     const loadedMessages = await api.get('/history/all', {
-      params: { project_id: selectedProjectId.value }
+      params: { project_id: selectedProjectId.value || null }
     })
+    
     // 为每条历史消息添加稳定的 _internalKey
-    messages.value = loadedMessages.map((msg: ChatMessage) => ({
+    const newMessages = loadedMessages.map((msg: ChatMessage) => ({
       ...msg,
       _internalKey: msg._internalKey || `loaded-${msg.message_id}`
     }))
+    
+    // 差异刷新：智能合并消息列表
+    if (!forceReload && messages.value.length > 0) {
+      const mergedMessages = mergeMessages(messages.value, newMessages)
+      
+      // 如果合并后的数组引用与原数组相同，说明没有任何变化，不更新UI
+      if (mergedMessages === messages.value) {
+        if (loadingHistory.value) {
+          loadingHistory.value = false
+        }
+        return
+      }
+      
+      // 有变化，更新消息列表
+      messages.value = mergedMessages
+    } else {
+      // 强制重新加载或首次加载，直接替换
+      messages.value = newMessages
+    }
+    
     // 滚动到底部
     nextTick(() => {
       scrollToBottom()
@@ -659,7 +739,7 @@ const loadHistory = async () => {
 
 // 发送消息
 const sendMessage = async () => {
-  if (!selectedProjectId.value || !inputText.value.trim() || isStreaming.value) {
+  if (!inputText.value.trim() || isStreaming.value) {
     return
   }
 
@@ -676,7 +756,7 @@ const sendMessage = async () => {
   const userInternalKey = `user-${Date.now()}-${Math.random()}`
   const userMessage: ChatMessage = {
     message_id: `temp-${Date.now()}`,
-    project_id: selectedProjectId.value,
+    project_id: selectedProjectId.value || null,
     role: 'user',
     context: message,
     status: 'ready',
@@ -694,7 +774,7 @@ const sendMessage = async () => {
   const assistantInternalKey = `assistant-${Date.now()}-${Math.random()}`
   currentAssistantMessage = {
     message_id: `streaming-${Date.now()}`,
-    project_id: selectedProjectId.value,
+    project_id: selectedProjectId.value || null,
     role: 'assistant',
     context: '',
     status: 'thinking',
@@ -717,7 +797,7 @@ const sendMessage = async () => {
       },
       body: JSON.stringify({
         message: message,
-        project_id: selectedProjectId.value
+        project_id: selectedProjectId.value || null
       })
     })
 
@@ -785,11 +865,14 @@ const sendMessage = async () => {
       currentAssistantMessage.status = 'error'
       currentAssistantMessage.context = `错误: ${error.message || '发送失败'}`
     }
+    // 发生错误时，强制重新加载以确保数据同步
+    await loadHistory(true)
   } finally {
     isStreaming.value = false
     currentEventSource = null
-    // 重新加载历史记录以获取最新数据
-    await loadHistory()
+    // 流式传输成功完成后，使用差异刷新（不显示 loading）
+    // 只在数据有变化时才更新 UI，避免屏闪
+    await loadHistory(false)
   }
 }
 
@@ -1200,7 +1283,7 @@ const cancelEdit = () => {
 
 // 确认重新开始（使用编辑后的内容）
 const confirmRestart = async () => {
-  if (!selectedProjectId.value || !editingMessageId.value) return
+  if (!editingMessageId.value) return
   
   const editedText = editingText.value.trim()
   if (!editedText) {
@@ -1231,8 +1314,8 @@ const confirmRestart = async () => {
       }
     }
 
-    // 重新加载历史记录
-    await loadHistory()
+    // 重新加载历史记录（删除消息后需要强制重新加载）
+    await loadHistory(true)
 
     // 等待一下确保历史记录已更新
     await nextTick()
@@ -1250,13 +1333,11 @@ const confirmRestart = async () => {
 
 // 确认清空历史
 const confirmClearHistory = async () => {
-  if (!selectedProjectId.value) return
-  
   showClearHistoryDialog.value = false
 
   try {
     await api.delete('/history/clear', {
-      params: { project_id: selectedProjectId.value }
+      params: { project_id: selectedProjectId.value || null }
     })
     messages.value = []
   } catch (error) {

@@ -630,7 +630,7 @@
       :show="showGenerateDialog"
       :actor-name="actor?.name || ''"
       :actor-id="actor?.actor_id || ''"
-      :project-id="actor?.project_id || ''"
+      :project-id="actor?.project_id || null"
       :actor-desc="actor?.desc"
       :actor-tags="actor?.tags"
       @close="showGenerateDialog = false"
@@ -650,6 +650,18 @@
       :initial-index="currentExampleIndex"
       :visible="showImageGallery"
       @close="showImageGallery = false"
+    />
+    
+    <!-- 确认对话框 -->
+    <ConfirmDialog
+      :show="confirmDialog.show"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :type="confirmDialog.type"
+      :items="confirmDialog.items"
+      :warning-text="confirmDialog.warningText"
+      @confirm="confirmDialog.onConfirm"
+      @cancel="confirmDialog.show = false"
     />
   </Teleport>
 </template>
@@ -674,6 +686,7 @@ import { getApiBaseURL } from '../utils/apiConfig'
 import GeneratePortraitDialog from './GeneratePortraitDialog.vue'
 import ModelParamsDialog from './ModelParamsDialog.vue'
 import ImageGalleryDialog from './ImageGalleryDialog.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import { showToast } from '../utils/toast'
 
 interface Actor {
@@ -748,6 +761,17 @@ const exampleCount = computed(() => props.actor?.examples?.length || 0)
 const currentExampleIndex = ref(0)
 const showParamsDialog = ref(false)
 const showImageGallery = ref(false)
+
+// 确认对话框状态
+const confirmDialog = ref({
+  show: false,
+  title: '',
+  message: '',
+  type: 'default' as 'default' | 'danger',
+  items: [] as string[],
+  warningText: '',
+  onConfirm: () => {}
+})
 
 // 当前example
 const currentExample = computed(() => {
@@ -1285,80 +1309,92 @@ const deleteExample = async () => {
 }
 
 // 清空所有立绘
-const clearAllExamples = async () => {
+const clearAllExamples = () => {
   if (!props.actor) return
   
-  // 确认对话框
-  if (!confirm('确定要清空所有立绘吗？此操作不可撤销。')) {
-    return
-  }
-  
-  try {
-    await api.delete(`/actor/${props.actor.actor_id}/examples/clear`, {
-      params: {
-        project_id: props.actor.project_id
+  confirmDialog.value = {
+    show: true,
+    title: '确认清空',
+    message: '确定要清空所有立绘吗？',
+    type: 'danger',
+    items: [],
+    warningText: '此操作不可撤销。',
+    onConfirm: async () => {
+      confirmDialog.value.show = false
+      try {
+        await api.delete(`/actor/${props.actor!.actor_id}/examples/clear`, {
+          params: {
+            project_id: props.actor!.project_id
+          }
+        })
+        
+        showToast('已清空所有立绘', 'success')
+        emit('refresh')
+      } catch (error: any) {
+        console.error('清空立绘失败:', error)
+        showToast('清空立绘失败: ' + (error.response?.data?.detail || error.message), 'error')
       }
-    })
-    
-    showToast('已清空所有立绘', 'success')
-    emit('refresh')
-  } catch (error: any) {
-    console.error('清空立绘失败:', error)
-    showToast('清空立绘失败: ' + (error.response?.data?.detail || error.message), 'error')
+    }
   }
 }
 
 // 删除其他立绘（保留当前立绘）
-const deleteOtherExamples = async () => {
+const deleteOtherExamples = () => {
   if (!props.actor || contextMenu.value.index === -1) return
   
-  // 确认对话框
-  if (!confirm('确定要删除除当前立绘外的所有其他立绘吗？此操作不可撤销。')) {
-    return
-  }
-  
-  try {
-    const currentIndex = contextMenu.value.index
-    
-    // 如果当前立绘不是 index=0，先将其移动到 index=0
-    if (currentIndex !== 0) {
-      await api.post(`/actor/${props.actor.actor_id}/example/swap`, null, {
-        params: {
-          index1: 0,
-          index2: currentIndex,
-          project_id: props.actor.project_id
+  confirmDialog.value = {
+    show: true,
+    title: '确认删除',
+    message: '确定要删除除当前立绘外的所有其他立绘吗？',
+    type: 'danger',
+    items: [],
+    warningText: '此操作不可撤销。',
+    onConfirm: async () => {
+      confirmDialog.value.show = false
+      try {
+        const currentIndex = contextMenu.value.index
+        
+        // 如果当前立绘不是 index=0，先将其移动到 index=0
+        if (currentIndex !== 0) {
+          await api.post(`/actor/${props.actor!.actor_id}/example/swap`, null, {
+            params: {
+              index1: 0,
+              index2: currentIndex,
+              project_id: props.actor!.project_id
+            }
+          })
         }
-      })
-    }
-    
-    // 计算要删除的索引列表（除了 index=0 之外的所有索引）
-    // 需要先刷新 actor 数据以获取最新的 examples 列表
-    const updatedActor = await api.get(`/actor/${props.actor.actor_id}`)
-    const totalCount = updatedActor.examples?.length || 0
-    
-    if (totalCount <= 1) {
-      showToast('没有其他立绘需要删除', 'info')
-      contextMenu.value.show = false
-      return
-    }
-    
-    // 要删除的索引：从 1 到 totalCount-1
-    const indicesToDelete = Array.from({ length: totalCount - 1 }, (_, i) => i + 1)
-    
-    // 批量删除
-    await api.post(`/actor/${props.actor.actor_id}/examples/batch-remove`, indicesToDelete, {
-      params: {
-        project_id: props.actor.project_id
+        
+        // 计算要删除的索引列表（除了 index=0 之外的所有索引）
+        // 需要先刷新 actor 数据以获取最新的 examples 列表
+        const updatedActor = await api.get(`/actor/${props.actor!.actor_id}`)
+        const totalCount = updatedActor.examples?.length || 0
+        
+        if (totalCount <= 1) {
+          showToast('没有其他立绘需要删除', 'info')
+          contextMenu.value.show = false
+          return
+        }
+        
+        // 要删除的索引：从 1 到 totalCount-1
+        const indicesToDelete = Array.from({ length: totalCount - 1 }, (_, i) => i + 1)
+        
+        // 批量删除
+        await api.post(`/actor/${props.actor!.actor_id}/examples/batch-remove`, indicesToDelete, {
+          params: {
+            project_id: props.actor!.project_id
+          }
+        })
+        
+        showToast('已删除其他立绘', 'success')
+        contextMenu.value.show = false
+        emit('refresh')
+      } catch (error: any) {
+        console.error('删除其他立绘失败:', error)
+        showToast('删除其他立绘失败: ' + (error.response?.data?.detail || error.message), 'error')
+        contextMenu.value.show = false
       }
-    })
-    
-    showToast('已删除其他立绘', 'success')
-    contextMenu.value.show = false
-    emit('refresh')
-  } catch (error: any) {
-    console.error('删除其他立绘失败:', error)
-    showToast('删除其他立绘失败: ' + (error.response?.data?.detail || error.message), 'error')
-    contextMenu.value.show = false
+    }
   }
 }
 

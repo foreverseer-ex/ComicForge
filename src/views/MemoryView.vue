@@ -20,7 +20,7 @@
           记忆管理
         </h1>
       </div>
-      <div v-if="selectedProjectId" class="flex items-center gap-2">
+      <div class="flex items-center gap-2">
         <button
           v-if="memories.length > 0"
           @click="selectedMemoryIds.size > 0 ? handleDeleteSelected() : handleClearAll()"
@@ -51,43 +51,9 @@
 
     <!-- 内容区域 -->
     <div>
-      <!-- 无项目状态 -->
-      <div 
-        v-if="!selectedProjectId"
-        class="h-full flex items-center justify-center"
-      >
-        <div class="text-center">
-          <svg 
-            class="w-16 h-16 mx-auto mb-4"
-            :class="isDark ? 'text-gray-600' : 'text-gray-400'"
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <h3 
-            :class="[
-              'text-lg font-semibold mb-2',
-              isDark ? 'text-gray-300' : 'text-gray-700'
-            ]"
-          >
-            请先创建一个项目
-          </h3>
-          <p 
-            :class="[
-              'text-sm',
-              isDark ? 'text-gray-500' : 'text-gray-500'
-            ]"
-          >
-            在主页创建项目后，才能管理记忆
-          </p>
-        </div>
-      </div>
-
       <!-- 加载状态 -->
       <div 
-        v-else-if="loading"
+        v-if="loading"
         class="flex justify-center items-center py-12"
       >
         <div class="text-center">
@@ -608,16 +574,12 @@ const loadPredefinedKeys = async () => {
 
 // 加载记忆列表
 const loadMemories = async () => {
-  if (!selectedProjectId.value) {
-    memories.value = []
-    return
-  }
-
   loading.value = true
   try {
     const data = await api.get('/memory/all', {
       params: {
-        project_id: selectedProjectId.value
+        project_id: selectedProjectId.value || null,
+        limit: 1000
       }
     })
     memories.value = data || []
@@ -677,7 +639,7 @@ const editMemory = (memory: MemoryEntry) => {
 
 // 保存记忆
 const saveMemory = async () => {
-  if (!selectedProjectId.value || !memoryForm.value.key.trim() || !memoryForm.value.value.trim()) {
+  if (!memoryForm.value.key.trim() || !memoryForm.value.value.trim()) {
     return
   }
 
@@ -691,9 +653,9 @@ const saveMemory = async () => {
         description: memoryForm.value.description.trim() || null
       })
     } else {
-      // 创建记忆
+      // 创建记忆（如果没有项目，使用 null 作为 project_id）
       await api.post('/memory/create', {
-        project_id: selectedProjectId.value,
+        project_id: selectedProjectId.value || null,
         key: memoryForm.value.key.trim(),
         value: memoryForm.value.value.trim(),
         description: memoryForm.value.description.trim() || null
@@ -800,15 +762,11 @@ const handleClearAll = () => {
     message: `即将清空当前项目的所有记忆条目（共 ${memories.value.length} 条）\n\n⚠️ 此操作不可恢复，所有记忆将被永久删除！`,
     onConfirm: async () => {
       confirmDialog.value.show = false
-      if (!selectedProjectId.value) {
-        return
-      }
-
       clearing.value = true
       try {
-        const result = await api.post('/memory/clear', null, {
+        const result = await api.delete('/memory/clear', {
           params: {
-            project_id: selectedProjectId.value
+            project_id: selectedProjectId.value || null
           }
         })
         

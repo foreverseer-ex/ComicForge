@@ -10,9 +10,9 @@ from api.components.desperate.async_media import AsyncMedia
 from api.components.desperate.detail_view import DetailView
 from api.components.desperate.detail_dialog import create_copyable_text
 from api.constants.ui import (
-    THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT,  # 向后兼容的默认值
-    SPACING_MEDIUM,  # 向后兼容的默认值
-    LOADING_SIZE_MEDIUM,  # 向后兼容的默认值
+    THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT,
+    SPACING_MEDIUM,
+    LOADING_SIZE_MEDIUM,
 )
 from api.utils.responsive import ResponsiveHelper, get_responsive_helper
 

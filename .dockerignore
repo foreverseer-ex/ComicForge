@@ -1,0 +1,58 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+dist
+build
+.venv
+venv
+env
+ENV
+
+# Node
+node_modules
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+.pnpm-store
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# 测试和文档
+tests
+docs
+*.md
+!README.md
+
+# 构建产物
+dist
+dev-dist
+*.log
+
+# 数据目录（会在运行时挂载）
+storage
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# 其他
+.DS_Store
+*.bak
+*.tmp
+
+

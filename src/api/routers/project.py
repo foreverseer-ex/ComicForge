@@ -5,7 +5,6 @@
 维护项目基本信息：项目位置、project_id等。
 依赖配置（SD后端、LLM后端）使用 settings 模块。
 """
-import uuid
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException
@@ -47,26 +46,26 @@ async def create_project(
     - 依赖配置从 settings 模块读取
     """
     # 生成唯一项目ID
-    project_id = str(uuid.uuid4())
-    
-    # 创建项目路径
-    project_path = str(project_home / project_id)
-
-    # 创建项目对象
+    # 创建项目对象（ID 会自动生成）
     project = Project(
-        project_id=project_id,
         title=title,
         novel_path=novel_path,
-        project_path=project_path,
+        project_path="",  # 先创建空路径，创建后再设置
         created_at=datetime.now(),
         updated_at=datetime.now(),
     )
     
     # 保存到数据库
-    ProjectService.create(project)
-    logger.info(f"创建项目: {project_id}, 标题: {title}")
+    project = ProjectService.create(project)
     
-    return {"project_id": project_id}
+    # 创建项目路径（使用生成的 project_id）
+    project_path = str(project_home / project.project_id)
+    project.project_path = project_path
+    project = ProjectService.update(project.project_id, project_path=project_path)
+    
+    logger.info(f"创建项目: {project.project_id}, 标题: {title}")
+    
+    return {"project_id": project.project_id}
 
 
 @router.get("/all", response_model=List[Project], summary="列出所有项目")

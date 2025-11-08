@@ -74,14 +74,14 @@
                 <button
                   @click="copyJobId"
                   :class="[
-                    'px-3 py-2 rounded border transition-colors text-sm font-medium',
+                    'p-2 rounded-lg transition-colors',
                     isDark
-                      ? 'border-gray-600 bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                      ? 'hover:bg-gray-700 text-gray-300'
+                      : 'hover:bg-gray-100 text-gray-600'
                   ]"
                   title="复制 Job ID"
                 >
-                  复制
+                  <ClipboardIcon class="w-5 h-5" />
                 </button>
               </div>
             </div>
@@ -168,11 +168,11 @@
             </div>
 
             <!-- LoRA 配置 -->
-            <div v-if="params.loras && Object.keys(params.loras).length > 0">
+            <div v-if="params.loras !== undefined && params.loras !== null">
               <label :class="['block text-sm font-semibold mb-2', isDark ? 'text-gray-300' : 'text-gray-700']">
                 LoRA 配置
               </label>
-              <div class="space-y-2">
+              <div v-if="params.loras && Object.keys(params.loras).length > 0" class="space-y-2">
                 <div
                   v-for="(weight, name) in params.loras"
                   :key="name"
@@ -183,6 +183,9 @@
                     <span :class="['text-sm font-semibold', isDark ? 'text-gray-400' : 'text-gray-600']">{{ weight }}</span>
                   </div>
                 </div>
+              </div>
+              <div v-else :class="['px-3 py-2 rounded border', isDark ? 'bg-gray-700 border-gray-600 text-gray-400' : 'bg-gray-50 border-gray-300 text-gray-500']">
+                <span class="text-sm">无 LoRA</span>
               </div>
             </div>
           </div>
@@ -203,7 +206,7 @@ export interface DrawParams {
   prompt?: string
   negative_prompt?: string
   sampler?: string
-  sampler_name?: string  // 兼容不同的字段名
+  sampler_name?: string
   steps?: number
   cfg_scale?: number
   seed?: number

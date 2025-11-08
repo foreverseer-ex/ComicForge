@@ -6,9 +6,7 @@
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from pathlib import Path
 import httpx
-import asyncio
 from loguru import logger
 
 from api.services.db import JobService, BatchJobService
@@ -79,79 +77,12 @@ async def get_loras() -> List[Dict[str, Any]]:
 
 # ==================== 图像生成 ====================
 
-async def _monitor_job_and_save_image(job_id: str):
-    """
-    监控 job 状态，完成后保存图片到 jobs/{job_id}.png。
-    
-    这是一个后台任务函数，会轮询检查 job 状态，直到完成或超时。
-    """
-    from api.services.draw import get_current_draw_service
-    from api.settings import app_settings
-    from api.services.db import JobService
-    from datetime import datetime
-    
-    # 获取当前绘图服务
-    draw_service = get_current_draw_service()
-    
-    # 根据后端类型设置超时时间
-    backend = app_settings.draw.backend
-    if backend == "civitai":
-        # Civitai 超时时间（秒），从配置中读取
-        timeout_seconds = app_settings.civitai.draw_timeout
-        max_attempts = int(timeout_seconds)  # 每秒检查一次
-    else:
-        # SD-Forge 默认超时时间：5分钟
-        max_attempts = 300
-    
-    attempt = 0
-    last_error = None
-    
-    while attempt < max_attempts:
-        try:
-            # 检查 job 状态（异步）
-            is_complete = await draw_service.get_job_status(job_id)
-            
-            if is_complete:
-                # Job 已完成，设置完成时间和状态
-                job = JobService.get(job_id)
-                if job and job.completed_at is None:
-                    JobService.update(job_id, completed_at=datetime.now(), status="completed")
-                
-                # 保存图片到 jobs/{job_id}.png
-                job_image_path = jobs_home / f"{job_id}.png"
-                try:
-                    await draw_service.save_image(job_id, job_image_path)
-                    logger.success(f"任务图像已保存: {job_id} -> {job_image_path}")
-                    return
-                except Exception as save_error:
-                    # 保存图片失败，记录为失败状态，但设置完成时间
-                    error_message = f"保存图片失败: {str(save_error)}"
-                    JobService.update(job_id, completed_at=datetime.now(), status="failed")
-                    logger.error(f"保存图片失败: job_id={job_id}, error={save_error}")
-                    return
-            
-            # Job 未完成，等待 1 秒后重试
-            await asyncio.sleep(1)
-            attempt += 1
-            
-        except Exception as e:
-            logger.exception(f"监控任务出错 (attempt {attempt}): {e}")
-            last_error = e
-            await asyncio.sleep(1)
-            attempt += 1
-    
-    # 超时或失败，设置完成时间和失败状态
-    error_message = f"任务超时或失败: {str(last_error) if last_error else '超时'} (尝试了 {attempt} 次)"
-    JobService.update(job_id, completed_at=datetime.now(), status="failed")
-    logger.error(f"监控任务超时/失败: job_id={job_id}, attempt={attempt}, error={last_error}")
-
-
 @router.post("", summary="创建绘图任务（文生图）")
-async def create_draw_job(
+async def create_draw(
     model: str,
     prompt: str,
     negative_prompt: str = "",
-    loras: Optional[Dict[str, float] | str] = None,  # 可以是字典或 JSON 字符串
+    loras: Optional[Dict[str, float] | str] = None,
     seed: int = -1,
     sampler_name: str = "DPM++ 2M Karras",
     steps: int = 30,
@@ -162,57 +93,46 @@ async def create_draw_job(
     vae: Optional[str] = None,
     name: Optional[str] = None,
     desc: Optional[str] = None,
-    batch_size: int = 1,  # 批量大小，默认1（单个任务）
-) -> Dict[str, Any]:
+    batch_size: int = 1,
+) -> str:
     """
     创建绘图任务（文生图），返回 batch_id。
     
-    注意：如果使用的是SD-Forge后端，会自动检查并设置model和vae选项。
-    
     Args:
-        model: SD模型名称（查询参数）
-        prompt: 正向提示词（查询参数）
-        negative_prompt: 负向提示词（查询参数）
-        loras: LoRA 配置 {name: weight}（查询参数）
-        seed: 随机种子（-1 表示随机，查询参数）
-        sampler_name: 采样器名称（查询参数）
-        steps: 采样步数（查询参数）
-        cfg_scale: CFG Scale（查询参数）
-        width: 图像宽度（查询参数）
-        height: 图像高度（查询参数）
-        clip_skip: CLIP skip（查询参数）
-        vae: VAE 模型（查询参数）
-        name: 任务名称（查询参数，可选）
-        desc: 任务描述（查询参数，可选）
-        batch_size: 批量大小（查询参数，1-16，默认1）
+        model: SD模型名称
+        prompt: 正向提示词
+        negative_prompt: 负向提示词
+        loras: LoRA 配置 {name: weight}
+        seed: 随机种子（-1 表示随机）
+        sampler_name: 采样器名称
+        steps: 采样步数
+        cfg_scale: CFG Scale
+        width: 图像宽度
+        height: 图像高度
+        clip_skip: CLIP skip
+        vae: VAE 模型
+        name: 任务名称（可选）
+        desc: 任务描述（可选）
+        batch_size: 批量大小（1-16，默认1）
     
     Returns:
-        包含 batch_id 和 job_ids 列表的字典
-    
-    实现要点：
-    - 调用绘图服务的 draw() 方法
-    - 如果使用SD-Forge后端，会自动检查当前加载的model和vae，如果不同则自动设置
-    - 创建 batch_size 个 Job 记录到数据库
-    - 创建 BatchJob 记录
+        batch_id（批次 ID）
     """
     try:
         import json
-        import uuid
-        from datetime import datetime
         
         # 验证 batch_size
         if batch_size < 1 or batch_size > 16:
             raise HTTPException(status_code=400, detail="batch_size 必须在 1-16 之间")
         
-        # 解析 loras（如果是字符串，尝试解析为 JSON）
+        # 解析 loras
         loras_dict: Optional[Dict[str, float]] = None
         if loras:
             if isinstance(loras, str):
                 try:
                     loras_dict = json.loads(loras)
                 except json.JSONDecodeError:
-                    # 如果解析失败，尝试作为单个键值对处理
-                    logger.warning(f"LoRA 参数格式错误，尝试其他解析方式: {loras}")
+                    logger.warning(f"LoRA 参数格式错误: {loras}")
                     loras_dict = None
             elif isinstance(loras, dict):
                 loras_dict = loras
@@ -238,20 +158,16 @@ async def create_draw_job(
             original_width = args.width
             original_height = args.height
             
-            # 如果宽高超过 1024，自动调整为 1024（保持宽高比例）
             if args.width > 1024 or args.height > 1024:
                 if args.width > args.height:
-                    # 宽度更大，以宽度为基准缩放到 1024
                     scale = 1024 / args.width
                     args.width = 1024
                     args.height = int(args.height * scale)
                 else:
-                    # 高度更大，以高度为基准缩放到 1024
                     scale = 1024 / args.height
                     args.height = 1024
                     args.width = int(args.width * scale)
                 
-                # 确保调整后的宽高不超过 1024（由于舍入可能导致）
                 if args.width > 1024:
                     args.width = 1024
                 if args.height > 1024:
@@ -262,73 +178,12 @@ async def create_draw_job(
                     f"（{original_width}x{original_height} → {args.width}x{args.height}，最大限制 1024）"
                 )
         
-        # 使用当前配置的绘图服务
+        # 调用绘图服务
         draw_service = get_current_draw_service()
+        batch_id = draw_service.draw(args, batch_size=batch_size, name=name, desc=desc)
         
-        # 生成 batch_id
-        batch_id = str(uuid.uuid4())
-        job_ids = []
-        failed_count = 0
-        last_error = None
+        return batch_id
         
-        # 创建 batch_size 个任务（允许部分成功）
-        for i in range(batch_size):
-            try:
-                job_id = draw_service.draw(args)
-                job_ids.append(job_id)
-                
-                # 创建 Job 记录到数据库
-                job = Job(
-                    job_id=job_id,
-                    name=name,
-                    desc=desc,
-                    created_at=datetime.now(),
-                    status="pending",  # 初始状态为 pending
-                    draw_args=args.model_dump(exclude_none=True)  # 保存 DrawArgs 到 Job，排除 None 值
-                )
-                JobService.create(job)
-                
-                # 启动后台任务监控 job 状态并保存图片到 jobs/{job_id}.png
-                asyncio.create_task(_monitor_job_and_save_image(job_id=job_id))
-            except Exception as e:
-                failed_count += 1
-                last_error = e
-                logger.error(f"创建批量任务中的第 {i+1}/{batch_size} 个任务失败: {e}")
-                # 继续创建下一个任务，不中断整个批量创建流程
-        
-        # 如果所有任务都失败了，抛出异常
-        if not job_ids:
-            error_msg = f"批量创建任务失败：所有 {batch_size} 个任务都创建失败"
-            if last_error:
-                if isinstance(last_error, httpx.ReadTimeout) or isinstance(last_error, httpx.TimeoutException):
-                    error_msg += f"。最后一个错误：连接超时。请检查网络连接和代理设置。"
-                else:
-                    error_msg += f"。最后一个错误：{str(last_error)}"
-            raise HTTPException(status_code=500, detail=error_msg)
-        
-        # 创建 BatchJob 记录（只包含成功创建的 job_ids）
-        batch_job = BatchJob(
-            batch_id=batch_id,
-            job_ids=job_ids,
-            created_at=datetime.now()
-        )
-        BatchJobService.create(batch_job)
-        
-        # 如果部分失败，记录警告
-        if failed_count > 0:
-            logger.warning(
-                f"批量创建任务部分成功: batch_id={batch_id}, "
-                f"成功={len(job_ids)}/{batch_size}, 失败={failed_count}"
-            )
-        
-        return {
-            "batch_id": batch_id,
-            "job_ids": job_ids,
-            "total_requested": batch_size,
-            "success_count": len(job_ids),
-            "failed_count": failed_count,
-            "partial_success": failed_count > 0
-        }
     except httpx.HTTPError as e:
         backend = app_settings.draw.backend
         raise HTTPException(status_code=502, detail=f"{backend} 连接失败: {e}") from e
@@ -475,7 +330,20 @@ async def check_job_status(job_id: str) -> dict:
     # 获取当前绘图服务并检查状态
     try:
         draw_service = get_current_draw_service()
-        is_complete = await draw_service.get_job_status(job_id)
+        
+        # 对于 Civitai，需要从 job.data 中获取 civitai_job_token
+        civitai_token = None
+        if job.data and 'civitai_job_token' in job.data:
+            civitai_token = job.data['civitai_job_token']
+        
+        # 如果还没有 token，说明后台任务还在创建中
+        backend = app_settings.draw.backend
+        if backend == "civitai" and not civitai_token:
+            return {"completed": False, "pending": True}
+        
+        # 检查状态：对于 Civitai，使用 civitai_job_token；对于 SD-Forge，使用 job_id
+        check_job_id = civitai_token if (backend == "civitai" and civitai_token) else job_id
+        is_complete = await draw_service.get_job_status(check_job_id)
         
         # 如果任务已完成且 completed_at 未设置，更新它
         if is_complete and job.completed_at is None:
@@ -514,7 +382,20 @@ async def get_job_image(job_id: str) -> FileResponse:
         if job.completed_at is None:
             # 检查任务状态
             draw_service = get_current_draw_service()
-            is_complete = await draw_service.get_job_status(job_id)
+            
+            # 对于 Civitai，需要从 job.data 中获取 civitai_job_token
+            civitai_token = None
+            if job.data and 'civitai_job_token' in job.data:
+                civitai_token = job.data['civitai_job_token']
+            
+            # 如果还没有 token，说明后台任务还在创建中
+            backend = app_settings.draw.backend
+            if backend == "civitai" and not civitai_token:
+                raise HTTPException(status_code=400, detail=f"任务正在创建中: {job_id}")
+            
+            # 检查状态：对于 Civitai，使用 civitai_job_token；对于 SD-Forge，使用 job_id
+            check_job_id = civitai_token if (backend == "civitai" and civitai_token) else job_id
+            is_complete = await draw_service.get_job_status(check_job_id)
             if not is_complete:
                 raise HTTPException(status_code=400, detail=f"任务未完成: {job_id}")
         

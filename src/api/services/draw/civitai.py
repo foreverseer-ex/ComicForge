@@ -1,22 +1,29 @@
 """
 Civitai 绘图服务实现。
 """
-from __future__ import annotations
 
-import os
-import io
+
 import asyncio
-import concurrent.futures
+import io
+import os
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TypeVar
 
 import httpx
 from PIL import Image
 from loguru import logger
 
-from api.settings import app_settings
 from api.schemas.draw import DrawArgs
+from api.schemas.draw import Job, BatchJob
+from api.services.db import JobService, BatchJobService
+from api.settings import app_settings
+from api.utils.path import jobs_home
+from api.utils.retry import retry_async
+from api.utils.timeout import with_timeout_async
 from .base import AbstractDrawService
+
+T = TypeVar('T')
 
 # 在导入 civitai 之前设置环境变量
 if app_settings.civitai.api_token:
@@ -31,7 +38,7 @@ class CivitaiDrawService(AbstractDrawService):
     
     注意：对于 Civitai，job_id 实际上是 token。
     """
-    
+
     # SD-Forge sampler 名称到 Civitai scheduler 名称的映射
     SCHEDULER_MAP = {
         "Euler a": "EulerA",
@@ -52,7 +59,7 @@ class CivitaiDrawService(AbstractDrawService):
         "DPM2 a Karras": "DPM2AncestralKarras",
         "DPM++ 2S a Karras": "DPMPP2SAncestralKarras",
     }
-    
+
     @classmethod
     def _map_sampler_to_scheduler(cls, sampler: str) -> str:
         """
@@ -69,10 +76,208 @@ class CivitaiDrawService(AbstractDrawService):
         if app_settings.civitai.api_token:
             os.environ["CIVITAI_API_TOKEN"] = app_settings.civitai.api_token
 
-    def _create_text2image(
+        # 注意：civitai 库内部使用 httpx，但库的 API 设计不支持直接传入超时参数
+        # 我们会在每次调用时通过 asyncio.wait_for 来应用超时设置
+        # 这样可以确保使用我们配置的 timeout 值
+
+    async def _get_job_async(self, token: str) -> Dict[str, Any]:
+        """
+        查询任务状态（异步版本）。
+        
+        :param token: 任务 token
+        :return: Civitai 的完整响应
+        """
+
+        async def _do_get():
+            try:
+                # 在异步上下文中，直接调用 civitai.jobs.get
+                coro_or_task = civitai.jobs.get(token=token)
+
+                # 检查返回值类型
+                if isinstance(coro_or_task, dict):
+                    # 如果直接返回字典，直接返回
+                    return coro_or_task
+                elif isinstance(coro_or_task, asyncio.Task):
+                    # 如果是 Task，使用 asyncio.wait_for 应用超时
+                    return await asyncio.wait_for(coro_or_task, timeout=app_settings.civitai.timeout)
+                else:
+                    # 如果是协程，使用 asyncio.wait_for 应用超时
+                    return await asyncio.wait_for(coro_or_task, timeout=app_settings.civitai.timeout)
+
+            except asyncio.TimeoutError:
+                # asyncio.wait_for 超时
+                logger.debug(f"civitai.jobs.get 超时（超时时间: {app_settings.civitai.timeout}秒）: {token}")
+                raise httpx.ReadTimeout(f"请求超时（{app_settings.civitai.timeout}秒）")
+            except (httpx.ReadTimeout, httpx.TimeoutException) as e:
+                # 超时异常向上传播，由调用者处理
+                logger.debug(f"civitai.jobs.get 超时: {e}")
+                raise
+            except Exception as e:
+                logger.exception(f"civitai.jobs.get 调用失败: {e}")
+                raise
+
+        # 使用重试机制
+        return await retry_async(
+            _do_get,
+            max_attempts=app_settings.civitai.retry_count,
+            delay=app_settings.civitai.retry_delay,
+            exceptions=(httpx.ReadTimeout, httpx.TimeoutException, httpx.ConnectTimeout, httpx.ConnectError),
+            operation_name=f"查询 Civitai 任务状态 ({token})"
+        )
+
+    # ========== 辅助方法 ==========
+
+    def _convert_args_to_civitai_format(self, args: DrawArgs) -> Dict[str, Any]:
+        """
+        将 DrawArgs 转换为 Civitai API 格式。
+        
+        :param args: 绘图参数
+        :return: 包含 model_air, prompt, negative_prompt, scheduler, steps, cfg_scale, width, height, seed, clip_skip, positive_lora_airs, vae_air 的字典
+        """
+        from api.services.model_meta import local_model_meta_service
+
+        # 获取模型的 AIR 标识符
+        model_meta = local_model_meta_service.get_by_version_name(args.model)
+        if not model_meta:
+            raise RuntimeError(f"未找到模型: {args.model}")
+
+        model_air = model_meta.air
+        logger.debug(f"模型 AIR: {model_air}")
+
+        # 转换 LoRAs 名称为 AIR
+        positive_lora_airs: Dict[str, float] = {}
+        negative_lora_airs: Dict[str, float] = {}
+        if args.loras:
+            for lora_name, strength in args.loras.items():
+                lora_meta = local_model_meta_service.get_by_version_name(lora_name)
+                if not lora_meta:
+                    logger.warning(f"未找到 LoRA 元数据: {lora_name}，跳过")
+                    continue
+                if strength < 0:
+                    negative_lora_airs[lora_meta.air] = abs(strength)
+                else:
+                    positive_lora_airs[lora_meta.air] = strength
+                logger.debug(f"LoRA AIR: {lora_meta.air}, strength: {strength}")
+
+        # 转换 VAE 名称为 AIR
+        vae_air: Optional[str] = None
+        if args.vae:
+            vae_meta = local_model_meta_service.get_by_version_name(args.vae)
+            if vae_meta:
+                vae_air = vae_meta.air
+                logger.debug(f"VAE AIR: {vae_air}")
+
+        # 处理负面 LoRA
+        final_negative_prompt = args.negative_prompt or ""
+        if negative_lora_airs:
+            negative_lora_names = []
+            for lora_air, strength in negative_lora_airs.items():
+                negative_lora_names.append(f"{lora_air} (strength: {strength})")
+            if negative_lora_names:
+                negative_lora_text = ", ".join(negative_lora_names)
+                final_negative_prompt = f"{final_negative_prompt}, {negative_lora_text}".strip(", ")
+                logger.info(f"已将负面 LoRA 添加到负面提示词: {negative_lora_names}")
+
+        # 验证宽高
+        width = args.width
+        height = args.height
+        if width < 1 or height < 1:
+            raise ValueError(f"宽度和高度必须大于 0: {width}x{height}")
+        if width > 1024 or height > 1024:
+            raise ValueError(f"宽高超过 Civitai API 限制（最大 1024）: {width}x{height}")
+
+        return {
+            "model_air": model_air,
+            "prompt": args.prompt,
+            "negative_prompt": final_negative_prompt,
+            "scheduler": self._map_sampler_to_scheduler(args.sampler),
+            "steps": args.steps,
+            "cfg_scale": args.cfg_scale,
+            "width": width,
+            "height": height,
+            "seed": args.seed,
+            "clip_skip": args.clip_skip or 2,
+            "positive_lora_airs": positive_lora_airs,
+            "vae_air": vae_air,
+        }
+
+    async def _create_job_token_async(self, civitai_params: Dict[str, Any]) -> str:
+        """
+        异步创建 Civitai 任务并返回 token（带重试）。
+        
+        :param civitai_params: Civitai API 参数（来自 _convert_args_to_civitai_format）
+        :return: Civitai job token
+        """
+
+        async def _do_create():
+            result = await self._create_text2image_async(**civitai_params)
+            token = result.get("token")
+            if not token:
+                raise RuntimeError("Civitai 未返回 token")
+            return token
+
+        # 使用重试机制
+        return await retry_async(
+            _do_create,
+            max_attempts=app_settings.civitai.retry_count,
+            delay=app_settings.civitai.retry_delay,
+            exceptions=(httpx.ReadTimeout, httpx.TimeoutException, httpx.ConnectTimeout, httpx.ConnectError),
+            operation_name="创建 Civitai 任务"
+        )
+
+    async def _monitor_job_async(self, job_id: str, civitai_token: str) -> None:
+        """
+        监控 Civitai 任务直到完成，然后下载并保存图像。
+        
+        :param job_id: 本地 job_id（UUID）
+        :param civitai_token: Civitai job token
+        """
+        timeout_seconds = app_settings.civitai.draw_timeout
+        check_interval = 1.0  # 每秒检查一次
+
+        async def _monitor():
+            max_attempts = int(timeout_seconds / check_interval)
+            attempt = 0
+
+            while attempt < max_attempts:
+                try:
+                    # 检查任务状态
+                    is_complete = await self.get_job_status(civitai_token)
+
+                    if is_complete:
+                        # 任务完成，下载并保存图像
+                        job_image_path = jobs_home / f"{job_id}.png"
+                        await self.save_image(civitai_token, job_image_path)
+                        logger.success(f"任务图像已保存: {job_id} -> {job_image_path}")
+
+                        # 标记任务完成
+                        JobService.update(job_id, completed_at=datetime.now(), status="completed")
+                        return
+
+                    # 等待后重试
+                    await asyncio.sleep(check_interval)
+                    attempt += 1
+
+                except Exception as e:
+                    logger.exception(f"监控任务出错 (attempt {attempt}): {e}")
+                    await asyncio.sleep(check_interval)
+                    attempt += 1
+
+            # 超时，标记为失败
+            logger.error(f"任务超时: job_id={job_id}, timeout={timeout_seconds}秒")
+            JobService.update(job_id, completed_at=datetime.now(), status="failed")
+
+        # 使用超时机制包装监控函数
+        try:
+            await with_timeout_async(_monitor, timeout_seconds + 10, f"监控任务 {job_id}")
+        except TimeoutError:
+            logger.error(f"监控任务超时: job_id={job_id}")
+            JobService.update(job_id, completed_at=datetime.now(), status="failed")
+
+    async def _create_text2image_async(
             self,
             *,
-            model: str,
+            model_air: str,
             prompt: str,
             negative_prompt: str = "",
             scheduler: str = "EulerA",
@@ -82,28 +287,28 @@ class CivitaiDrawService(AbstractDrawService):
             height: int = 768,
             seed: int = -1,
             clip_skip: int = 2,
-            loras: Optional[Dict[str, float]] = None,
-            vae: Optional[str] = None,
+            positive_lora_airs: Optional[Dict[str, float]] = None,
+            vae_air: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        创建 Civitai 文生图任务，返回 { token }。
+        异步创建 Civitai 文生图任务，返回 { token }。
         
-        :param model: 模型名称，如 "SDXL"
+        :param model_air: 模型 AIR 标识符
         :param prompt: 提示词
         :param negative_prompt: 负提示词
-        :param scheduler: 调度器，如 "EulerA"
+        :param scheduler: 调度器
         :param steps: 推理步数
         :param cfg_scale: CFG 缩放因子
         :param width: 图像宽度
         :param height: 图像高度
-        :param seed: 随机种子（-1 表示随机）
+        :param seed: 随机种子
         :param clip_skip: CLIP 层跳过数
-        :param loras: LoRA 字典，{ urn: 强度 }
-        :param vae: VAE AIR 标识符
+        :param positive_lora_airs: 正面 LoRA 字典
+        :param vae_air: VAE AIR 标识符
         :return: 包含 token 的字典
         """
         option: Dict[str, Any] = {
-            "model": model,
+            "model": model_air,
             "params": {
                 "prompt": prompt,
                 "negativePrompt": negative_prompt,
@@ -119,369 +324,123 @@ class CivitaiDrawService(AbstractDrawService):
 
         # 处理 additionalNetworks（LoRA 和 VAE）
         additional: Dict[str, Any] = {}
-        
-        # 分离正面和负面 LoRA
-        positive_loras: Dict[str, float] = {}
-        negative_loras: Dict[str, float] = {}
-        
-        # 添加 LoRA
-        if loras:
-            for air, strength in loras.items():
-                if strength < 0:
-                    # 负数权重表示负面 LoRA，正化后添加到负面提示词
-                    negative_loras[air] = abs(strength)
-                else:
-                    # 正数权重表示正面 LoRA，添加到 additionalNetworks
-                    positive_loras[air] = strength
-        
-        # 添加正面 LoRA 到 additionalNetworks
-        for air, strength in positive_loras.items():
-            additional[air] = {"type": "Lora", "strength": float(strength)}
-        
-        # 如果有负面 LoRA，需要添加到负面提示词
-        # 注意：Civitai API 可能不支持在 negativePrompt 中使用 LoRA
-        # 这里我们先记录日志，如果 Civitai API 不支持，可能需要其他处理方式
-        if negative_loras:
-            logger.warning(f"检测到负面 LoRA: {negative_loras}，但 Civitai API 可能不支持在负面提示词中使用 LoRA")
-            # TODO: 如果 Civitai API 支持负面 LoRA，可以在这里处理
-            # 目前先记录警告，暂时忽略负面 LoRA
-        
+
+        # 添加正面 LoRA
+        if positive_lora_airs:
+            for air, strength in positive_lora_airs.items():
+                additional[air] = {"type": "Lora", "strength": float(strength)}
+
         # 添加 VAE
-        if vae:
-            additional[vae] = {"type": "VAE", "strength": 1.0}
-        
+        if vae_air:
+            additional[vae_air] = {"type": "VAE", "strength": 1.0}
+
         if additional:
             option["additionalNetworks"] = additional
 
         logger.debug(f"civitai.image.create option={option}")
-        
-        # civitai.image.create() 的行为取决于调用上下文
-        # 在异步上下文中，它可能返回 Task；在新线程中，它可能直接返回字典结果
-        try:
-            # 尝试获取当前事件循环
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 如果事件循环正在运行（FastAPI 的异步上下文），这是不应该发生的
-                    # 因为 draw() 是同步方法，不应该在异步上下文中调用
-                    # 但为了安全，我们使用线程池在新线程中运行
-                    def run_in_thread():
-                        # 在新线程中创建新的事件循环
-                        new_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(new_loop)
-                        try:
-                            # 调用 civitai.image.create，它在新线程中可能返回字典或协程/Task
-                            coro_or_task = civitai.image.create(option)
-                            # 检查返回值类型
-                            if isinstance(coro_or_task, dict):
-                                # 如果直接返回字典，直接返回
-                                return coro_or_task
-                            elif isinstance(coro_or_task, asyncio.Task):
-                                # 如果是 Task，需要用对应的事件循环等待
-                                return new_loop.run_until_complete(coro_or_task)
-                            else:
-                                # 如果是协程，创建 Task 后等待
-                                return new_loop.run_until_complete(coro_or_task)
-                        finally:
-                            new_loop.close()
-                    
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(run_in_thread)
-                        resp = future.result()
-                else:
-                    # 事件循环存在但未运行，直接运行
-                    coro_or_task = civitai.image.create(option)
-                    if isinstance(coro_or_task, dict):
-                        # 如果直接返回字典，直接返回
-                        resp = coro_or_task
-                    elif isinstance(coro_or_task, asyncio.Task):
-                        resp = loop.run_until_complete(coro_or_task)
-                    else:
-                        resp = loop.run_until_complete(coro_or_task)
-            except RuntimeError:
-                # 没有事件循环，创建一个新的
-                coro_or_task = civitai.image.create(option)
-                if isinstance(coro_or_task, dict):
-                    # 如果直接返回字典，直接返回
-                    resp = coro_or_task
-                elif isinstance(coro_or_task, asyncio.Task):
-                    # 如果是 Task，不能用 asyncio.run()，需要手动创建循环
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        resp = loop.run_until_complete(coro_or_task)
-                    finally:
-                        loop.close()
-                else:
-                    resp = asyncio.run(coro_or_task)
-        except Exception as e:
-            # 捕获并记录所有异常，包括 HTTPException
-            logger.exception(f"Civitai API 调用失败: {e}")
-            
-            # 检查异常类型，提供更友好的错误消息
-            error_msg = str(e)
-            error_type = type(e).__name__
-            error_type_module = type(e).__module__
-            
-            # 检查是否是连接超时错误（包括 httpcore.ConnectTimeout）
-            if isinstance(e, (httpx.ConnectTimeout, httpx.TimeoutException)) or \
-               error_type == "ConnectTimeout" or \
-               "ConnectTimeout" in error_type or \
-               "timeout" in error_msg.lower():
-                error_msg = "连接 Civitai API 超时。请检查网络连接和代理设置（当前代理: http://127.0.0.1:7890）。"
-            elif isinstance(e, httpx.ConnectError) or \
-                 error_type == "ConnectError" or \
-                 "ConnectError" in error_type or \
-                 ("connect" in error_msg.lower() and "error" in error_msg.lower()):
-                error_msg = f"无法连接到 Civitai API。请检查网络连接和代理设置（当前代理: http://127.0.0.1:7890）。错误: {error_msg}"
-            elif isinstance(e, httpx.HTTPStatusError):
-                status_code = e.response.status_code
-                error_msg = f"Civitai API 错误 ({status_code}): {error_msg}"
-            elif hasattr(e, 'status_code'):
-                status_code = e.status_code
-                error_msg = f"Civitai API 错误 ({status_code}): {error_msg}"
-            elif not error_msg or error_msg.strip() == "":
-                # 如果错误消息为空，提供默认消息
-                error_msg = f"Civitai API 调用失败 ({error_type})。请检查网络连接和配置（当前代理: http://127.0.0.1:7890）。"
-            
-            raise RuntimeError(error_msg) from e
-        
-        # 返回示例：{'token': '...'}
-        return resp
 
-    def _get_job(self, token: str) -> Dict[str, Any]:
-        """
-        查询任务状态。
-        
-        :param token: 任务 token
-        :return: Civitai 的完整响应
-        """
-        # civitai.jobs.get() 的行为取决于调用上下文
-        # 在异步上下文中，它可能返回 Task；在新线程中，它可能直接返回字典结果
-        try:
-            # 尝试获取当前事件循环
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 如果事件循环正在运行，使用线程池在新线程中运行
-                    def run_in_thread():
-                        # 在新线程中创建新的事件循环
-                        new_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(new_loop)
-                        try:
-                            # 调用 civitai.jobs.get，它在新线程中可能返回字典或协程/Task
-                            coro_or_task = civitai.jobs.get(token=token)
-                            # 检查返回值类型
-                            if isinstance(coro_or_task, dict):
-                                # 如果直接返回字典，直接返回
-                                return coro_or_task
-                            elif isinstance(coro_or_task, asyncio.Task):
-                                # 如果是 Task，需要用对应的事件循环等待
-                                return new_loop.run_until_complete(coro_or_task)
-                            else:
-                                # 如果是协程，创建 Task 后等待
-                                return new_loop.run_until_complete(coro_or_task)
-                        finally:
-                            new_loop.close()
-                    
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(run_in_thread)
-                        resp = future.result()
-                else:
-                    # 事件循环存在但未运行，直接运行
-                    coro_or_task = civitai.jobs.get(token=token)
-                    if isinstance(coro_or_task, dict):
-                        # 如果直接返回字典，直接返回
-                        resp = coro_or_task
-                    elif isinstance(coro_or_task, asyncio.Task):
-                        resp = loop.run_until_complete(coro_or_task)
-                    else:
-                        resp = loop.run_until_complete(coro_or_task)
-            except RuntimeError:
-                # 没有事件循环，创建一个新的
-                coro_or_task = civitai.jobs.get(token=token)
-                if isinstance(coro_or_task, dict):
-                    # 如果直接返回字典，直接返回
-                    resp = coro_or_task
-                elif isinstance(coro_or_task, asyncio.Task):
-                    # 如果是 Task，不能用 asyncio.run()，需要手动创建循环
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        resp = loop.run_until_complete(coro_or_task)
-                    finally:
-                        loop.close()
-                else:
-                    resp = asyncio.run(coro_or_task)
-        except (httpx.ReadTimeout, httpx.TimeoutException) as e:
-            # 超时异常向上传播，由调用者处理（get_job_status 会捕获并返回 False）
-            logger.debug(f"civitai.jobs.get 超时: {e}")
-            raise
-        except Exception as e:
-            logger.exception(f"civitai.jobs.get 调用失败: {e}")
-            raise
-        
-        return resp
+        # 调用 Civitai API（异步）
+        async def _do_create():
+            return await civitai.image.create(option)
 
-    async def _get_job_async(self, token: str) -> Dict[str, Any]:
-        """
-        查询任务状态（异步版本）。
-        
-        :param token: 任务 token
-        :return: Civitai 的完整响应
-        """
-        try:
-            # 在异步上下文中，直接调用 civitai.jobs.get
-            coro_or_task = civitai.jobs.get(token=token)
-            
-            # 检查返回值类型
-            if isinstance(coro_or_task, dict):
-                # 如果直接返回字典，直接返回
-                return coro_or_task
-            elif isinstance(coro_or_task, asyncio.Task):
-                # 如果是 Task，直接 await
-                return await coro_or_task
-            else:
-                # 如果是协程，直接 await
-                return await coro_or_task
-                
-        except (httpx.ReadTimeout, httpx.TimeoutException) as e:
-            # 超时异常向上传播，由调用者处理
-            logger.debug(f"civitai.jobs.get 超时: {e}")
-            raise
-        except Exception as e:
-            logger.exception(f"civitai.jobs.get 调用失败: {e}")
-            raise
+        # 使用超时机制
+        return await with_timeout_async(
+            _do_create,
+            timeout_seconds=app_settings.civitai.timeout,
+            operation_name="创建 Civitai 绘图任务"
+        )
 
     # ========== 实现抽象接口 ==========
 
-    def draw(self, args: DrawArgs) -> str:
+    def draw(self, args: DrawArgs, batch_size: int = 1, name: Optional[str] = None, desc: Optional[str] = None) -> str:
         """
-        执行单次绘图。
+        批量创建绘图任务并启动监控。
         
         :param args: 绘图参数
-        :return: job_id（对于 Civitai 来说就是 token）
-        """
-        from api.services.model_meta import local_model_meta_service
-        
-        # 获取模型的 AIR 标识符（通过 version_name 查找）
-        model_meta = local_model_meta_service.get_by_version_name(args.model)
-        if not model_meta:
-            raise RuntimeError(f"未找到模型: {args.model}")
-        
-        model_air = model_meta.air
-        logger.debug(f"模型 AIR: {model_air}")
-        
-        # 转换 LoRAs 名称为 AIR（通过 version_name 查找）
-        # 分离正面和负面 LoRA
-        positive_lora_airs: Dict[str, float] = {}
-        negative_lora_airs: Dict[str, float] = {}
-        if args.loras:
-            for lora_name, strength in args.loras.items():
-                lora_meta = local_model_meta_service.get_by_version_name(lora_name)
-                if not lora_meta:
-                    logger.warning(f"未找到 LoRA 元数据: {lora_name}，跳过")
-                    continue
-                if strength < 0:
-                    # 负数权重表示负面 LoRA
-                    negative_lora_airs[lora_meta.air] = abs(strength)
-                else:
-                    # 正数权重表示正面 LoRA
-                    positive_lora_airs[lora_meta.air] = strength
-                logger.debug(f"LoRA AIR: {lora_meta.air}, strength: {strength}")
-        
-        # 转换 VAE 名称为 AIR（通过 version_name 查找）
-        vae_air: Optional[str] = None
-        if args.vae:
-            vae_meta = local_model_meta_service.get_by_version_name(args.vae)
-            if not vae_meta:
-                logger.warning(f"未找到 VAE 元数据: {args.vae}，跳过")
-            else:
-                vae_air = vae_meta.air
-                logger.debug(f"VAE AIR: {vae_air}")
-        
-        # 如果有负面 LoRA，需要添加到负面提示词
-        # 注意：Civitai API 的 negativePrompt 是纯文本，不支持 LoRA 语法
-        # 我们需要将负面 LoRA 的名称添加到 negativePrompt 中（作为文本）
-        final_negative_prompt = args.negative_prompt or ""
-        if negative_lora_airs:
-            # 获取负面 LoRA 的名称，添加到负面提示词
-            negative_lora_names = []
-            for lora_air, strength in negative_lora_airs.items():
-                # 从 AIR 中提取 LoRA 名称（如果可能）
-                # AIR 格式：urn:air:sd1:lora:civitai:328553@368189
-                # 我们可以尝试从元数据中获取名称
-                lora_name_for_prompt = lora_air  # 暂时使用 AIR，后续可以优化
-                negative_lora_names.append(f"{lora_name_for_prompt} (strength: {strength})")
-            if negative_lora_names:
-                negative_lora_text = ", ".join(negative_lora_names)
-                final_negative_prompt = f"{final_negative_prompt}, {negative_lora_text}".strip(", ")
-                logger.info(f"已将负面 LoRA 添加到负面提示词: {negative_lora_names}")
-        
-        # Civitai API 要求宽高必须在 1-1024 之间
-        width = args.width
-        height = args.height
-        
-        # 确保宽高是正整数
-        if width < 1 or height < 1:
-            raise ValueError(f"宽度和高度必须大于 0: {width}x{height}")
-        
-        # 验证宽高不超过 1024（Civitai API 限制）
-        # 前端已经进行验证，这里作为安全措施
-        if width > 1024 or height > 1024:
-            raise ValueError(f"宽高超过 Civitai API 限制（最大 1024）: {width}x{height}")
-        
-        logger.info(f"使用图像尺寸: {width}x{height}")
-        
-        result = self._create_text2image(
-            model=model_air,  # 使用 AIR 标识符而不是名称
-            prompt=args.prompt,
-            negative_prompt=final_negative_prompt,  # 使用包含负面 LoRA 的负面提示词
-            scheduler=self._map_sampler_to_scheduler(args.sampler),  # 映射 sampler 到 scheduler
-            steps=args.steps,
-            cfg_scale=args.cfg_scale,
-            width=width,  # 使用调整后的宽度
-            height=height,  # 使用调整后的高度
-            seed=args.seed,
-            clip_skip=args.clip_skip or 2,
-            loras=positive_lora_airs,  # 只传递正面 LoRA
-            vae=vae_air,  # 使用 VAE AIR
-        )
-
-        token = result.get("token")
-        if not token:
-            raise RuntimeError("Civitai 未返回 token")
-
-        logger.success(f"Civitai 任务已创建: token={token}")
-        return token  # 对于 Civitai，job_id 就是 token
-
-    def draw_batch(self, args_list: list[DrawArgs]) -> str:
-        """
-        批量绘图（暂未实现）。
-        
-        :param args_list: 绘图参数列表
+        :param batch_size: 批量大小
+        :param name: 任务名称（可选）
+        :param desc: 任务描述（可选）
         :return: batch_id
         """
-        raise NotImplementedError("Civitai 批量绘图功能暂未实现")
+        # 1. 转换参数为 Civitai 格式
+        civitai_params = self._convert_args_to_civitai_format(args)
 
-    def get_batch_status(self, batch_id: str) -> dict[str, bool]:
+
+        job_ids = []
+
+        # 3. 创建 batch_size 个 job
+        draw_args_dict = args.model_dump(exclude_none=True)
+        if 'loras' not in draw_args_dict:
+            draw_args_dict['loras'] = {}
+
+        for i in range(batch_size):
+
+
+
+            # 创建 Job 记录
+
+            job=JobService.create(Job(
+
+                name=name,
+                desc=desc,
+                created_at=datetime.now(),
+                status="pending",
+                draw_args=draw_args_dict,
+                data={}
+            ))
+            job_ids.append(job.job_id)
+            # 启动后台任务：创建 token 并监控
+            asyncio.create_task(self._create_and_monitor_job_async(job.job_id, civitai_params))
+
+        # 4. 创建 BatchJob 记录
+
+        batch_job=BatchJobService.create(BatchJob(
+            job_ids=job_ids,
+            created_at=datetime.now()
+        ))
+
+        logger.success(f"批量创建任务完成: batch_id={batch_job.batch_id}, job_count={len(job_ids)}")
+        return batch_job.batch_id
+
+    async def _create_and_monitor_job_async(self, job_id: str, civitai_params: Dict[str, Any]) -> None:
         """
-        获取批次状态（暂未实现）。
+        创建 Civitai 任务 token 并启动监控（后台任务）。
         
-        :param batch_id: 批次 ID
-        :return: 字典 {job_id: 是否完成}
+        :param job_id: 本地 job_id（UUID）
+        :param civitai_params: Civitai API 参数
         """
-        raise NotImplementedError("Civitai 批量绘图功能暂未实现")
+        try:
+            # 1. 创建 token（带重试）
+            civitai_token = await self._create_job_token_async(civitai_params)
+
+            # 2. 更新 job.data
+            job = JobService.get(job_id)
+            if job:
+                data = job.data or {}
+                data['civitai_job_token'] = civitai_token
+                JobService.update(job_id, data=data)
+                logger.success(f"Civitai 任务已创建并绑定: job_id={job_id}, token={civitai_token}")
+            else:
+                logger.error(f"未找到 Job: {job_id}")
+                return
+
+            # 3. 启动监控任务
+            await self._monitor_job_async(job_id, civitai_token)
+
+        except Exception as e:
+            logger.exception(f"创建或监控 Civitai 任务失败: job_id={job_id}, error={e}")
+            JobService.update(job_id, status="failed", completed_at=datetime.now())
 
     async def get_job_status(self, job_id: str) -> bool:
         """
         获取任务状态。
         
-        :param job_id: 任务 ID（对于 Civitai 来说是 token）
+        :param job_id: 任务 ID（对于 Civitai 来说，这应该是 civitai_job_token）
         :return: 是否完成
         """
         try:
-            # 在异步上下文中调用 _get_job
+            # 在异步上下文中调用 _get_job_async
+            # 注意：job_id 参数实际上是 civitai_job_token
             resp = await self._get_job_async(job_id)
             jobs = resp.get("jobs", [])
 
@@ -501,7 +460,7 @@ class CivitaiDrawService(AbstractDrawService):
                 if not result:
                     return False
                 result = result[0]
-            
+
             # 检查是否有可用的结果
             available = result.get("available", False)
             return available
@@ -518,9 +477,10 @@ class CivitaiDrawService(AbstractDrawService):
         """
         获取生成的图片（异步）。
         
-        :param job_id: 任务 ID（对于 Civitai 来说是 token）
+        :param job_id: 任务 ID（对于 Civitai 来说，这应该是 civitai_job_token）
         :return: PIL Image 对象
         """
+        # 注意：job_id 参数实际上是 civitai_job_token
         resp = await self._get_job_async(job_id)
         jobs = resp.get("jobs", [])
 
@@ -560,24 +520,25 @@ class CivitaiDrawService(AbstractDrawService):
         """
         保存生成的图片到文件（异步）。
         
-        :param job_id: 任务 ID（对于 Civitai 来说是 token）
+        :param job_id: 任务 ID（对于 Civitai 来说，这应该是 civitai_job_token）
         :param save_path: 保存路径
         """
         import aiofiles
-        
+
+        # 注意：job_id 参数实际上是 civitai_job_token
         img = await self.get_image(job_id)
         save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # 使用 aiofiles 异步保存图片
         # PIL Image.save() 是同步的，但我们可以将图片数据先保存到内存，然后异步写入
         img_bytes = io.BytesIO()
         img.save(img_bytes, format='PNG')
         img_bytes.seek(0)
-        
+
         async with aiofiles.open(save_path, 'wb') as f:
             await f.write(img_bytes.read())
-        
+
         logger.info(f"图片已保存: {save_path}")
 
 

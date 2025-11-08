@@ -1,6 +1,7 @@
 """
 绘图相关的数据模型。
 """
+import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any
 from pydantic import BaseModel
@@ -34,7 +35,7 @@ class Job(SQLModel, table=True):
     
     记录单次图像生成任务的基本信息。
     """
-    job_id: str = Field(description="任务唯一标识", primary_key=True)
+    job_id: Optional[str] = Field(description="任务唯一标识", primary_key=True,default_factory=lambda: str(uuid.uuid4()))
     name: Optional[str] = Field(default=None, description="任务名称")
     desc: Optional[str] = Field(default=None, description="任务描述")
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
@@ -45,6 +46,11 @@ class Job(SQLModel, table=True):
         sa_column=Column(JSON()),
         description="绘图参数（DrawArgs 的字典形式）"
     )
+    data: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(JSON()),
+        description="额外数据（JSON 格式），用于存储后端特定的信息，如 Civitai 的 job_token"
+    )
 
 
 class BatchJob(SQLModel, table=True):
@@ -53,7 +59,7 @@ class BatchJob(SQLModel, table=True):
     
     管理一批相关的绘图任务。
     """
-    batch_id: str = Field(description="批次唯一标识", primary_key=True)
+    batch_id: Optional[str] = Field(description="批次唯一标识", primary_key=True,default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
     job_ids: list[str] = Field(
         default_factory=list,

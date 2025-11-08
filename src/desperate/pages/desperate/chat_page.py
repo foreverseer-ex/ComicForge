@@ -164,7 +164,7 @@ class ChatPage(ft.Container):
                 [
                     ft.Icon(ft.Icons.BRUSH, size=24, color=ft.Colors.BLUE_400),
                     ft.Text(
-                        "NovelPanel 助手",
+                        "ComicForge 助手",
                         size=18,
                         weight=ft.FontWeight.BOLD,
                     ),

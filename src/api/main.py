@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
 # 创建 FastAPI 应用实例
 app = FastAPI(
     title="ComicForge API",
-    description="AI 驱动的小说创作与可视化工具 API",
+    description="AI 驱动的漫画创作与可视化工具 API",
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -105,7 +105,7 @@ async def root():
     return {
         "name": "ComicForge API",
         "version": "0.1.0",
-        "description": "AI 驱动的小说创作与可视化工具 API",
+        "description": "AI 驱动的漫画创作与可视化工具 API",
         "docs": "/docs",
         "redoc": "/redoc",
     }

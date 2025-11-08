@@ -10,7 +10,6 @@ import httpx
 from loguru import logger
 
 from api.schemas.model_meta import Example, DrawArgs, ModelMeta
-from api.services.model_meta.local import local_model_meta_service
 from api.services.model_meta.base import AbstractModelMetaService
 from api.settings import app_settings
 from api.constants.civitai import CIVITAI_BASE_URL
@@ -249,7 +248,7 @@ class CivitaiModelMetaService(AbstractModelMetaService):
             logger.exception(f"从 Civitai 获取模型元数据失败: {e}")
             return None
     
-    async def save(self, model_meta: ModelMeta, parallel_download: bool = False) -> ModelMeta:
+    async def save(self, model_meta: ModelMeta, parallel_download: bool = False) -> tuple[ModelMeta, int, int]:
         """
         保存模型元数据（委托给本地服务）。
         
@@ -260,10 +259,10 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         
         :param model_meta: 模型元数据（必须包含 type 字段）
         :param parallel_download: 是否并行下载示例图片，默认 False（串行下载）
-        :return: 保存后的模型元数据
+        :return: (保存后的模型元数据, 失败的图片数量, 总图片数量)
         """
         # 延迟导入，避免循环依赖
-        
+        from api.services.model_meta.local import local_model_meta_service
         
         logger.debug(f"Civitai 服务委托本地服务保存: {model_meta.name} (parallel_download={parallel_download})")
         return await local_model_meta_service.save(model_meta, parallel_download=parallel_download)
@@ -305,6 +304,9 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         :param safetensor_file: safetensors 文件路径
         :param stats: 统计信息字典
         """
+        # 延迟导入，避免循环依赖
+        from api.services.model_meta.local import local_model_meta_service
+        
         try:
             logger.info(f"处理模型: {safetensor_file.name}")
             

@@ -17,14 +17,29 @@
         isDark ? 'bg-gray-900' : 'bg-gray-100'
       ]"
     >
+      <!-- 生成中的 loading 状态 -->
+      <div 
+        v-if="hasGeneratingExample && !privacyMode" 
+        class="flex flex-col items-center justify-center"
+      >
+        <div 
+          class="animate-spin rounded-full h-8 w-8 border-b-2"
+          :class="isDark ? 'border-blue-400' : 'border-blue-600'"
+        ></div>
+        <span :class="['text-xs mt-2', isDark ? 'text-gray-400' : 'text-gray-500']">
+          生成中...
+        </span>
+      </div>
+      <!-- 有图片时显示图片 -->
       <img 
-        v-if="firstExampleImage && !privacyMode"
+        v-else-if="firstExampleImage && !privacyMode"
         :src="firstExampleImageWithRetry"
         :alt="actor.name"
         class="w-full h-full object-cover"
         @error="handleImageError"
         @load="handleImageLoad"
       />
+      <!-- 无图片时的空状态 -->
       <div v-else class="flex flex-col items-center justify-center">
         <PhotoIcon class="w-12 h-12" :class="isDark ? 'text-gray-600' : 'text-gray-400'" />
         <span :class="['text-xs mt-1', isDark ? 'text-gray-500' : 'text-gray-500']">
@@ -78,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { PhotoIcon, TagIcon } from '@heroicons/vue/24/outline'
@@ -114,6 +129,12 @@ const { isDark } = storeToRefs(themeStore)
 
 const exampleCount = computed(() => props.actor.examples?.length || 0)
 const tagCount = computed(() => Object.keys(props.actor.tags || {}).length)
+
+// 检查是否有正在生成的立绘（image_path 为 null）
+const hasGeneratingExample = computed(() => {
+  if (!props.actor.examples || exampleCount.value === 0) return false
+  return props.actor.examples.some((ex: any) => !ex.image_path)
+})
 
 const firstExampleImage = computed(() => {
   if (!props.actor.examples || exampleCount.value === 0) return null
@@ -171,6 +192,26 @@ const handleImageLoad = () => {
   imageRetryCount.value = 0
   imageLoadKey.value = 0
 }
+
+// 监听 actor.examples 的变化，当 image_path 从 null 变为有值时，强制刷新图片
+watch(
+  () => props.actor.examples,
+  (newExamples, oldExamples) => {
+    // 检查是否有 example 的 image_path 从 null 变为有值
+    if (newExamples && oldExamples) {
+      const hadNullImage = oldExamples.some((ex: any) => !ex.image_path)
+      const hasImageNow = newExamples.some((ex: any) => ex.image_path)
+      
+      // 如果之前有 null 的 image_path，现在有了，强制刷新图片
+      if (hadNullImage && hasImageNow) {
+        imageTimestamp.value = Date.now()
+        imageLoadKey.value++
+        imageRetryCount.value = 0
+      }
+    }
+  },
+  { deep: true }
+)
 
 const openDetailDialog = () => {
   emit('openDetail', props.actor)

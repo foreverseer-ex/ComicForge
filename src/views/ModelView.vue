@@ -4,22 +4,22 @@
     <div class="flex flex-col md:flex-row md:items-center gap-3">
       <!-- 第一行：生态系统筛选器 -->
       <div class="flex items-center gap-2">
-        <select
-          v-model="ecosystemFilter"
-          :class="[
-            'flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500',
-            isDark
-              ? 'bg-gray-700 border-gray-600 text-white'
-              : 'bg-white border-gray-300 text-gray-900'
-          ]"
-          @change="saveFilters"
-        >
-          <option value="">生态系统：全部</option>
-          <option value="sd1">sd1</option>
-          <option value="sd2">sd2</option>
-          <option value="sdxl">sdxl</option>
-        </select>
-        
+      <select
+        v-model="ecosystemFilter"
+        :class="[
+          'flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500',
+          isDark
+            ? 'bg-gray-700 border-gray-600 text-white'
+            : 'bg-white border-gray-300 text-gray-900'
+        ]"
+        @change="saveFilters"
+      >
+        <option value="">生态系统：全部</option>
+        <option value="sd1">sd1</option>
+        <option value="sd2">sd2</option>
+        <option value="sdxl">sdxl</option>
+      </select>
+
         <!-- 清除筛选按钮（移动端显示在第一行） -->
         <button
           v-if="ecosystemFilter || baseModelFilter"
@@ -177,6 +177,7 @@
             :show-warning="!checkModelFileExists(model)"
             @open-detail="openDetailDialog"
             @context-menu="showModelContextMenu"
+            @preference-changed="handlePreferenceChanged"
           />
         </div>
       </div>
@@ -216,6 +217,7 @@
             :show-warning="!checkModelFileExists(model)"
             @open-detail="openDetailDialog"
             @context-menu="showModelContextMenu"
+            @preference-changed="handlePreferenceChanged"
           />
         </div>
       </div>
@@ -444,6 +446,7 @@
     :privacy-mode="privacyMode"
     @close="detailModel = null"
     @toggle-privacy-mode="togglePrivacyMode"
+    @model-updated="handleModelUpdated"
   />
 </template>
 
@@ -478,6 +481,7 @@ interface ModelMeta {
   examples: any[]
   web_page_url: string | null
   air: string
+  preference?: 'liked' | 'neutral' | 'disliked'  // 模型偏好：喜欢、中性、不喜欢
 }
 
 const themeStore = useThemeStore()
@@ -588,10 +592,10 @@ const exportAllAir = async () => {
     const airText = airList.join('\n')
     
     await navigator.clipboard.writeText(airText)
-    alert(`✅ 已复制 ${airList.length} 个模型的 AIR 到剪贴板`)
+    showToast(`✅ 已复制 ${airList.length} 个模型的 AIR 到剪贴板`, 'success')
   } catch (error) {
     console.error('导出 AIR 失败:', error)
-    alert('❌ 导出失败')
+    showToast('❌ 导出失败', 'error')
   }
 }
 
@@ -631,12 +635,13 @@ const batchImport = async () => {
   
   let successCount = 0
   let failedCount = 0
+  let skippedCount = 0
   
   // 获取最大并发数设置
-  let maxConcurrency = 3 // 默认值
+  let maxConcurrency = 4 // 默认值
   try {
     const settings = await api.get('/settings/civitai')
-    maxConcurrency = settings.max_concurrency || 3
+    maxConcurrency = settings.parallel_workers || 4
   } catch (error) {
     console.warn('获取并发数设置失败，使用默认值:', error)
   }
@@ -653,19 +658,55 @@ const batchImport = async () => {
         parallel_download: parallelDownload
       })
       
-      if (response.success) {
-        successCount++
-        return { success: true, air, modelName: response.model_name }
+      const data = response.data || response
+      
+      if (data.success) {
+        if (data.skipped) {
+          skippedCount++
+          return { success: true, air, modelName: data.model_name, skipped: true }
+        } else {
+          successCount++
+          
+          // 如果有图片下载失败，显示警告信息
+          if (data.failed_image_count > 0) {
+            const errorMsg = `部分图片下载失败：${data.failed_image_count}/${data.total_image_count} 张图片未能下载`
+            importErrors.value.push(`${air}: ${errorMsg}`)
+          }
+          
+          return { success: true, air, modelName: data.model_name, skipped: false }
+        }
       } else {
         failedCount++
-        const errorMsg = `${air}: ${response.error || '未知错误'}`
-        importErrors.value.push(errorMsg)
-        return { success: false, air, error: response.error }
+        // 区分元数据下载失败和图片下载失败
+        let errorMsg = data.error || '未知错误'
+        if (!errorMsg.includes('部分图片下载失败')) {
+          // 这是元数据下载失败
+          errorMsg = '元数据下载失败：' + errorMsg
+        }
+        const fullErrorMsg = `${air}: ${errorMsg}`
+        importErrors.value.push(fullErrorMsg)
+        return { success: false, air, error: errorMsg }
       }
     } catch (error: any) {
       failedCount++
-      const errorMsg = `${air}: ${error.response?.data?.detail || error.message || '网络错误'}`
-      importErrors.value.push(errorMsg)
+      let errorMsg = '网络错误'
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        // 请求超时 - 这是元数据下载失败
+        errorMsg = '元数据下载超时，请检查网络连接或稍后重试'
+      } else if (error.response?.data?.detail) {
+        // 后端返回的错误信息
+        const detail = error.response.data.detail
+        if (detail.includes('网络连接失败') || detail.includes('请求超时')) {
+          // 元数据下载失败
+          errorMsg = '元数据下载失败：' + detail
+        } else {
+          errorMsg = detail
+        }
+      } else if (error.message) {
+        errorMsg = error.message
+      }
+      const fullErrorMsg = `${air}: ${errorMsg}`
+      importErrors.value.push(fullErrorMsg)
       return { success: false, air, error: errorMsg }
     } finally {
       // 更新进度
@@ -673,7 +714,10 @@ const batchImport = async () => {
       importProgress.value.percentage = Math.round(
         (importProgress.value.current / importProgress.value.total) * 100
       )
-      importStatus.value = `⏳ ${importProgress.value.current}/${importProgress.value.total} 已完成（成功: ${successCount}, 失败: ${failedCount}）`
+      const statusText = skippedCount > 0 
+        ? `⏳ ${importProgress.value.current}/${importProgress.value.total} 已完成（成功: ${successCount}, 跳过: ${skippedCount}, 失败: ${failedCount}）`
+        : `⏳ ${importProgress.value.current}/${importProgress.value.total} 已完成（成功: ${successCount}, 失败: ${failedCount}）`
+      importStatus.value = statusText
     }
   }
   
@@ -708,15 +752,18 @@ const batchImport = async () => {
       importStatus.value = '⚠️ 导入已取消'
       importStatusColor.value = 'text-orange-600'
     } else if (failedCount === 0) {
-      importStatus.value = `✅ 成功导入 ${successCount} 个模型`
+      const statusText = skippedCount > 0
+        ? `✅ 成功导入 ${successCount} 个模型，跳过 ${skippedCount} 个已存在的模型`
+        : `✅ 成功导入 ${successCount} 个模型`
+      importStatus.value = statusText
       importStatusColor.value = 'text-green-600'
       // 导入成功后刷新模型列表
       await loadModels()
       // 导入完成后立即关闭对话框
-      showImportDialog.value = false
-      importAirInput.value = ''
-      importStatus.value = ''
-      importErrors.value = []
+          showImportDialog.value = false
+          importAirInput.value = ''
+          importStatus.value = ''
+          importErrors.value = []
     } else if (successCount === 0) {
       importStatus.value = `❌ 全部导入失败（${failedCount} 个）`
       importStatusColor.value = 'text-red-600'
@@ -726,7 +773,10 @@ const batchImport = async () => {
       importStatus.value = ''
       importErrors.value = []
     } else {
-      importStatus.value = `⚠️ 成功 ${successCount} 个，失败 ${failedCount} 个`
+      const statusText = skippedCount > 0
+        ? `⚠️ 成功 ${successCount} 个，跳过 ${skippedCount} 个，失败 ${failedCount} 个`
+        : `⚠️ 成功 ${successCount} 个，失败 ${failedCount} 个`
+      importStatus.value = statusText
       importStatusColor.value = 'text-orange-600'
       // 部分成功也刷新模型列表
       await loadModels()
@@ -838,6 +888,12 @@ const openDetailDialog = (model: ModelMeta) => {
   detailModel.value = model
 }
 
+// 处理模型更新事件（重置后刷新列表）
+const handleModelUpdated = async () => {
+  await loadModels()
+  showToast('模型列表已刷新', 'success')
+}
+
 // 显示右键菜单
 const showModelContextMenu = (event: MouseEvent, model: ModelMeta) => {
   contextMenu.value = {
@@ -870,6 +926,20 @@ const deleteModel = async () => {
 const checkModelFileExists = (model: ModelMeta) => {
   // TODO: 调用 API 检查
   return true
+}
+
+// 处理偏好状态改变
+const handlePreferenceChanged = (model: ModelMeta) => {
+  // 更新本地模型列表中的偏好状态
+  const updateModelInList = (list: ModelMeta[]) => {
+    const index = list.findIndex(m => m.version_id === model.version_id)
+    if (index >= 0) {
+      list[index].preference = model.preference
+    }
+  }
+  
+  updateModelInList(checkpoints.value)
+  updateModelInList(loras.value)
 }
 
 // 点击外部关闭右键菜单

@@ -298,7 +298,7 @@ class ChatHistory(BaseModel):
                         {
                             "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                             "role": "assistant", 
-                            "messages": [{"type": "text", "content": "你好！我是 NovelPanel AI 助手"}],
+                            "messages": [{"type": "text", "content": "你好！我是 ComicForge（漫画锻造）AI 助手"}],
                             "choices": None
                         }
                     ]

@@ -648,7 +648,7 @@ class ModelManagePage(ft.Column):
         
         筛选逻辑：
         - 空字符串 "" 表示"所有"（不筛选）
-        - None 也视为"所有"（兼容旧配置）
+        - None 也视为"所有"
         - 非空字符串表示具体的筛选值
         
         :param models: 原始模型列表

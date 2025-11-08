@@ -110,7 +110,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
             
             metadata_file = meta_dir / "metadata.json"
             if not metadata_file.exists():
-                logger.warning(f"元数据文件不存在: {metadata_file}")
+                logger.debug(f"元数据文件不存在: {metadata_file}")
                 continue
             
             try:
@@ -144,7 +144,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
             
             metadata_file = meta_dir / "metadata.json"
             if not metadata_file.exists():
-                logger.warning(f"元数据文件不存在: {metadata_file}")
+                logger.debug(f"元数据文件不存在: {metadata_file}")
                 continue
             
             try:
@@ -194,7 +194,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         async with aiofiles.open(meta_file, 'w', encoding='utf-8') as f:
             await f.write(meta.model_dump_json(indent=2))
     
-    async def save(self, model_meta: ModelMeta, parallel_download: bool = False) -> ModelMeta:
+    async def save(self, model_meta: ModelMeta, parallel_download: bool = False) -> tuple[ModelMeta, int, int]:
         """
         将模型元数据本地化并保存。
         
@@ -205,7 +205,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         
         :param model_meta: 模型元数据（必须包含 type 字段，可以是远程的或本地的）
         :param parallel_download: 是否并行下载示例图片，默认 False（串行下载）
-        :return: 本地化后的 ModelMeta
+        :return: (本地化后的 ModelMeta, 失败的图片数量, 总图片数量)
         """
         # 确定基础路径与重名处理（使用内存缓存匹配同名文件）
         home = checkpoint_meta_home if model_meta.type == ModelType.CHECKPOINT else lora_meta_home
@@ -239,6 +239,9 @@ class LocalModelModelMetaService(AbstractModelMetaService):
             logger.debug(f"示例图片已是本地: {example.filename}")
         
         # 下载远程示例图片
+        failed_image_count = 0
+        total_image_count = len(remote_examples)
+        
         if remote_examples:
             if parallel_download:
                 # 并行下载
@@ -257,6 +260,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
                 for example, result in zip(remote_examples, results):
                     if isinstance(result, Exception):
                         logger.exception(f"下载示例图片失败 ({example.filename}): {result}")
+                        failed_image_count += 1
                         continue
                     elif result:
                         # 下载成功
@@ -268,6 +272,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
                         localized_examples.append(local_example)
                         logger.debug(f"成功下载示例图片: {example.filename}")
                     else:
+                        failed_image_count += 1
                         logger.warning(f"下载失败，跳过示例图片: {example.filename}")
             else:
                 # 串行下载（原有逻辑）
@@ -276,24 +281,20 @@ class LocalModelModelMetaService(AbstractModelMetaService):
                     save_path = base_path / example.filename
                     logger.debug(f"下载示例图片: {example.filename}")
                     
-                    try:
-                        success = await download_file(example.url, save_path, app_settings.civitai.timeout)
-                        if success:
-                            # 创建新的 Example，替换 URL 为本地 file:// URL
-                            local_example = Example(
-                                url=save_path.as_uri(),  # 转换为 file:// URL
-                                args=example.args
-                            )
-                            localized_examples.append(local_example)
-                            logger.debug(f"成功下载示例图片: {example.filename}")
-                        else:
-                            # 下载失败，保留原 URL（或跳过）
-                            logger.warning(f"下载失败，跳过示例图片: {example.filename}")
-                    except Exception as e:
-                        logger.exception(f"下载示例图片失败 ({example.filename}): {e}")
-                        # 下载失败，跳过这张图片
-                        continue
-        
+                    success = await download_file(example.url, save_path, app_settings.civitai.timeout)
+                    if success:
+                        # 创建新的 Example，替换 URL 为本地 file:// URL
+                        local_example = Example(
+                            url=save_path.as_uri(),  # 转换为 file:// URL
+                            args=example.args
+                        )
+                        localized_examples.append(local_example)
+                        logger.debug(f"成功下载示例图片: {example.filename}")
+                    else:
+                        failed_image_count += 1
+                        # 下载失败，跳过这张图片（download_file 已经记录了警告日志）
+                        logger.warning(f"下载失败，跳过示例图片: {example.filename}")
+
         # 创建本地化的 ModelMeta
         localized_meta = ModelMeta(
             filename=model_meta.filename,
@@ -317,7 +318,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         await self._save_meta_to_disk(localized_meta)
         logger.success(f"已保存模型元数据: {model_meta.name} ({model_meta.type})")
         
-        return localized_meta
+        return localized_meta, failed_image_count, total_image_count
     
     async def _download_example_image(self, example: Example, save_path: Path) -> bool:
         """
@@ -475,6 +476,38 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         
         logger.debug(f"未找到版本 ID 为 {version_id} 的模型")
         return None
+    
+    async def set_preference(self, version_id: int, preference: str) -> Optional[ModelMeta]:
+        """
+        设置模型的偏好状态。
+        
+        :param version_id: Civitai 模型版本 ID
+        :param preference: 偏好状态（'liked', 'neutral', 'disliked'）
+        :return: 更新后的模型元数据，未找到返回 None
+        """
+        # 验证偏好值
+        if preference not in ['liked', 'neutral', 'disliked']:
+            raise ValueError(f"无效的偏好值: {preference}，必须是 'liked', 'neutral' 或 'disliked'")
+        
+        # 在本地缓存中查找
+        meta = None
+        for m in self.sd_list + self.lora_list + self.vae_list:
+            if m.version_id == version_id:
+                meta = m
+                break
+        
+        if meta is None:
+            logger.warning(f"未找到版本 ID 为 {version_id} 的模型")
+            return None
+        
+        # 更新内存缓存
+        meta.preference = preference
+        
+        # 保存到磁盘
+        await self._save_meta_to_disk(meta)
+        
+        logger.info(f"已设置模型偏好状态: {meta.name} (version_id={version_id}, preference={preference})")
+        return meta
 
 
 local_model_meta_service = LocalModelModelMetaService()

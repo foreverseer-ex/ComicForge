@@ -5,7 +5,6 @@ LLM 服务基础抽象类。
 """
 import functools
 import json
-import uuid
 from abc import ABC, abstractmethod
 from typing import Optional, List, AsyncGenerator, Any
 
@@ -29,7 +28,7 @@ from api.routers.actor import (
     add_example, remove_example, add_portrait_from_batch_tool
 )
 from api.routers.draw import (
-    create_draw_job, get_draw_job, delete_draw_job, get_image,
+    create_draw, get_draw_job, delete_draw_job, get_image,
 )
 from api.routers.model_meta import (
     get_loras, get_checkpoints,
@@ -147,7 +146,7 @@ class AbstractLlmService(ABC):
             # Novel 内容管理
             get_project_content, get_chapter_content, get_line_content,
             # Draw 功能
-            get_loras, get_checkpoints, create_draw_job, get_draw_job, delete_draw_job, get_image,
+            get_loras, get_checkpoints, create_draw, get_draw_job, delete_draw_job, get_image,
         ]
         # 先包装，再转换为工具
         self.tools = [tool(tool_wrapper(func)) for func in all_functions]
@@ -165,20 +164,53 @@ class AbstractLlmService(ABC):
         """
         raise NotImplementedError
 
-    def get_session_context(self, project_id: str) -> Optional[str]:
+    def get_session_context(self, project_id: Optional[str]) -> Optional[str]:
         """
         获取当前项目的上下文信息（包括项目基本信息和所有记忆条目）。
         
-        :param project_id: 项目 ID
-        :return: 格式化的项目信息（JSON 字符串），如果项目不存在则返回 None
+        :param project_id: 项目 ID（None 表示默认工作空间）
+        :return: 格式化的项目信息（JSON 字符串），如果项目不存在则返回默认工作空间的记忆信息
         """
         try:
-            # 查询项目信息（项目不存在时返回 None，不抛出异常）
+            # 查询所有记忆条目（支持 project_id 为 None）
+            memories = MemoryService.get_all(project_id=project_id, limit=1000)
 
+            # 构建记忆字典（按 key 分组）
+            memories_dict = {}
+            for memory in memories:
+                memories_dict[memory.key] = {
+                    "value": memory.value,
+                    "description": memory.description,
+                }
+
+            # 如果 project_id 为 None，返回默认工作空间的上下文（只包含记忆）
+            if project_id is None:
+                default_context = {
+                    "workspace": "default",
+                    "description": "默认工作空间（无项目）"
+                }
+                session_info = SESSION_INFO_TEMPLATE.format(
+                    context_json=json.dumps(default_context, ensure_ascii=False, indent=2),
+                    memories_count=len(memories),
+                    memories_dict_json=json.dumps(memories_dict, ensure_ascii=False, indent=2),
+                )
+                return session_info
+
+            # 查询项目信息（项目不存在时返回 None，不抛出异常）
             project = ProjectService.get(project_id)
             if not project:
-                logger.debug(f"项目不存在: {project_id}，跳过项目上下文")
-                return None
+                logger.debug(f"项目不存在: {project_id}，只返回记忆信息")
+                # 项目不存在，但返回记忆信息
+                default_context = {
+                    "project_id": project_id,
+                    "description": "项目不存在，但包含记忆信息"
+                }
+                session_info = SESSION_INFO_TEMPLATE.format(
+                    context_json=json.dumps(default_context, ensure_ascii=False, indent=2),
+                    memories_count=len(memories),
+                    memories_dict_json=json.dumps(memories_dict, ensure_ascii=False, indent=2),
+                )
+                return session_info
 
             # 构建项目上下文信息
             context = {
@@ -190,17 +222,6 @@ class AbstractLlmService(ABC):
                 "current_line": project.current_line,
                 "current_chapter": project.current_chapter,
             }
-
-            # 查询所有记忆条目
-            memories = MemoryService.get_all(project_id=project_id, limit=1000)
-
-            # 构建记忆字典（按 key 分组）
-            memories_dict = {}
-            for memory in memories:
-                memories_dict[memory.key] = {
-                    "value": memory.value,
-                    "description": memory.description,
-                }
 
             # 格式化为 JSON 字符串，包含提示信息
             session_info = SESSION_INFO_TEMPLATE.format(
@@ -261,14 +282,13 @@ class AbstractLlmService(ABC):
             # 1. 构建系统消息（不包含历史消息和摘要）
             messages = self.build_system_messages()
             
-            # 2. 如果提供了 project_id，添加项目上下文信息
-            if project_id:
-                session_info = self.get_session_context(project_id)
-                if session_info:
-                    messages.append(("system", session_info))
+            # 2. 添加项目上下文信息（支持 project_id=None，表示默认工作空间）
+            session_info = self.get_session_context(project_id)
+            if session_info:
+                messages.append(("system", session_info))
             
-            # 3. 添加工具使用说明（如果没有 project_id，告知某些工具可能不可用）
-            if not project_id:
+            # 3. 如果 project_id 为 None，添加工具使用说明
+            if project_id is None:
                 from api.constants.llm import NO_PROJECT_ID_WARNING
                 messages.append(("system", NO_PROJECT_ID_WARNING))
             
@@ -304,12 +324,15 @@ class AbstractLlmService(ABC):
             logger.exception(f"LLM 调用失败: {e}")
             return f"错误：LLM 调用失败 - {str(e)}"
 
-    def summary_history(self, project_id: str):
+    def summary_history(self, project_id: Optional[str]):
         """
         自动生成聊天摘要（当消息数量达到 summary_epoch 的倍数时）。
         
-        :param project_id: 项目ID
+        :param project_id: 项目ID（None 表示默认工作空间，不生成摘要）
         """
+        # 无项目时不生成摘要（ChatSummary 的 project_id 是主键，不能为 None）
+        if project_id is None:
+            return
         count = HistoryService.count(project_id)
         res_round = count % app_settings.llm.summary_epoch
 
@@ -362,7 +385,7 @@ class AbstractLlmService(ABC):
             except Exception as e:
                 logger.exception(f"生成聊天摘要失败: {e}")
 
-    async def chat_streamed(self, message: str, project_id: str) -> AsyncGenerator[dict, None]:
+    async def chat_streamed(self, message: str, project_id: Optional[str] = None) -> AsyncGenerator[dict, None]:
         """
         增强的流式对话方法，返回结构化事件。
         
@@ -374,7 +397,6 @@ class AbstractLlmService(ABC):
         logger.info(f"👤 用户消息: {message[:200]}{'...' if len(message) > 200 else ''}")
 
         # 创建助手消息的 ID（提前创建，用于实时更新）
-        assistant_message_id = str(uuid.uuid4())
         assistant_context = ""
         assistant_tools: list[dict] = []
         assistant_suggests: list[str] = []
@@ -388,19 +410,22 @@ class AbstractLlmService(ABC):
             if session_info:
                 messages.append(("system", session_info))
             
-            self.summary_history(project_id)
-            chat_summary_memory = MemoryService.get_summary(project_id)
+            # 生成摘要（仅在有项目时）
+            if project_id:
+                self.summary_history(project_id)
+                chat_summary_memory = MemoryService.get_summary(project_id)
+            else:
+                chat_summary_memory = None
 
-            # 2. 创建用户消息并写入数据库
+            # 2. 创建用户消息并写入数据库（ID 会自动生成）
             user_message = ChatMessage(
-                message_id=str(uuid.uuid4()),
                 project_id=project_id,
                 role="user",
                 context=message,
                 status="ready",
                 message_type="normal"
             )
-            HistoryService.create(user_message)
+            user_message = HistoryService.create(user_message)
 
             # 3. 获取历史消息（用于上下文）
             start_index = max(0, HistoryService.count(project_id) - app_settings.llm.summary_epoch)
@@ -422,9 +447,8 @@ class AbstractLlmService(ABC):
                 elif msg.role == "assistant":
                     messages.append(("ai", msg.context))
 
-            # 6. 创建初始助手消息（状态为 thinking）
+            # 6. 创建初始助手消息（状态为 thinking，ID 会自动生成）
             assistant_message = ChatMessage(
-                message_id=assistant_message_id,
                 project_id=project_id,
                 role="assistant",
                 context="",
@@ -433,7 +457,8 @@ class AbstractLlmService(ABC):
                 tools=[],
                 suggests=[]
             )
-            HistoryService.create(assistant_message)
+            assistant_message = HistoryService.create(assistant_message)
+            assistant_message_id = assistant_message.message_id
 
             # 发送消息ID
             yield {'type': 'message_id', 'message_id': assistant_message_id}
@@ -564,10 +589,14 @@ class AbstractLlmService(ABC):
             else:
                 error_msg = f"错误：{e}"
 
-            # 更新助手消息为错误状态
-            assistant_message.status = "error"
-            assistant_message.context = error_msg
-            HistoryService.update(assistant_message)
+            # 更新助手消息为错误状态（如果已创建）
+            if 'assistant_message' in locals() and assistant_message:
+                try:
+                    assistant_message.status = "error"
+                    assistant_message.context = error_msg
+                    HistoryService.update(assistant_message)
+                except Exception as update_error:
+                    logger.warning(f"更新助手消息失败: {update_error}")
 
             yield {'type': 'status', 'status': 'error'}
             yield {'type': 'error', 'error': error_msg}
@@ -576,7 +605,7 @@ class AbstractLlmService(ABC):
         """
         与 LLM 进行标准对话（流式返回）。
         
-        这是 `chat_streamed` 的包装器，只返回文本内容片段，保持向后兼容。
+        这是 `chat_streamed` 的包装器，只返回文本内容片段。
         内部调用 `chat_streamed` 并提取 `content` 事件。
         
         :param message: 用户消息
@@ -621,10 +650,9 @@ class AbstractLlmService(ABC):
                 return
             iteration = ChatIteration(**iteration_message.data)
         else:
-            # 创建新的迭代消息
+            # 创建新的迭代消息（ID 会自动生成）
             iteration = ChatIteration(**iteration_data)
             iteration_message = ChatMessage(
-                message_id=str(uuid.uuid4()),
                 project_id=project_id,
                 role="assistant",
                 context="",
@@ -634,7 +662,7 @@ class AbstractLlmService(ABC):
                 tools=[],
                 suggests=[]
             )
-            HistoryService.create(iteration_message)
+            iteration_message = HistoryService.create(iteration_message)
 
         # 2. 迭代循环
         while iteration.index < iteration.stop:
