@@ -119,12 +119,16 @@ interface Props {
   initialIndex?: number  // 初始显示的图片索引
   visible: boolean  // 是否显示
   jobIds?: string[]  // 每个图片对应的 job_id 数组（可选）
+  versionId?: number  // 模型版本 ID（可选，用于模型示例图片）
+  filenames?: string[]  // 每个图片对应的文件名数组（可选，用于模型示例图片）
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialIndex: 0,
   visible: false,
-  jobIds: undefined
+  jobIds: undefined,
+  versionId: undefined,
+  filenames: undefined
 })
 
 const emit = defineEmits<{
@@ -171,7 +175,11 @@ const loadImageUrls = async () => {
   try {
     // 并行加载所有图片 URL（使用缓存）
     const urls = await Promise.all(
-      props.images.map(url => getImageUrl(url))
+      props.images.map((url, index) => {
+        // 如果提供了 versionId 和 filenames，使用新方式获取图片
+        const filename = props.filenames && props.filenames[index] ? props.filenames[index] : undefined
+        return getImageUrl(url, props.versionId, filename)
+      })
     )
     imageUrls.value = urls.filter((url): url is string => url !== null)
     lastLoadedKey.value = currentImagesKey
@@ -289,7 +297,7 @@ const handleDownload = async () => {
     link.href = blobUrl
     
     // 从 jobIds 中获取 job_id，或者从 URL 中提取，如果都没有则使用默认名称
-    let jobId = 'image'
+    let jobId: string | undefined = 'image'
     if (props.jobIds && props.jobIds.length > currentIndex.value) {
       // 优先使用 jobIds 中的 job_id
       jobId = props.jobIds[currentIndex.value]
@@ -326,8 +334,10 @@ const handleDownload = async () => {
 // 显示生成参数对话框
 const handleShowParams = () => {
   if (props.jobIds && props.jobIds.length > currentIndex.value) {
-    const jobId = props.jobIds[currentIndex.value]
-    emit('show-params', jobId)
+    const jobId: string | undefined = props.jobIds[currentIndex.value]
+    if (jobId) {
+      emit('show-params', jobId)
+    }
   }
 }
 

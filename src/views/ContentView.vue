@@ -582,14 +582,15 @@ const handleEditKeydown = (event: KeyboardEvent) => {
   // Shift+Enter：允许默认行为（换行）
 }
 
-// 处理编辑Enter键（Enter提交，Shift+Enter换行）
-const handleEditEnter = (event: KeyboardEvent) => {
-  if (event.shiftKey) {
+// 处理编辑Enter键（Enter提交，Shift+Enter换行）（未使用，保留以备将来使用）
+// @ts-expect-error - 未使用的函数，保留以备将来使用
+const _handleEditEnter = (_event: KeyboardEvent) => {
+  if (_event.shiftKey) {
     // Shift+Enter：换行
     return
   } else {
     // Enter：提交
-    event.preventDefault()
+    _event.preventDefault()
     saveEdit()
   }
 }
@@ -756,14 +757,15 @@ const handleInsertKeydown = (event: KeyboardEvent) => {
   // Shift+Enter：允许默认行为（换行）
 }
 
-// 处理插入Enter键（Enter提交，Shift+Enter换行）
-const handleInsertEnter = (event: KeyboardEvent) => {
-  if (event.shiftKey) {
+// 处理插入Enter键（Enter提交，Shift+Enter换行）（未使用，保留以备将来使用）
+// @ts-expect-error - 未使用的函数，保留以备将来使用
+const _handleInsertEnter = (_event: KeyboardEvent) => {
+  if (_event.shiftKey) {
     // Shift+Enter：换行
     return
   } else {
     // Enter：提交
-    event.preventDefault()
+    _event.preventDefault()
     const hasContent = insertText.value.trim().length > 0
     if (hasContent) {
       saveInsert()

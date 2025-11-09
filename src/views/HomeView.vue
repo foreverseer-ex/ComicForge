@@ -665,8 +665,6 @@ import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
 import { storeToRefs } from 'pinia'
 import api from '../api'
-import axios from 'axios'
-import { getApiBaseURL } from '../utils/apiConfig'
 import {
   HomeIcon,
   PlusIcon,
@@ -806,8 +804,9 @@ const loadCurrentParagraph = async () => {
           line
         }
       })
+      const contentData = (content as any)?.data || content
       // 立即更新内容，不等待图片加载
-      currentParagraph.value = content
+      currentParagraph.value = contentData
       
       // 暂时禁用图片加载功能（功能尚未实现）
       // TODO: 实现当前图片功能
@@ -841,13 +840,14 @@ const prevParagraph = async () => {
       newChapter -= 1
       // 获取上一章的所有行，取最后一行的行号
       try {
-        const chapterLines = await api.get('/reader/lines', {
+        const response = await api.get('/reader/lines', {
           params: {
             project_id: currentProject.value.project_id,
             chapter: newChapter
           }
         })
-        if (chapterLines && chapterLines.length > 0) {
+        const chapterLines = (response as any)?.data || response
+        if (Array.isArray(chapterLines) && chapterLines.length > 0) {
           newLine = chapterLines[chapterLines.length - 1].line
         } else {
           newLine = 0
@@ -885,13 +885,14 @@ const nextParagraph = async () => {
 
     // 检查是否超出当前章节
     try {
-      const chapterLines = await api.get('/reader/lines', {
+      const response = await api.get('/reader/lines', {
         params: {
           project_id: currentProject.value.project_id,
           chapter: newChapter
         }
       })
-      if (chapterLines && chapterLines.length > 0) {
+      const chapterLines = (response as any)?.data || response
+      if (Array.isArray(chapterLines) && chapterLines.length > 0) {
         const maxLine = chapterLines[chapterLines.length - 1].line
         if (newLine > maxLine && newChapter < currentProject.value.total_chapters - 1) {
           newChapter += 1
@@ -1046,8 +1047,9 @@ const jumpToPosition = async () => {
   }
 }
 
-// 图片加载错误处理
-const handleImageError = () => {
+// 图片加载错误处理（未使用，保留以备将来使用）
+// @ts-expect-error - 未使用的函数，保留以备将来使用
+const _handleImageError = () => {
   currentImageUrl.value = null
 }
 
@@ -1125,11 +1127,12 @@ const uploadFile = async (file: File) => {
     
     // 上传文件到后端（FormData 会自动设置正确的 Content-Type）
     const response = await api.post('/file/upload', formData)
+    const responseData = (response as any)?.data || response
     
     // 保存文件路径到表单
-    if (response.file_path) {
-      projectForm.value.novel_path = response.file_path
-      console.log('文件上传成功:', response.file_path)
+    if (responseData?.file_path) {
+      projectForm.value.novel_path = responseData.file_path
+      console.log('文件上传成功:', responseData.file_path)
     } else {
       throw new Error('服务器未返回文件路径')
     }
@@ -1195,7 +1198,8 @@ const saveProject = async () => {
       }
 
       const response = await api.post('/project/create', null, { params })
-      selectedProjectId.value = response.project_id
+      const responseData = (response as any)?.data || response
+      selectedProjectId.value = responseData?.project_id
     }
     
     // 重置表单
@@ -1245,7 +1249,7 @@ const deleteProject = async () => {
     await loadProjects()
     
     // 如果还有项目，选中第一个
-    if (projectStore.projects.length > 0) {
+    if (projectStore.projects.length > 0 && projectStore.projects[0]) {
       projectStore.setSelectedProjectId(projectStore.projects[0].project_id)
       await loadCurrentProject()
     } else {

@@ -118,7 +118,7 @@ interface Props {
   titleColor?: string  // 标题颜色类
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   title: '确认',
   confirmText: '确定',
   cancelText: '取消',

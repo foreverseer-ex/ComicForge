@@ -293,57 +293,100 @@ async def get_checkpoints() -> List[Dict[str, Any]]:
 # ==================== 图片端点 ====================
 
 @router.get("/image", summary="获取模型示例图片")
-async def get_model_image(image_url: str) -> FileResponse:
+async def get_model_image(
+    image_url: str | None = None,
+    version_id: int | None = None,
+    filename: str | None = None
+) -> FileResponse:
     """
     获取模型示例图片。
     
-    通过图片 URL（file:// URL 或相对路径）获取图片文件。
+    支持两种方式：
+    1. 通过 image_url（兼容旧方式，file:// URL 或相对路径）
+    2. 通过 version_id 和 filename（推荐方式，根据模型版本ID和文件名查找本地文件）
     
     Args:
-        image_url: 图片 URL，例如 "file:///C:/path/to/image.jpg" 或相对路径 "checkpoint/model_name/example.jpg"
+        image_url: 图片 URL（可选，兼容旧方式）
+        version_id: 模型版本 ID（可选，新方式）
+        filename: 示例图片文件名（可选，新方式）
     
     Returns:
         图片文件响应
     
     实现要点：
-    - 支持 file:// URL 和相对路径
+    - 优先使用 version_id + filename 方式（推荐）
+    - 兼容旧的 image_url 方式
     - 只允许访问 model_meta 目录下的文件
     - 防止路径遍历攻击
     """
     from api.utils.path import checkpoint_meta_home, lora_meta_home
     from api.utils.download import url_to_path
+    from pathlib import Path
     
     try:
-        # 尝试将 URL 转换为路径
-        file_path = url_to_path(image_url)
+        file_path: Path | None = None
         
-        if file_path and file_path.exists() and file_path.is_file():
+        # 优先使用 version_id + filename 方式（推荐）
+        if version_id is not None and filename:
+            # 从本地缓存中查找模型
+            model_meta = local_model_meta_service.get_by_id(version_id)
+            if not model_meta:
+                raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
+            
+            # 确定基础路径
+            home = checkpoint_meta_home if model_meta.type == 'checkpoint' else lora_meta_home
+            # 构建文件路径：data/model_meta/checkpoint或lora/模型名称/filename
+            model_dir = home / Path(model_meta.filename).stem
+            file_path = model_dir / filename
+            
+            # 验证文件存在
+            if not file_path.exists() or not file_path.is_file():
+                raise HTTPException(status_code=404, detail=f"图片不存在: {filename}")
+            
             # 验证文件在允许的目录内（防止路径遍历）
             try:
-                file_path.resolve().relative_to(checkpoint_meta_home.resolve())
+                file_path.resolve().relative_to(home.resolve())
                 is_allowed = True
             except ValueError:
-                try:
-                    file_path.resolve().relative_to(lora_meta_home.resolve())
-                    is_allowed = True
-                except ValueError:
-                    is_allowed = False
+                is_allowed = False
             
             if not is_allowed:
                 raise HTTPException(status_code=403, detail="访问被拒绝")
+        
+        # 兼容旧的 image_url 方式
+        elif image_url:
+            # 尝试将 URL 转换为路径
+            file_path = url_to_path(image_url)
             
-            # 返回文件
-            return FileResponse(
-                path=file_path,
-                media_type="image/jpeg"  # 可以根据文件扩展名设置更准确的类型
-            )
+            if file_path and file_path.exists() and file_path.is_file():
+                # 验证文件在允许的目录内（防止路径遍历）
+                try:
+                    file_path.resolve().relative_to(checkpoint_meta_home.resolve())
+                    is_allowed = True
+                except ValueError:
+                    try:
+                        file_path.resolve().relative_to(lora_meta_home.resolve())
+                        is_allowed = True
+                    except ValueError:
+                        is_allowed = False
+                
+                if not is_allowed:
+                    raise HTTPException(status_code=403, detail="访问被拒绝")
+            else:
+                raise HTTPException(status_code=404, detail=f"图片不存在: {image_url}")
         else:
-            raise HTTPException(status_code=404, detail=f"图片不存在: {image_url}")
+            raise HTTPException(status_code=400, detail="必须提供 image_url 或 (version_id + filename)")
+        
+        # 返回文件
+        return FileResponse(
+            path=file_path,
+            media_type="image/jpeg"  # 可以根据文件扩展名设置更准确的类型
+        )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取图片失败: {image_url}")
+        logger.exception(f"获取图片失败: {image_url or f'version_id={version_id}, filename={filename}'}")
         raise HTTPException(status_code=500, detail=f"获取图片失败: {str(e)}")
 
 

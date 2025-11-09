@@ -31,28 +31,37 @@ class ImageCache {
 
   /**
    * 获取缓存的图片 URL
+   * 
+   * @param imageUrl 原始图片 URL（可能是 file:// URL 或远程 URL）
+   * @param versionId 模型版本 ID（可选，用于新方式获取图片）
+   * @param filename 示例图片文件名（可选，用于新方式获取图片）
    */
-  async get(imageUrl: string): Promise<string> {
+  async get(imageUrl: string, versionId?: number, filename?: string): Promise<string> {
     // 如果是远程 URL，直接返回
     if (!imageUrl.startsWith('file://')) {
       return imageUrl
     }
 
+    // 构建缓存 key（如果使用新方式，使用 version_id + filename 作为 key）
+    const cacheKey = (versionId !== undefined && filename) 
+      ? `model:${versionId}:${filename}` 
+      : imageUrl
+
     // 检查缓存
-    const cached = this.cache.get(imageUrl)
+    const cached = this.cache.get(cacheKey)
     if (cached) {
       // 移动到末尾（标记为最近使用）
-      this.cache.delete(imageUrl)
-      this.cache.set(imageUrl, cached)
+      this.cache.delete(cacheKey)
+      this.cache.set(cacheKey, cached)
       return cached.blobUrl
     }
 
     // 缓存未命中，从后端获取
     try {
-      const blobUrl = await this.fetchImage(imageUrl)
+      const blobUrl = await this.fetchImage(imageUrl, versionId, filename)
       
       // 添加到缓存
-      this.addToCache(imageUrl, blobUrl)
+      this.addToCache(cacheKey, blobUrl)
       
       return blobUrl
     } catch (error) {
@@ -64,14 +73,24 @@ class ImageCache {
   /**
    * 从后端获取图片
    */
-  private async fetchImage(imageUrl: string): Promise<string> {
+  private async fetchImage(imageUrl: string, versionId?: number, filename?: string): Promise<string> {
     // 使用原始的 axios 实例，绕过响应拦截器
     const axios = (await import('axios')).default
     const { getApiBaseURL } = await import('./apiConfig')
     
+    // 优先使用 version_id + filename 方式（推荐）
+    const params: any = {}
+    if (versionId !== undefined && filename) {
+      params.version_id = versionId
+      params.filename = filename
+    } else {
+      // 兼容旧的 image_url 方式
+      params.image_url = imageUrl
+    }
+    
     const response = await axios.get('/model-meta/image', {
       baseURL: getApiBaseURL(), // 使用统一的 API baseURL（开发环境是 /api，生产环境是完整 URL）
-      params: { image_url: imageUrl },
+      params,
       responseType: 'blob'
     })
     

@@ -121,6 +121,7 @@ interface ModelMeta {
   base_model: string | null
   examples: any[]
   web_page_url: string | null
+  air: string
   preference?: 'liked' | 'neutral' | 'disliked'  // 模型偏好：喜欢、中性、不喜欢
 }
 
@@ -217,14 +218,31 @@ const rawImageUrl = computed(() => {
 
 // 加载图片 URL
 const loadImageUrl = async () => {
-  if (!rawImageUrl.value || props.privacyMode) {
+  if (!rawImageUrl.value || props.privacyMode || !props.model.examples || props.model.examples.length === 0) {
     imageLoading.value = false
     return
   }
 
   imageLoading.value = true
   try {
-    previewImageUrl.value = await getImageUrl(rawImageUrl.value)
+    // 使用新方式：根据 version_id 和 filename 获取图片
+    // filename 从 URL 中提取（因为后端 Example.filename 是 @property，不会序列化到 JSON）
+    const firstExample = props.model.examples[0]
+    let filename: string | undefined
+    if (firstExample?.url) {
+      try {
+        const url = new URL(firstExample.url)
+        filename = url.pathname.split('/').pop() || undefined
+      } catch {
+        // 如果不是有效的 URL，尝试直接提取文件名
+        filename = firstExample.url.split('/').pop() || undefined
+      }
+    }
+    previewImageUrl.value = await getImageUrl(
+      rawImageUrl.value,
+      props.model.version_id,
+      filename
+    )
   } catch (error) {
     console.error('加载图片失败:', error)
     previewImageUrl.value = null

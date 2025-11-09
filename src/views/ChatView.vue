@@ -104,7 +104,7 @@
                 ]"
                 rows="3"
                 style="min-height: 60px;"
-                :ref="el => { if (el) editingTextareaRef = el }"
+                :ref="setEditingTextareaRef"
               ></textarea>
               <button
                 @click="confirmRestart"
@@ -356,7 +356,7 @@
                         <!-- 渲染视图 -->
                         <div v-if="getToolDisplayMode(message.message_id, index, 'result') === 'rendered'">
                           <!-- 将结果统一转换为 list 格式进行渲染 -->
-                          <template v-for="(item, itemIndex) in normalizeResultToList(tool.result)" :key="itemIndex">
+                          <template v-for="(item, _itemIndex) in normalizeResultToList(tool.result)" :key="_itemIndex">
                             <div 
                               class="border-t first:border-t-0 divide-y"
                               :class="isDark ? 'border-gray-700 divide-gray-700' : 'border-gray-200 divide-gray-200'"
@@ -553,7 +553,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
 import { useNavigationStore } from '../stores/navigation'
@@ -568,7 +568,7 @@ import 'highlight.js/styles/github-dark.css'
 // 类型定义
 interface ChatMessage {
   message_id: string
-  project_id: string
+  project_id: string | null
   role: 'user' | 'assistant' | 'system'
   context: string
   status: string
@@ -597,8 +597,7 @@ const { width: navigationWidth } = storeToRefs(navigationStore)
 const projectStore = useProjectStore()
 const { 
   selectedProjectId, 
-  selectedProject,
-  loadProjects: storeLoadProjects
+  selectedProject
 } = storeToRefs(projectStore)
 
 // 消息相关
@@ -621,7 +620,7 @@ const showClearHistoryDialog = ref(false)
 // 编辑消息相关
 const editingMessageId = ref<string | null>(null)
 const editingText = ref('')
-let editingTextareaRef: HTMLTextAreaElement | null = null
+const editingTextareaRef = ref<HTMLTextAreaElement | null>(null)
 
 // 工具调用展开状态：messageId -> toolIndex -> expanded
 const toolExpandState = ref<Record<string, Record<number, boolean>>>({})
@@ -667,13 +666,16 @@ const mergeMessages = (oldMessages: ChatMessage[], newMessages: ChatMessage[]): 
     const oldMsg = oldMessages[i]
     const newMsg = newMessages[i]
     
-    if (areMessagesEqual(oldMsg, newMsg)) {
+    if (oldMsg && newMsg && areMessagesEqual(oldMsg, newMsg)) {
       // 内容相同，保持原对象引用（避免Vue重新渲染）
       mergedMessages.push(oldMsg)
-    } else {
+    } else if (newMsg) {
       // 内容不同，使用新对象
       mergedMessages.push(newMsg)
       hasChanges = true
+    } else if (oldMsg) {
+      // 新消息不存在，保留旧消息
+      mergedMessages.push(oldMsg)
     }
   }
   
@@ -697,12 +699,13 @@ const loadHistory = async (forceReload: boolean = false) => {
   }
   
   try {
-    const loadedMessages = await api.get('/history/all', {
+    const response = await api.get('/history/all', {
       params: { project_id: selectedProjectId.value || null }
     })
+    const loadedMessages = (response as any).data || response
     
     // 为每条历史消息添加稳定的 _internalKey
-    const newMessages = loadedMessages.map((msg: ChatMessage) => ({
+    const newMessages = (Array.isArray(loadedMessages) ? loadedMessages : []).map((msg: ChatMessage) => ({
       ...msg,
       _internalKey: msg._internalKey || `loaded-${msg.message_id}`
     }))
@@ -885,15 +888,14 @@ const handleStreamEvent = (data: any) => {
   if (eventType === 'message_id') {
     // 更新消息ID（将临时ID替换为真实ID）
     const oldId = currentAssistantMessage?.message_id
-    const internalKey = currentAssistantMessage?._internalKey
-    if (currentAssistantMessage) {
+    if (currentAssistantMessage && oldId) {
       currentAssistantMessage.message_id = data.message_id
-    }
-    // 找到临时消息并更新ID（保持 _internalKey 不变以避免重新渲染）
-    const index = messages.value.findIndex(m => m.message_id === oldId)
-    if (index !== -1 && currentAssistantMessage) {
-      messages.value[index].message_id = data.message_id
-      // 保留 _internalKey，避免因 key 变化导致组件重新挂载
+      // 找到临时消息并更新ID（保持 _internalKey 不变以避免重新渲染）
+      const index = messages.value.findIndex(m => m.message_id === oldId)
+      if (index !== -1 && messages.value[index]) {
+        messages.value[index].message_id = data.message_id
+        // 保留 _internalKey，避免因 key 变化导致组件重新挂载
+      }
     }
   } else if (eventType === 'content') {
     // 流式更新内容
@@ -903,15 +905,15 @@ const handleStreamEvent = (data: any) => {
       const index = messages.value.findIndex(m => 
         m.message_id === currentAssistantMessage?.message_id
       )
-      if (index !== -1) {
+      if (index !== -1 && messages.value[index]) {
         // 直接更新内容，触发响应式更新
-        messages.value[index].context = currentAssistantMessage.context
+        messages.value[index].context = currentAssistantMessage.context || ''
         // 确保工具调用和建议也更新
         if (currentAssistantMessage.tools) {
           messages.value[index].tools = [...currentAssistantMessage.tools]
         }
         if (currentAssistantMessage.suggests) {
-          messages.value[index].suggests = [...currentAssistantMessage.suggests]
+          messages.value[index].suggests = [...(currentAssistantMessage.suggests || [])]
         }
       }
       scrollToBottom()
@@ -929,26 +931,26 @@ const handleStreamEvent = (data: any) => {
     })
     // 实时更新消息中的工具调用
     const index = messages.value.findIndex(m => m.message_id === currentAssistantMessage?.message_id)
-    if (index !== -1) {
+    if (index !== -1 && messages.value[index] && currentAssistantMessage.tools) {
       messages.value[index].tools = [...currentAssistantMessage.tools]
     }
   } else if (eventType === 'tool_end') {
     if (currentAssistantMessage.tools && currentAssistantMessage.tools.length > 0) {
       const lastTool = currentAssistantMessage.tools[currentAssistantMessage.tools.length - 1]
-      if (lastTool.name === data.name) {
+      if (lastTool && lastTool.name === data.name) {
         lastTool.result = data.result
       }
     }
     // 实时更新消息中的工具调用
     const index = messages.value.findIndex(m => m.message_id === currentAssistantMessage?.message_id)
-    if (index !== -1) {
+    if (index !== -1 && messages.value[index] && currentAssistantMessage.tools) {
       messages.value[index].tools = [...currentAssistantMessage.tools]
     }
   } else if (eventType === 'tools') {
     currentAssistantMessage.tools = data.tools || []
     // 更新消息
     const index = messages.value.findIndex(m => m.message_id === currentAssistantMessage?.message_id)
-    if (index !== -1) {
+    if (index !== -1 && messages.value[index]) {
       messages.value[index] = { ...currentAssistantMessage } as ChatMessage
     }
   } else if (eventType === 'suggests') {
@@ -1073,63 +1075,64 @@ const getToolColorCategory = (toolName: string): string => {
   return 'default'
 }
 
-// 获取工具背景颜色类
-const getToolColorClasses = (toolName: string, dark: boolean): string => {
-  const category = getToolColorCategory(toolName)
+// 获取工具背景颜色类（未使用，保留以备将来使用）
+// @ts-expect-error - 未使用的函数，保留以备将来使用
+const _getToolColorClasses = (_toolName: string, _dark: boolean): string => {
+  const category = getToolColorCategory(_toolName)
   const colorMap: Record<string, { bg: string, border: string, text: string }> = {
     session: {
-      bg: dark ? 'bg-blue-900/30' : 'bg-blue-50',
-      border: dark ? 'border-blue-700' : 'border-blue-200',
-      text: dark ? 'text-gray-200' : 'text-gray-800'
+      bg: _dark ? 'bg-blue-900/30' : 'bg-blue-50',
+      border: _dark ? 'border-blue-700' : 'border-blue-200',
+      text: _dark ? 'text-gray-200' : 'text-gray-800'
     },
     memory: {
-      bg: dark ? 'bg-purple-900/30' : 'bg-purple-50',
-      border: dark ? 'border-purple-700' : 'border-purple-200',
-      text: dark ? 'text-gray-200' : 'text-gray-800'
+      bg: _dark ? 'bg-purple-900/30' : 'bg-purple-50',
+      border: _dark ? 'border-purple-700' : 'border-purple-200',
+      text: _dark ? 'text-gray-200' : 'text-gray-800'
     },
     actor: {
-      bg: dark ? 'bg-pink-900/30' : 'bg-pink-50',
-      border: dark ? 'border-pink-700' : 'border-pink-200',
-      text: dark ? 'text-gray-200' : 'text-gray-800'
+      bg: _dark ? 'bg-pink-900/30' : 'bg-pink-50',
+      border: _dark ? 'border-pink-700' : 'border-pink-200',
+      text: _dark ? 'text-gray-200' : 'text-gray-800'
     },
     reader: {
-      bg: dark ? 'bg-teal-900/30' : 'bg-teal-50',
-      border: dark ? 'border-teal-700' : 'border-teal-200',
-      text: dark ? 'text-gray-200' : 'text-gray-800'
+      bg: _dark ? 'bg-teal-900/30' : 'bg-teal-50',
+      border: _dark ? 'border-teal-700' : 'border-teal-200',
+      text: _dark ? 'text-gray-200' : 'text-gray-800'
     },
     novel: {
-      bg: dark ? 'bg-cyan-900/30' : 'bg-cyan-50',
-      border: dark ? 'border-cyan-700' : 'border-cyan-200',
-      text: dark ? 'text-gray-200' : 'text-gray-800'
+      bg: _dark ? 'bg-cyan-900/30' : 'bg-cyan-50',
+      border: _dark ? 'border-cyan-700' : 'border-cyan-200',
+      text: _dark ? 'text-gray-200' : 'text-gray-800'
     },
     draw: {
-      bg: dark ? 'bg-orange-900/30' : 'bg-orange-50',
-      border: dark ? 'border-orange-700' : 'border-orange-200',
-      text: dark ? 'text-gray-200' : 'text-gray-800'
+      bg: _dark ? 'bg-orange-900/30' : 'bg-orange-50',
+      border: _dark ? 'border-orange-700' : 'border-orange-200',
+      text: _dark ? 'text-gray-200' : 'text-gray-800'
     },
     llm: {
-      bg: dark ? 'bg-green-900/30' : 'bg-green-50',
-      border: dark ? 'border-green-700' : 'border-green-200',
-      text: dark ? 'text-gray-200' : 'text-gray-800'
+      bg: _dark ? 'bg-green-900/30' : 'bg-green-50',
+      border: _dark ? 'border-green-700' : 'border-green-200',
+      text: _dark ? 'text-gray-200' : 'text-gray-800'
     },
     illustration: {
-      bg: dark ? 'bg-purple-900/30' : 'bg-purple-50',
-      border: dark ? 'border-purple-700' : 'border-purple-200',
-      text: dark ? 'text-gray-200' : 'text-gray-800'
+      bg: _dark ? 'bg-purple-900/30' : 'bg-purple-50',
+      border: _dark ? 'border-purple-700' : 'border-purple-200',
+      text: _dark ? 'text-gray-200' : 'text-gray-800'
     },
     file: {
-      bg: dark ? 'bg-amber-900/30' : 'bg-amber-50',
-      border: dark ? 'border-amber-700' : 'border-amber-200',
-      text: dark ? 'text-gray-200' : 'text-gray-800'
+      bg: _dark ? 'bg-amber-900/30' : 'bg-amber-50',
+      border: _dark ? 'border-amber-700' : 'border-amber-200',
+      text: _dark ? 'text-gray-200' : 'text-gray-800'
     },
     default: {
-      bg: dark ? 'bg-gray-700' : 'bg-gray-50',
-      border: dark ? 'border-gray-600' : 'border-gray-200',
-      text: dark ? 'text-gray-300' : 'text-gray-700'
+      bg: _dark ? 'bg-gray-700' : 'bg-gray-50',
+      border: _dark ? 'border-gray-600' : 'border-gray-200',
+      text: _dark ? 'text-gray-300' : 'text-gray-700'
     }
   }
   const colors = colorMap[category] || colorMap.default
-  return `${colors.bg} ${colors.border} border ${colors.text}`
+  return `${colors?.bg || ''} ${colors?.border || ''} border ${colors?.text || ''}`
 }
 
 // 获取工具名称颜色类（Cursor 风格：更柔和的颜色）
@@ -1147,24 +1150,26 @@ const getToolNameColorClasses = (toolName: string, dark: boolean): string => {
     file: dark ? 'text-amber-400' : 'text-amber-500',
     default: dark ? 'text-gray-300' : 'text-gray-600'
   }
-  return colorMap[category] || colorMap.default
+  return colorMap[category] || colorMap.default || ''
 }
 
-// 格式化工具参数
-const formatToolArgs = (args: Record<string, any>): string => {
+// 格式化工具参数（未使用，保留以备将来使用）
+// @ts-expect-error - 未使用的函数，保留以备将来使用
+const _formatToolArgs = (_args: Record<string, any>): string => {
   const parts: string[] = []
-  for (const [key, value] of Object.entries(args)) {
+  for (const [key, value] of Object.entries(_args)) {
     const valStr = typeof value === 'string' ? `"${value}"` : String(value)
     parts.push(`${key}=${valStr}`)
   }
   return parts.join(', ')
 }
 
-// 判断结果是否是 JSON 格式
-const isJSONResult = (result: string | null): boolean => {
-  if (!result || typeof result !== 'string') return false
+// 判断结果是否是 JSON 格式（未使用，保留以备将来使用）
+// @ts-expect-error - 未使用的函数，保留以备将来使用
+const _isJSONResult = (_result: string | null): boolean => {
+  if (!_result || typeof _result !== 'string') return false
   try {
-    JSON.parse(result)
+    JSON.parse(_result)
     return true
   } catch {
     return false
@@ -1257,12 +1262,18 @@ const copyToClipboard = async (text: string, elementId: string) => {
   }
 }
 
-// 截断结果（用于折叠状态）
-const truncateResult = (result: string): string => {
-  if (result.length > 100) {
-    return result.substring(0, 100) + '...'
+// 截断结果（用于折叠状态）（未使用，保留以备将来使用）
+// @ts-expect-error - 未使用的函数，保留以备将来使用
+const _truncateResult = (_result: string): string => {
+  if (_result.length > 100) {
+    return _result.substring(0, 100) + '...'
   }
-  return result
+  return _result
+}
+
+// 设置编辑文本框 ref
+const setEditingTextareaRef = (el: any) => {
+  editingTextareaRef.value = el ? (el as HTMLTextAreaElement) : null
 }
 
 // 开始编辑消息
@@ -1270,7 +1281,7 @@ const startEditMessage = (messageId: string, content: string) => {
   editingMessageId.value = messageId
   editingText.value = content
   nextTick(() => {
-    editingTextareaRef?.focus()
+    editingTextareaRef.value?.focus()
   })
 }
 
@@ -1278,7 +1289,7 @@ const startEditMessage = (messageId: string, content: string) => {
 const cancelEdit = () => {
   editingMessageId.value = null
   editingText.value = ''
-  editingTextareaRef = null
+  editingTextareaRef.value = null
 }
 
 // 确认重新开始（使用编辑后的内容）
@@ -1361,6 +1372,7 @@ const scrollToBottom = () => {
 const renderer = new marked.Renderer()
 
 // 自定义代码块渲染器，使用 highlight.js 进行语法高亮
+// @ts-ignore - marked 的类型定义可能不完整
 renderer.code = (code: string | any, language: string | undefined | null) => {
   const codeStr = String(code || '')
   let lang: string = ''

@@ -528,8 +528,9 @@ const canSubmit = computed(() => {
 // 加载绘图后端设置
 const loadDrawSettings = async () => {
   try {
-    const settings = await api.get('/settings/draw')
-    drawBackend.value = settings.backend || 'sd_forge'
+    const response = await api.get('/settings/draw')
+    const settings = (response as any)?.data || response
+    drawBackend.value = settings?.backend || 'sd_forge'
   } catch (error) {
     console.error('加载绘图设置失败:', error)
     drawBackend.value = 'sd_forge'

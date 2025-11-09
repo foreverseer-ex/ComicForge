@@ -20,12 +20,12 @@ function createToastContainer() {
   return toastContainer
 }
 
-export function showToast(message: string, type: 'success' | 'error' | 'info' = 'success', duration: number = 3000) {
+export function showToast(message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success', duration: number = 3000) {
   const container = createToastContainer()
   
   const toast = document.createElement('div')
   toast.style.cssText = `
-    background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
+    background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#3b82f6'};
     color: white;
     padding: 12px 16px;
     border-radius: 8px;

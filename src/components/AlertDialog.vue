@@ -76,7 +76,7 @@ interface Props {
   message: string
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   title: '提示'
 })
 

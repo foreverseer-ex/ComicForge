@@ -49,7 +49,7 @@ export const useProjectStore = defineStore('project', () => {
         const savedProjectId = localStorage.getItem('currentProjectId')
         if (savedProjectId && projects.value.find(p => p.project_id === savedProjectId)) {
           setSelectedProjectId(savedProjectId)
-        } else {
+        } else if (projects.value.length > 0 && projects.value[0]) {
           // 如果没有保存的项目，选中第一个
           setSelectedProjectId(projects.value[0].project_id)
         }

@@ -143,7 +143,7 @@ interface Props {
   showSwitchButton?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   title: '选择已有任务图像',
   showSwitchButton: true
 })

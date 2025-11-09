@@ -162,7 +162,7 @@ const imageTimestamp = ref(Date.now()) // 初始时间戳
 
 // 带重试的图片URL
 const firstExampleImageWithRetry = computed(() => {
-  if (!firstExampleImage.value) return null
+  if (!firstExampleImage.value) return undefined
   // 添加时间戳和重试次数作为查询参数，避免浏览器缓存
   const separator = firstExampleImage.value.includes('?') ? '&' : '?'
   return `${firstExampleImage.value}${separator}_t=${imageTimestamp.value}&_retry=${imageRetryCount.value}&_key=${imageLoadKey.value}`

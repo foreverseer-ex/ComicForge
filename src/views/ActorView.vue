@@ -409,7 +409,6 @@ const saveActor = async () => {
 
   saving.value = true
   try {
-    let actorId: string | null = null
     if (editingActor.value) {
       // 更新角色
       await api.put(`/actor/${editingActor.value.actor_id}`, {
@@ -417,10 +416,9 @@ const saveActor = async () => {
         desc: actorForm.value.desc.trim(),
         color: actorForm.value.color.trim()
       })
-      actorId = editingActor.value.actor_id
     } else {
       // 创建角色（如果没有项目，使用 null 作为 project_id）
-      const result = await api.post('/actor/create', null, {
+      await api.post('/actor/create', null, {
         params: {
           project_id: selectedProjectId.value || null,
           name: actorForm.value.name.trim(),
@@ -428,7 +426,6 @@ const saveActor = async () => {
           color: actorForm.value.color.trim()
         }
       })
-      actorId = result.actor_id
       showToast('角色创建成功', 'success')
     }
     
@@ -607,7 +604,7 @@ watch([hasGeneratingPortrait, selectedProjectId], ([hasGenerating, projectId]) =
             // 智能更新：只更新有变化的 actor
             response.forEach((updatedActor: any) => {
               const existingIndex = actors.value.findIndex(a => a.actor_id === updatedActor.actor_id)
-              if (existingIndex >= 0) {
+              if (existingIndex >= 0 && actors.value[existingIndex]) {
                 // 检查这个 actor 的 examples 是否有变化
                 const existingActor = actors.value[existingIndex]
                 const existingExamplesState = JSON.stringify(existingActor.examples?.map((ex: any) => ({

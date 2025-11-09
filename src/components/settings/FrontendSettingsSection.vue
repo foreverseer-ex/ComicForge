@@ -80,7 +80,7 @@ import { ref, onMounted, watch } from 'vue'
 import { updateImageCacheSize, imageCache } from '../../utils/imageCache'
 import { showToast } from '../../utils/toast'
 
-const props = defineProps<{
+defineProps<{
   isDark: boolean
 }>()
 

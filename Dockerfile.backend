@@ -4,6 +4,16 @@ FROM python:3.13-slim
 # 设置工作目录
 WORKDIR /app
 
+# 替换为国内镜像源（阿里云）以加速下载
+# 检测 Debian 版本并替换源
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
+        sed -i 's|http://security.debian.org|https://mirrors.aliyun.com/debian-security|g' /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+        sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list && \
+        sed -i 's|http://security.debian.org|https://mirrors.aliyun.com/debian-security|g' /etc/apt/sources.list; \
+    fi
+
 # 安装系统依赖
 RUN apt-get update && apt-get install -y \
     curl \

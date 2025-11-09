@@ -418,7 +418,7 @@
                   v-model="memoryForm.description"
                   type="text"
                   :placeholder="isPredefinedKey ? '预定义键的说明' : '对这条记忆的补充说明'"
-                  :disabled="isPredefinedKey"
+                  :disabled="!!isPredefinedKey"
                   :class="[
                     'w-full px-4 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500',
                     isDark
@@ -541,8 +541,9 @@ const userKeys = ref<Record<string, string>>({})
 // 加载预定义键
 const loadPredefinedKeys = async () => {
   try {
-    const keys = await api.get('/memory/key-descriptions')
-    predefinedKeys.value = keys
+    const response = await api.get('/memory/key-descriptions')
+    const keys = (response as any)?.data || response
+    predefinedKeys.value = keys || {}
     
     // 分离小说相关和用户偏好相关的键
     const novelKeysMap: Record<string, string> = {}
@@ -558,10 +559,12 @@ const loadPredefinedKeys = async () => {
     ]
     
     for (const [key, desc] of Object.entries(keys)) {
-      if (novelKeyNames.includes(key)) {
-        novelKeysMap[key] = desc
-      } else if (userKeyNames.includes(key)) {
-        userKeysMap[key] = desc
+      const keyStr = String(key)
+      const descStr = String(desc)
+      if (novelKeyNames.includes(keyStr)) {
+        novelKeysMap[keyStr] = descStr
+      } else if (userKeyNames.includes(keyStr)) {
+        userKeysMap[keyStr] = descStr
       }
     }
     
@@ -576,13 +579,14 @@ const loadPredefinedKeys = async () => {
 const loadMemories = async () => {
   loading.value = true
   try {
-    const data = await api.get('/memory/all', {
+    const response = await api.get('/memory/all', {
       params: {
         project_id: selectedProjectId.value || null,
         limit: 1000
       }
     })
-    memories.value = data || []
+    const data = (response as any)?.data || response
+    memories.value = Array.isArray(data) ? data : []
   } catch (error: any) {
     console.error('加载记忆失败:', error)
     showToast('加载记忆失败: ' + (error.response?.data?.detail || error.message), 'error')
@@ -764,15 +768,16 @@ const handleClearAll = () => {
       confirmDialog.value.show = false
       clearing.value = true
       try {
-        const result = await api.delete('/memory/clear', {
+        const response = await api.delete('/memory/clear', {
           params: {
             project_id: selectedProjectId.value || null
           }
         })
+        const result = (response as any)?.data || response
         
         selectedMemoryIds.value.clear()
         await loadMemories()
-        showToast(`已清空 ${result.deleted_count || 0} 条记忆`, 'success')
+        showToast(`已清空 ${result?.deleted_count || 0} 条记忆`, 'success')
       } catch (error: any) {
         console.error('清空记忆失败:', error)
         showToast('清空记忆失败: ' + (error.response?.data?.detail || error.message), 'error')
@@ -783,12 +788,13 @@ const handleClearAll = () => {
   }
 }
 
-// 截断值显示
-const truncateValue = (value: string, maxLength: number = 100): string => {
-  if (value.length <= maxLength) {
-    return value
+// 截断值显示（未使用，保留以备将来使用）
+// @ts-expect-error - 未使用的函数，保留以备将来使用
+const _truncateValue = (_value: string, _maxLength: number = 100): string => {
+  if (_value.length <= _maxLength) {
+    return _value
   }
-  return value.substring(0, maxLength) + '...'
+  return _value.substring(0, _maxLength) + '...'
 }
 
 // 格式化日期时间

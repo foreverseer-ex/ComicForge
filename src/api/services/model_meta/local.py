@@ -200,8 +200,11 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         
         此方法会：
         1. 下载所有远程示例图片到本地
-        2. 将 example 的 URL 转换为本地 file:// URL
+        2. 保持 example 的原始 URL（不替换为本地 file:// URL）
         3. 序列化 ModelMeta 到本地 metadata.json
+        
+        注意：示例图片的 URL 保持原始值（Civitai URL），实际文件保存在本地。
+        前端获取图片时，应根据 version_id 和 filename 查找本地文件。
         
         :param model_meta: 模型元数据（必须包含 type 字段，可以是远程的或本地的）
         :param parallel_download: 是否并行下载示例图片，默认 False（串行下载）
@@ -263,13 +266,8 @@ class LocalModelModelMetaService(AbstractModelMetaService):
                         failed_image_count += 1
                         continue
                     elif result:
-                        # 下载成功
-                        save_path = base_path / example.filename
-                        local_example = Example(
-                            url=save_path.as_uri(),
-                            args=example.args
-                        )
-                        localized_examples.append(local_example)
+                        # 下载成功，保持原始 URL（不替换为本地 file:// URL）
+                        localized_examples.append(example)
                         logger.debug(f"成功下载示例图片: {example.filename}")
                     else:
                         failed_image_count += 1
@@ -283,12 +281,8 @@ class LocalModelModelMetaService(AbstractModelMetaService):
                     
                     success = await download_file(example.url, save_path, app_settings.civitai.timeout)
                     if success:
-                        # 创建新的 Example，替换 URL 为本地 file:// URL
-                        local_example = Example(
-                            url=save_path.as_uri(),  # 转换为 file:// URL
-                            args=example.args
-                        )
-                        localized_examples.append(local_example)
+                        # 下载成功，保持原始 URL（不替换为本地 file:// URL）
+                        localized_examples.append(example)
                         logger.debug(f"成功下载示例图片: {example.filename}")
                     else:
                         failed_image_count += 1

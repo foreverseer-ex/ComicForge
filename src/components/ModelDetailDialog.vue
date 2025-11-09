@@ -356,6 +356,8 @@
     <!-- 大图显示对话框 -->
     <ImageGalleryDialog
       :images="allExampleUrls"
+      :version-id="model?.version_id"
+      :filenames="allExampleFilenames"
       :initial-index="currentExampleIndex"
       :visible="showImageGallery"
       @close="showImageGallery = false"
@@ -482,6 +484,22 @@ const allExampleUrls = computed(() => {
     .filter(url => url) as string[]
 })
 
+// 所有example的文件名数组（用于大图显示）
+const allExampleFilenames = computed(() => {
+  if (!props.model || !props.model.examples) return []
+  return props.model.examples
+    .map(ex => {
+      if (!ex?.url) return undefined
+      try {
+        const url = new URL(ex.url)
+        return url.pathname.split('/').pop() || undefined
+      } catch {
+        return ex.url.split('/').pop() || undefined
+      }
+    })
+    .filter((filename): filename is string => filename !== undefined)
+})
+
 // 图片 URL
 const previewImageUrl = ref<string | null>(null)
 const imageLoading = ref(true)
@@ -493,7 +511,7 @@ const rawImageUrl = computed(() => {
 
 // 加载图片 URL
 const loadImageUrl = async () => {
-  if (!rawImageUrl.value) {
+  if (!rawImageUrl.value || !currentExample.value || !props.model) {
     imageLoading.value = false
     previewImageUrl.value = null
     return
@@ -501,7 +519,23 @@ const loadImageUrl = async () => {
 
   imageLoading.value = true
   try {
-    previewImageUrl.value = await getImageUrl(rawImageUrl.value)
+    // 使用新方式：根据 version_id 和 filename 获取图片
+    // filename 从 URL 中提取（因为后端 Example.filename 是 @property，不会序列化到 JSON）
+    let filename: string | undefined
+    if (currentExample.value.url) {
+      try {
+        const url = new URL(currentExample.value.url)
+        filename = url.pathname.split('/').pop() || undefined
+      } catch {
+        // 如果不是有效的 URL，尝试直接提取文件名
+        filename = currentExample.value.url.split('/').pop() || undefined
+      }
+    }
+    previewImageUrl.value = await getImageUrl(
+      rawImageUrl.value,
+      props.model.version_id,
+      filename
+    )
   } catch (error) {
     console.error('加载图片失败:', error)
     previewImageUrl.value = null
@@ -712,9 +746,10 @@ const handleReset = () => {
             parallel_download: false  // 串行下载，避免并发过多
           }
         })
+        const responseData = (response as any)?.data || response
         
-        if (response.success) {
-          showToast(`重置成功：${response.model_name}`, 'success')
+        if (responseData?.success) {
+          showToast(`重置成功：${responseData.model_name}`, 'success')
           // 触发模型更新事件，让父组件刷新模型列表
           emit('model-updated')
           // 关闭对话框，让用户重新打开查看更新后的数据

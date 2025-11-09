@@ -133,6 +133,7 @@ const ensureString = (value: any, fallback: string = ''): string => {
 }
 
 // 自定义代码块渲染器，使用 highlight.js 进行语法高亮
+// @ts-ignore - marked 的类型定义可能不完整
 renderer.code = (code: string | any, language: string | undefined | null) => {
   // 确保 code 是字符串类型
   const codeStr = ensureString(code, '')
@@ -297,7 +298,7 @@ const handleLinkClick = (event: MouseEvent) => {
   const target = event.target as HTMLElement
   
   // 检查是否点击的是复制按钮
-  const copyBtn = target.closest('.code-block-copy-btn')
+  const copyBtn = target.closest('.code-block-copy-btn') as HTMLElement | null
   if (copyBtn) {
     event.preventDefault()
     event.stopPropagation()

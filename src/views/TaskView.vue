@@ -360,8 +360,7 @@ import {
   PaintBrushIcon,
   PlusIcon,
   TrashIcon,
-  ArrowDownTrayIcon,
-  XMarkIcon
+  ArrowDownTrayIcon
 } from '@heroicons/vue/24/outline'
 import CreateDrawTaskDialog from '../components/CreateDrawTaskDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -420,8 +419,9 @@ const alertDialog = ref({
 const loadJobs = async () => {
   loading.value = true
   try {
-    const data = await api.get('/draw/all')
-    jobs.value = data
+    const response = await api.get('/draw/all')
+    const data = (response as any)?.data || response
+    jobs.value = Array.isArray(data) ? data : []
     // 清除已删除任务的选中状态
     const existingJobIds = new Set(jobs.value.map(job => job.job_id))
     selectedJobIds.value = new Set(
@@ -461,16 +461,17 @@ const checkPendingJobStatuses = async () => {
   // 并行检查所有待处理任务
   const promises = pendingJobs.map(async (job) => {
     try {
-      const jobData = await api.get('/draw', { params: { job_id: job.job_id } })
+      const response = await api.get('/draw', { params: { job_id: job.job_id } })
+      const jobData = (response as any)?.data || response
       // 更新任务数据（可能包含 status 或 completed_at）
       const index = jobs.value.findIndex(j => j.job_id === job.job_id)
       if (index >= 0) {
         jobs.value[index] = jobData
       }
       // 更新状态
-      if (jobData.status === 'completed') {
+      if (jobData?.status === 'completed') {
         jobStatuses.value[job.job_id] = true
-      } else if (jobData.status === 'failed') {
+      } else if (jobData?.status === 'failed') {
         jobStatuses.value[job.job_id] = false
       }
     } catch (error) {
@@ -481,13 +482,15 @@ const checkPendingJobStatuses = async () => {
   await Promise.all(promises)
 }
 
-// 检查单个任务状态（只在需要时调用）
-const checkJobStatus = async (jobId: string): Promise<boolean> => {
+// 检查单个任务状态（只在需要时调用）（未使用，保留以备将来使用）
+// @ts-expect-error - 未使用的函数，保留以备将来使用
+const _checkJobStatus = async (_jobId: string): Promise<boolean> => {
   try {
-    const response = await api.get('/draw/job/status', { params: { job_id: jobId } })
-    return response.completed || false
+    const response = await api.get('/draw/job/status', { params: { job_id: _jobId } })
+    const responseData = (response as any)?.data || response
+    return responseData?.completed || false
   } catch (error) {
-    console.debug(`检查任务状态失败: ${jobId}`, error)
+    console.debug(`检查任务状态失败: ${_jobId}`, error)
     return false
   }
 }

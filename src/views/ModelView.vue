@@ -488,7 +488,7 @@ const themeStore = useThemeStore()
 const { isDark } = storeToRefs(themeStore)
 
 const projectStore = useProjectStore()
-const { selectedProjectId } = storeToRefs(projectStore)
+// const { selectedProjectId } = storeToRefs(projectStore)
 
 const privacyStore = usePrivacyStore()
 const { privacyMode } = storeToRefs(privacyStore)
@@ -553,11 +553,13 @@ const loadModels = async () => {
   loading.value = true
   try {
     // 加载 Checkpoint
-    const checkpointData = await api.get('/model-meta/checkpoint')
+    const checkpointResponse = await api.get('/model-meta/checkpoint')
+    const checkpointData = (checkpointResponse as any)?.data || checkpointResponse
     checkpoints.value = Array.isArray(checkpointData) ? checkpointData : []
     
     // 加载 LoRA
-    const loraData = await api.get('/model-meta/loras')
+    const loraResponse = await api.get('/model-meta/loras')
+    const loraData = (loraResponse as any)?.data || loraResponse
     loras.value = Array.isArray(loraData) ? loraData : []
     
   } catch (error) {
@@ -640,14 +642,15 @@ const batchImport = async () => {
   // 获取最大并发数设置
   let maxConcurrency = 4 // 默认值
   try {
-    const settings = await api.get('/settings/civitai')
-    maxConcurrency = settings.parallel_workers || 4
+    const response = await api.get('/settings/civitai')
+    const settings = (response as any)?.data || response
+    maxConcurrency = settings?.parallel_workers || 4
   } catch (error) {
     console.warn('获取并发数设置失败，使用默认值:', error)
   }
   
   // 并发导入函数
-  const importSingleModel = async (air: string, index: number, parallelDownload: boolean = false) => {
+  const importSingleModel = async (air: string, _index: number, parallelDownload: boolean = false) => {
     if (cancelImportFlag.value) {
       return { success: false, air, error: '已取消' }
     }
@@ -658,7 +661,7 @@ const batchImport = async () => {
         parallel_download: parallelDownload
       })
       
-      const data = response.data || response
+      const data = (response as any)?.data || response
       
       if (data.success) {
         if (data.skipped) {
@@ -798,8 +801,9 @@ watch(showImportDialog, async (newVal) => {
   }
 })
 
-// 取消导入
-const cancelImport = () => {
+// 取消导入（未使用，保留以备将来使用）
+// @ts-expect-error - 未使用的函数，保留以备将来使用
+const _cancelImport = () => {
   if (importing.value) {
     cancelImportFlag.value = true
     importStatus.value = '⚠️ 正在取消导入...'
@@ -923,7 +927,8 @@ const deleteModel = async () => {
 }
 
 // 检查模型文件是否存在
-const checkModelFileExists = (model: ModelMeta) => {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const checkModelFileExists = (_model: ModelMeta) => {
   // TODO: 调用 API 检查
   return true
 }
@@ -933,7 +938,7 @@ const handlePreferenceChanged = (model: ModelMeta) => {
   // 更新本地模型列表中的偏好状态
   const updateModelInList = (list: ModelMeta[]) => {
     const index = list.findIndex(m => m.version_id === model.version_id)
-    if (index >= 0) {
+    if (index >= 0 && list[index]) {
       list[index].preference = model.preference
     }
   }

@@ -792,10 +792,10 @@ const allExampleUrls = computed(() => {
     .filter((url): url is string => url !== null && url !== '')
 })
 
-const firstExample = computed(() => {
-  if (!props.actor?.examples || props.actor.examples.length === 0) return null
-  return props.actor.examples[0]
-})
+// const firstExample = computed(() => {
+//   if (!props.actor?.examples || props.actor.examples.length === 0) return null
+//   return props.actor.examples[0]
+// })
 
 const getExampleImageUrl = (example: any, index: number) => {
   if (!example?.image_path || !props.actor) return ''
@@ -872,7 +872,7 @@ const handleExampleImageError = (event: Event, index: number) => {
 }
 
 // 立绘列表中图片加载成功
-const handleExampleImageLoad = (event: Event, index: number) => {
+const handleExampleImageLoad = (_event: Event, index: number) => {
   exampleImageRetryCounts.value[index] = 0
   exampleImageLoadKeys.value[index] = 0
 }
@@ -909,9 +909,10 @@ watch(() => props.actor, (newActor) => {
       try {
         // 只获取 actor 数据，检查是否有变化
         const response = await api.get(`/actor/${newActor.actor_id}`)
-        if (response && response.examples) {
+        const actorData = (response as any)?.data || response
+        if (actorData && actorData.examples) {
           // 比较当前状态和上次状态
-          const currentState = JSON.stringify(response.examples.map((ex: any) => ({
+          const currentState = JSON.stringify(actorData.examples.map((ex: any) => ({
             image_path: ex.image_path,
             title: ex.title
           })))
@@ -1100,11 +1101,11 @@ const close = () => {
   emit('close')
 }
 
-const openEditDialog = () => {
-  if (props.actor) {
-    emit('edit', props.actor)
-  }
-}
+// const openEditDialog = () => {
+//   if (props.actor) {
+//     emit('edit', props.actor)
+//   }
+// }
 
 const openGenerateDialog = () => {
   showGenerateDialog.value = true
@@ -1115,11 +1116,11 @@ const handleGenerated = () => {
   emit('refresh')
 }
 
-const openExamplesDialog = () => {
-  if (props.actor) {
-    emit('examples', props.actor)
-  }
-}
+// const openExamplesDialog = () => {
+//   if (props.actor) {
+//     emit('examples', props.actor)
+//   }
+// }
 
 // 切换到上一张example
 const prevExample = () => {
@@ -1367,8 +1368,9 @@ const deleteOtherExamples = () => {
         
         // 计算要删除的索引列表（除了 index=0 之外的所有索引）
         // 需要先刷新 actor 数据以获取最新的 examples 列表
-        const updatedActor = await api.get(`/actor/${props.actor!.actor_id}`)
-        const totalCount = updatedActor.examples?.length || 0
+        const response = await api.get(`/actor/${props.actor!.actor_id}`)
+        const updatedActor = (response as any)?.data || response
+        const totalCount = updatedActor?.examples?.length || 0
         
         if (totalCount <= 1) {
           showToast('没有其他立绘需要删除', 'info')

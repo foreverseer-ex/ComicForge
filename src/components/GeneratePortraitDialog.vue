@@ -21,7 +21,7 @@
           :context-info="actorName"
           :initial-name="taskName"
           :additional-info="additionalInfo"
-          :project-id="projectId"
+          :project-id="projectId ?? undefined"
           submit-button-text="开始生成"
           submit-button-loading-text="生成中..."
           :show-cancel="false"
@@ -58,7 +58,7 @@ interface Props {
   show: boolean
   actorName: string
   actorId: string
-  projectId: string | null
+  projectId: string | null | undefined
   actorDesc?: string // 角色描述
   actorTags?: Record<string, string> // 角色标签
 }
@@ -178,8 +178,9 @@ const handleSelectJob = async (job: any) => {
         project_id: props.projectId || null
       }
     })
+    const resultData = (result as any)?.data || result
     
-    if (result?.completed) {
+    if (resultData?.completed) {
       showToast('立绘已成功添加到角色', 'success')
     } else {
       showToast('立绘生成任务已提交，完成后将自动添加到角色', 'success')

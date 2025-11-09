@@ -196,7 +196,7 @@ const handleGenerateWithAI = async () => {
     const desc = drawFormRef.value.formData?.desc || ''
     
     if (!name.trim()) {
-      showToast('请先填写任务名称', 'warning')
+      showToast('请先填写任务名称', 'info')
       generatingParams.value = false
       return
     }
