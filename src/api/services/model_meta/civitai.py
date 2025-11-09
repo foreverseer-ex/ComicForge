@@ -79,21 +79,25 @@ class CivitaiModelMetaService(AbstractModelMetaService):
                 meta={}
             metadata = image_detail.get("metadata", {})
             
+            # 注意：Example.args 期望的是 dict，而不是 DrawArgs 对象
+            # 因此将 DrawArgs 转为字典以避免 pydantic 校验错误
+            args_dict = DrawArgs(
+                width=metadata.get("width", 0),
+                height=metadata.get("height", 0),
+                seed=meta.get("seed", -1),
+                model=meta.get("Model", ""),
+                steps=meta.get("steps", 0),
+                prompt=meta.get("prompt", ""),
+                sampler=meta.get("sampler", ""),
+                cfg_scale=meta.get("cfgScale", 0),
+                negative_prompt=meta.get("negativePrompt", ""),
+                clip_skip=meta.get("clipSkip"),
+            ).model_dump()
+
             examples.append(
                 Example(
                     url=image_detail.get("url", ""),
-                    args=DrawArgs(
-                        width=metadata.get("width", 0),
-                        height=metadata.get("height", 0),
-                        seed=meta.get("seed", -1),
-                        model=meta.get("Model", ""),
-                        steps=meta.get("steps", 0),
-                        prompt=meta.get("prompt", ""),
-                        sampler=meta.get("sampler", ""),
-                        cfg_scale=meta.get("cfgScale", 0),
-                        negative_prompt=meta.get("negativePrompt", ""),
-                        clip_skip=meta.get("clipSkip"),
-                    ),
+                    args=args_dict,
                 )
             )
         

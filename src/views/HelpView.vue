@@ -90,8 +90,7 @@ import hljs from 'highlight.js'
 import '../styles/highlight.css'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
-import axios from 'axios'
-import { getApiBaseURL } from '../utils/apiConfig'
+import api from '../api'
 import { LanguageIcon } from '@heroicons/vue/24/outline'
 
 const themeStore = useThemeStore()
@@ -262,18 +261,13 @@ const loadHelp = async () => {
   error.value = null
   
   try {
-    // 直接使用 axios 而不是 api 实例，避免拦截器处理 text 响应
-    const baseURL = getApiBaseURL()
-    const response = await axios.get(`${baseURL}/help/`, {
-      params: {
-        lang: currentLang.value
-      },
-      responseType: 'text' // 后端返回的是纯文本 Markdown
-    })
-    
-    // axios 直接返回响应对象，response.data 是字符串
-    // 确保 response.data 是字符串类型
-    let content = response.data
+    // 使用统一 api（带上 Authorization/withCredentials 与刷新逻辑）
+    const response = await api.get('/help/', {
+      params: { lang: currentLang.value },
+      responseType: 'text'
+    }) as any
+    // api 响应拦截器返回的就是 data
+    let content = typeof response === 'string' ? response : (response?.data ?? response)
     if (typeof content !== 'string') {
       console.warn('响应数据类型不是字符串:', typeof content, content)
       // 尝试转换为字符串

@@ -79,6 +79,8 @@
       </div>
     </div>
   </div>
+  <!-- 全局 Toast（shadcn 风格，通过 vue-sonner） -->
+  <Toaster :theme="isDark ? 'dark' : 'light'" position="top-right" :rich-colors="true" />
 </template>
 
 <script setup lang="ts">
@@ -91,6 +93,7 @@ import { useNavigationStore } from './stores/navigation'
 import { storeToRefs } from 'pinia'
 import { getApiBaseURL } from './utils/apiConfig'
 import { useAuthStore } from './stores/auth'
+import { Toaster } from 'vue-sonner'
 
 const themeStore = useThemeStore()
 const { isDark } = storeToRefs(themeStore)

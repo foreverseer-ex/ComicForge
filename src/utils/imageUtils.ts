@@ -25,13 +25,20 @@ export async function getImageUrl(
   }
 
   // 如果是受保护的后端 API 图片（/draw/.../image 或 /actor/.../image），使用带鉴权的请求获取 blob
+  // 并在模块级缓存中缓存 blob URL（key 使用相对路径，确保缩略图与大图共用）
   try {
     const base = getApiBaseURL()
     if (imageUrl.startsWith(base) && (/\/draw\/.+\/image/.test(imageUrl) || /\/actor\/.+\/image/.test(imageUrl))) {
-      // 去掉 base，改用 axios 实例以便自动注入 Authorization
       const relativeUrl = imageUrl.replace(base, '')
+      // 命中缓存直接返回
+      const cached = protectedBlobCache.get(relativeUrl)
+      if (cached) return cached
+      // 请求并缓存
       const resp = await api.get(relativeUrl, { responseType: 'blob' })
-      return URL.createObjectURL(resp as any)
+      const blob: Blob = (resp as any)?.data ?? resp
+      const blobUrl = URL.createObjectURL(blob)
+      protectedBlobCache.set(relativeUrl, blobUrl)
+      return blobUrl
     }
   } catch (e) {
     console.error('获取受保护图片失败:', imageUrl, e)
@@ -51,3 +58,7 @@ export async function getImageUrl(
     return null
   }
 }
+
+// 模块级受保护图片缓存（相对路径 -> blob URL）
+// 说明：用于共享 /actor/.../image 与 /draw/.../image 的 blob 以避免重复请求
+const protectedBlobCache: Map<string, string> = new Map()

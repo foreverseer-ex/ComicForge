@@ -1,18 +1,16 @@
 <template>
-  <Teleport to="body">
-    <div
-      v-if="show"
-      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      @click.self="handleClose"
-    >
-      <div
+  <DialogRoot :open="show" @update:open="onUpdateOpen">
+    <DialogPortal>
+      <DialogOverlay class="fixed inset-0 bg-black/50 z-50" />
+      <DialogContent
         :class="[
-          'w-full max-w-3xl max-h-[90vh] rounded-lg shadow-xl flex flex-col',
-          'mx-4 md:mx-0', // 移动端添加左右边距
+          'fixed z-50 w-full max-w-3xl max-h-[90vh] rounded-lg shadow-xl flex flex-col top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
+          'mx-4 md:mx-0',
           isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
         ]"
-        @click.stop
       >
+        <DialogTitle class="sr-only">{{ title }}</DialogTitle>
+        <DialogDescription class="sr-only">创建或选择绘图任务，并配置绘图参数</DialogDescription>
         <!-- 标题栏 -->
         <div 
           :class="[
@@ -92,7 +90,7 @@
         </div>
 
         <!-- 内容区域 -->
-        <div class="flex-1 overflow-y-auto p-4 md:p-6">
+        <div class="flex-1 overflow-y-auto no-scrollbar p-4 md:p-6">
           <DrawTaskForm
             ref="drawFormRef"
             :context-info="contextInfo"
@@ -131,9 +129,9 @@
             {{ submitting ? submitButtonLoadingText : submitButtonText }}
           </button>
         </div>
-      </div>
-    </div>
-  </Teleport>
+      </DialogContent>
+    </DialogPortal>
+  </DialogRoot>
 </template>
 
 <script setup lang="ts">
@@ -144,6 +142,7 @@ import { XMarkIcon, BoltIcon, ClipboardIcon, PhotoIcon } from '@heroicons/vue/24
 import api from '../api'
 import { showToast } from '../utils/toast'
 import DrawTaskForm from './DrawTaskForm.vue'
+import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription } from 'radix-vue'
 
 interface Props {
   show: boolean
@@ -195,15 +194,12 @@ const handleGenerateWithAI = async () => {
     const name = drawFormRef.value.formData?.name || ''
     const desc = drawFormRef.value.formData?.desc || ''
     
-    if (!name.trim()) {
-      showToast('请先填写任务名称', 'info')
-      generatingParams.value = false
-      return
-    }
+    // 名称允许为空：当为空时使用占位“角色立绘”
+    const effectiveName = name.trim() || '角色立绘'
     
     // 调用后端 API 生成参数
     const requestBody: any = {
-      name: name,
+      name: effectiveName,
       desc: desc || undefined
     }
     
@@ -323,6 +319,12 @@ const handleClose = () => {
   emit('close')
 }
 
+const onUpdateOpen = (v: boolean) => {
+  if (!v) {
+    handleClose()
+  }
+}
+
 // 监听初始值变化，确保表单值被设置
 watch([() => props.initialName, () => props.initialDesc], async () => {
   if (props.show && drawFormRef.value?.formData) {
@@ -384,5 +386,16 @@ onMounted(async () => {
     }
   }
 })
+
 </script>
 
+<style scoped>
+/* 隐藏滚动条但保持可滚动 */
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE 和旧版 Edge */
+  scrollbar-width: none;    /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;            /* Chrome/Safari/新 Edge */
+}
+</style>

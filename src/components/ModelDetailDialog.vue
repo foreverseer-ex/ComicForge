@@ -1,18 +1,17 @@
 <template>
-  <Teleport to="body">
-    <div
-      v-if="model"
-      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      @click.self="close"
-    >
-      <div
+  <DialogRoot :open="!!model" @update:open="onUpdateOpen">
+    <DialogPortal>
+      <DialogOverlay class="fixed inset-0 bg-black/50 z-50" />
+      <DialogContent v-if="model"
         :class="[
-          'w-full max-w-4xl max-h-[90vh] rounded-lg shadow-xl flex flex-col',
-          'mx-4 md:mx-0', // 移动端添加左右边距
+          'fixed z-50 w-full max-w-4xl max-h-[90vh] rounded-lg shadow-xl flex flex-col top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
+          'mx-4 md:mx-0',
           isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
         ]"
-        @click.stop
       >
+        <div class="flex flex-col h-full min-h-0">
+        <DialogTitle class="sr-only">模型详情</DialogTitle>
+        <DialogDescription class="sr-only">查看与管理模型版本信息与示例图</DialogDescription>
         <!-- 标题栏 -->
         <div 
           :class="[
@@ -23,7 +22,7 @@
         >
           <h2 
             :class="[
-              'text-lg md:text-xl font-bold', // 移动端使用更小的字体
+              'text-lg md:text-xl font-bold',
               isDark ? 'text-white' : 'text-gray-900'
             ]"
           >
@@ -91,10 +90,10 @@
               <XMarkIcon class="w-5 h-5" />
             </button>
           </div>
-        </div>
+          </div>
 
         <!-- 内容区域 -->
-        <div class="flex-1 overflow-y-auto p-4 md:p-6">
+        <div class="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 md:p-6">
           <div class="space-y-6">
             <!-- 预览图展示区域 -->
             <div class="relative">
@@ -359,9 +358,11 @@
             </div>
           </div>
         </div>
-      </div>
-    </div>
-    
+        </div>
+      </DialogContent>
+    </DialogPortal>
+  </DialogRoot>
+
     <!-- 生成参数对话框 -->
     <ModelParamsDialog
       v-if="showParamsDialog"
@@ -390,7 +391,7 @@
       @confirm="confirmDialog.onConfirm"
       @cancel="confirmDialog.show = false"
     />
-  </Teleport>
+  
 </template>
 
 <script setup lang="ts">
@@ -416,6 +417,7 @@ import api from '../api'
 import ModelParamsDialog from './ModelParamsDialog.vue'
 import ImageGalleryDialog from './ImageGalleryDialog.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
+import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription } from 'radix-vue'
 
 interface ModelMeta {
   model_id: number
@@ -734,6 +736,10 @@ const close = () => {
   emit('close')
 }
 
+const onUpdateOpen = (v: boolean) => {
+  if (!v) close()
+}
+
 // 切换隐私模式
 const togglePrivacyMode = () => {
   emit('toggle-privacy-mode')
@@ -808,3 +814,13 @@ const handleReset = () => {
 }
 </script>
 
+<style scoped>
+/* 隐藏滚动条但保持可滚动 */
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE 和旧版 Edge */
+  scrollbar-width: none;    /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;            /* Chrome/Safari/新 Edge */
+}
+</style>

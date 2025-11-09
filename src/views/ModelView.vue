@@ -355,68 +355,15 @@
       </div>
     </Teleport>
 
-    <!-- 清空确认对话框 -->
-    <Teleport to="body">
-      <div
-        v-if="showClearDialog"
-        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        @click.self="showClearDialog = false"
-      >
-        <div
-          :class="[
-            'w-full max-w-md rounded-lg shadow-xl',
-            'mx-4 md:mx-0', // 移动端添加左右边距
-            isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border-gray-200'
-          ]"
-          @click.stop
-        >
-          <div class="p-4 md:p-6">
-            <h2 class="text-xl font-bold mb-4 text-red-600">确认清空</h2>
-            <div class="text-center mb-4">
-              <svg class="w-12 h-12 mx-auto text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-            </div>
-            <p :class="['font-bold text-center mb-4', isDark ? 'text-white' : 'text-gray-900']">
-              即将删除所有模型元数据！
-            </p>
-            <div :class="['text-sm mb-4', isDark ? 'text-gray-300' : 'text-gray-700']">
-              <p>此操作将删除：</p>
-              <ul class="list-disc list-inside mt-2">
-                <li>所有 Checkpoint 元数据</li>
-                <li>所有 LoRA 元数据</li>
-                <li>包括下载的示例图片</li>
-              </ul>
-            </div>
-            <p class="text-sm text-red-600 font-bold text-center mb-4">
-              ⚠️ 此操作不可恢复！
-            </p>
-            <div class="flex justify-end gap-3">
-              <button
-                @click="showClearDialog = false"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  isDark
-                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                ]"
-              >
-                取消
-              </button>
-              <button
-                @click="clearAllMetadata"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  'bg-red-600 hover:bg-red-700 text-white'
-                ]"
-              >
-                确认清空
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <!-- 清空确认对话框（radix-vue/shadcn） -->
+    <ConfirmDialog
+      :show="showClearDialog"
+      title="确认清空"
+      :message="'即将删除所有模型元数据！\n\n此操作将删除：\n- 所有 Checkpoint 元数据\n- 所有 LoRA 元数据\n- 包括下载的示例图片\n\n⚠️ 此操作不可恢复！'"
+      type="danger"
+      @confirm="clearAllMetadata"
+      @cancel="() => { showClearDialog = false }"
+    />
 
     <!-- 右键菜单 -->
     <div
@@ -468,6 +415,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import ModelCard from '../components/ModelCard.vue'
 import ModelDetailDialog from '../components/ModelDetailDialog.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import api from '../api'
 import { showToast } from '../utils/toast'
 

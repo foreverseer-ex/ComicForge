@@ -93,31 +93,45 @@
       </p>
     </div>
 
-    <!-- 基础模型选择 -->
+    <!-- 基础模型选择（shadcn / radix-vue Select） -->
     <div>
       <label :class="['block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700']">
         基础模型 *
       </label>
-      <select
-        v-model="formData.model"
-        :disabled="loadingModels"
-        :class="[
-          'w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500',
-          isDark
-            ? 'bg-gray-700 border-gray-600 text-white'
-            : 'bg-white border-gray-300 text-gray-900'
-        ]"
-      >
-        <option value="" disabled>{{ loadingModels ? '加载中...' : '选择模型' }}</option>
-        <option 
-          v-for="model in models" 
-          :key="model.filename" 
-          :value="model.version_name"
-          :disabled="!isModelAvailable(model)"
-        >
-          {{ model.version_name }} {{ !isModelAvailable(model) && drawBackend === 'sd_forge' ? '(不可用)' : '' }}
-        </option>
-      </select>
+      <SelectRoot v-model="formData.model" :disabled="loadingModels">
+        <SelectTrigger :class="[
+          'w-full inline-flex items-center justify-between rounded-lg border px-3 py-2 text-sm',
+          isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+        ]">
+          <SelectValue :placeholder="loadingModels ? '加载中...' : '选择模型'" />
+          <SelectIcon class="ml-2">▼</SelectIcon>
+        </SelectTrigger>
+        <SelectPortal>
+          <SelectContent :class="[
+            'z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border shadow-md',
+            isDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-900'
+          ]">
+            <SelectViewport>
+              <SelectGroup>
+                <SelectLabel class="px-3 py-2 text-xs" :class="isDark ? 'text-gray-400' : 'text-gray-500'">可用模型</SelectLabel>
+                <SelectItem
+                  v-for="model in models"
+                  :key="model.filename"
+                  :value="model.version_name"
+                  :disabled="!isModelAvailable(model)"
+                  :class="[
+                    'px-3 py-2 text-sm outline-none cursor-pointer data-[disabled]:opacity-50 data-[highlighted]:bg-blue-600 data-[highlighted]:text-white'
+                  ]"
+                >
+                  <SelectItemText>
+                    {{ model.version_name }} {{ !isModelAvailable(model) && drawBackend === 'sd_forge' ? '(不可用)' : '' }}
+                  </SelectItemText>
+                </SelectItem>
+              </SelectGroup>
+            </SelectViewport>
+          </SelectContent>
+        </SelectPortal>
+      </SelectRoot>
     </div>
 
     <!-- 提示词 -->
@@ -162,19 +176,39 @@
         <label :class="['block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700']">
           采样器
         </label>
-        <select
-          v-model="formData.sampler"
-          :class="[
-            'w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500',
-            isDark
-              ? 'bg-gray-700 border-gray-600 text-white'
-              : 'bg-white border-gray-300 text-gray-900'
-          ]"
-        >
-          <option v-for="sampler in samplers" :key="sampler" :value="sampler">
-            {{ sampler }}
-          </option>
-        </select>
+        <SelectRoot v-model="formData.sampler">
+          <SelectTrigger :class="[
+            'w-full inline-flex items-center justify-between rounded-lg border px-3 py-2 text-sm',
+            isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+          ]">
+            <SelectValue placeholder="选择采样器" />
+            <SelectIcon class="ml-2">▼</SelectIcon>
+          </SelectTrigger>
+          <SelectPortal>
+            <SelectContent :class="[
+              'z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border shadow-md',
+              isDark ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-900'
+            ]">
+              <SelectViewport>
+                <SelectGroup>
+                  <SelectLabel class="px-3 py-2 text-xs" :class="isDark ? 'text-gray-400' : 'text-gray-500'">采样器</SelectLabel>
+                  <SelectItem
+                    v-for="sampler in samplers"
+                    :key="sampler"
+                    :value="sampler"
+                    :class="[
+                      'px-3 py-2 text-sm outline-none cursor-pointer data-[highlighted]:bg-blue-600 data-[highlighted]:text-white'
+                    ]"
+                  >
+                    <SelectItemText>
+                      {{ sampler }}
+                    </SelectItemText>
+                  </SelectItem>
+                </SelectGroup>
+              </SelectViewport>
+            </SelectContent>
+          </SelectPortal>
+        </SelectRoot>
       </div>
       <div>
         <label :class="['block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700']">
@@ -416,6 +450,19 @@ import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import api from '../api'
 import { showToast } from '../utils/toast'
+import {
+  SelectRoot,
+  SelectTrigger,
+  SelectValue,
+  SelectIcon,
+  SelectPortal,
+  SelectContent,
+  SelectViewport,
+  SelectGroup,
+  SelectLabel,
+  SelectItem,
+  SelectItemText
+} from 'radix-vue'
 
 interface Props {
   // 用于 AI 生成参数的上下文信息（如角色名称）

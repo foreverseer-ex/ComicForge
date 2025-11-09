@@ -459,55 +459,15 @@
     </div>
 
 
-    <!-- 清空历史确认对话框 -->
-    <Teleport to="body">
-      <div
-        v-if="showClearHistoryDialog"
-        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        @click="showClearHistoryDialog = false"
-      >
-      <div
-        @click.stop
-        :class="[
-          'w-full max-w-md rounded-lg shadow-xl',
-          isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
-        ]"
-      >
-        <div class="p-6">
-          <h2 :class="['text-xl font-bold mb-4', isDark ? 'text-white' : 'text-gray-900']">
-            确认清空历史
-          </h2>
-          <p :class="['mb-6', isDark ? 'text-gray-300' : 'text-gray-700']">
-            确定要清空所有历史记录吗？
-            <br />
-            <span class="text-sm text-red-600">此操作不可恢复，将删除该项目的所有聊天消息。</span>
-          </p>
-          <div class="flex justify-end gap-3">
-            <button
-              @click="showClearHistoryDialog = false"
-              :class="[
-                'px-4 py-2 rounded-lg font-medium transition-colors',
-                isDark
-                  ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-              ]"
-            >
-              取消
-            </button>
-            <button
-              @click="confirmClearHistory"
-              :class="[
-                'px-4 py-2 rounded-lg font-medium transition-colors',
-                'bg-red-600 hover:bg-red-700 text-white'
-              ]"
-            >
-              确认清空
-            </button>
-          </div>
-        </div>
-      </div>
-      </div>
-    </Teleport>
+    <!-- 清空历史确认对话框（radix-vue/shadcn） -->
+    <ConfirmDialog
+      :show="showClearHistoryDialog"
+      title="确认清空历史"
+      :message="'确定要清空所有历史记录吗？\n\n此操作不可恢复，将删除该项目的所有聊天消息。'"
+      type="danger"
+      @confirm="confirmClearHistory"
+      @cancel="() => { showClearHistoryDialog = false }"
+    />
 
     <!-- 输入区域：固定在底部 -->
     <div 
@@ -561,6 +521,7 @@ import { storeToRefs } from 'pinia'
 import api from '../api'
 import { getApiBaseURL } from '../utils/apiConfig'
 import { marked } from 'marked'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import hljs from 'highlight.js'
 // 动态导入 highlight.js 样式（根据主题）
 import 'highlight.js/styles/github-dark.css'

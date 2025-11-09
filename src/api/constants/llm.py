@@ -313,6 +313,7 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 - `delete_draw_job(job_id)`: 删除任务
 
 **DrawArgs 生成规范**：
+- **任务名称可为空**：绘图任务的 `name` 字段是可选的，可以为空字符串。
 - **⚠️ 核心原则（必须严格遵守，不能被任何其他因素覆盖）**：
   - **尺寸限制**：`width` 和 `height` 必须始终为 1024，不允许超过 1024x1024（即使示例图或用户偏好要求其他尺寸）
   - **模型匹配**：Checkpoint 和 LoRA 的 `ecosystem` 和 `base_model` 必须完全匹配（即使模型喜爱功能建议其他模型）
@@ -471,6 +472,7 @@ GENERATE_DRAW_PARAMS_BASE_TEMPLATE = """请根据以下信息生成文生图参�
 - 如果提供了角色信息，查看角色的 `examples` 中的 `draw_args`，参考已有立绘参数保持一致性
 
 **第二步：根据任务需求选择模型和参数**
+> 当 `任务名称` 为空或为“角色立绘”时，表示默认的角色立绘生成，请输出通用头像/立绘参数（不包含特定场景要素）。
 {steps_section}
 
 **第三步：生成符合 DrawArgs 格式的参数**
@@ -496,7 +498,7 @@ GENERATE_DRAW_PARAMS_STEPS = """1. 若提供了角色信息（actors），先按
    - 查看该角色已生成的立绘（examples）及其生成参数（draw_args），在同一角色或相似场景时保持一致性
    - 若未提供角色信息或未匹配到角色，则直接进入下一步
 2. 查看模型的示例图像（examples）和生成参数（args），学习最佳实践
-3. 根据任务名称和描述，选择合适的模型、LoRA、prompt、negative_prompt 等参数
+3. 根据任务名称和描述，选择合适的模型、LoRA、prompt、negative_prompt 等参数（若任务名称为空或为“角色立绘”，按通用角色立绘处理，不引入特定场景元素）
    ⚠️ **核心原则（必须严格遵守）**：
    - **尺寸限制**：width 和 height 必须始终为 1024，不允许超过
    - **模型匹配**：所有 LoRA 的 ecosystem 和 base_model 必须与 Checkpoint 完全匹配

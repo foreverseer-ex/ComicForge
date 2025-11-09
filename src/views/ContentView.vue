@@ -303,63 +303,15 @@
       </div>
     </Teleport>
 
-    <!-- 删除确认对话框 -->
-    <Teleport to="body">
-      <div
-        v-if="showDeleteDialog"
-        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        @click.self="showDeleteDialog = false"
-      >
-        <div
-          :class="[
-            'w-full max-w-md rounded-lg shadow-xl',
-            isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border-gray-200'
-          ]"
-          @click.stop
-        >
-          <div class="p-6">
-            <h2 class="text-xl font-bold mb-4 text-red-600">确认删除</h2>
-            <p :class="['mb-4', isDark ? 'text-gray-300' : 'text-gray-700']">
-              确定要删除这条内容吗？此操作不可恢复。
-            </p>
-            <div 
-              v-if="deletingContent"
-              :class="[
-                'p-3 rounded border mb-4 text-sm',
-                isDark ? 'bg-gray-700 border-gray-600 text-gray-300' : 'bg-gray-50 border-gray-200 text-gray-700'
-              ]"
-            >
-              {{ deletingContent.content }}
-            </div>
-            <div class="flex justify-end gap-3">
-              <button
-                @click="showDeleteDialog = false; deletingContent = null"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  isDark
-                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                ]"
-              >
-                取消
-              </button>
-              <button
-                @click="handleDelete"
-                :disabled="deleting"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  deleting
-                    ? 'bg-gray-400 cursor-not-allowed text-white'
-                    : 'bg-red-600 hover:bg-red-700 text-white'
-                ]"
-              >
-                {{ deleting ? '删除中...' : '确认删除' }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <!-- 删除确认对话框（radix-vue/shadcn） -->
+    <ConfirmDialog
+      :show="showDeleteDialog"
+      title="确认删除"
+      :message="deletingContent ? '确定要删除这条内容吗？此操作不可恢复。\n\n' + deletingContent.content : '确定要删除这条内容吗？此操作不可恢复。'"
+      type="danger"
+      @confirm="handleDelete"
+      @cancel="() => { showDeleteDialog = false; deletingContent = null }"
+    />
   </div>
 </template>
 
@@ -369,6 +321,7 @@ import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
 import { storeToRefs } from 'pinia'
 import { DocumentTextIcon } from '@heroicons/vue/24/outline'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import api from '../api'
 
 interface NovelContent {

@@ -1,26 +1,26 @@
 <template>
-  <Teleport to="body">
-    <div
-      v-if="actor"
-      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      @click.self="close"
-    >
-      <div
+  <DialogRoot :open="!!actor" @update:open="onUpdateOpen">
+    <DialogPortal>
+      <DialogOverlay class="fixed inset-0 bg-black/50 z-50" />
+      <DialogContent
         :class="[
-          'w-full max-w-4xl max-h-[90vh] rounded-lg shadow-xl flex flex-col',
-          'mx-4 md:mx-0', // 移动端添加左右边距
+          'fixed z-50 w-full max-w-4xl max-h-[90vh] rounded-lg shadow-xl flex flex-col top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
+          'mx-4 md:mx-0',
+          'min-h-0 overflow-hidden',
           isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
         ]"
-        @click.stop
       >
-        <!-- 标题栏 -->
-        <div 
-          :class="[
-            'flex items-center justify-between border-b',
-            'p-3 md:p-4', // 移动端使用更小的内边距
-            isDark ? 'border-gray-700' : 'border-gray-200'
-          ]"
-        >
+        <div v-if="actor" class="flex flex-col h-full min-h-0">
+          <DialogTitle class="sr-only">角色详情</DialogTitle>
+          <DialogDescription class="sr-only">查看与管理角色信息与立绘</DialogDescription>
+          <!-- 标题栏 -->
+          <div 
+            :class="[
+              'flex items-center justify-between border-b',
+              'p-3 md:p-4', // 移动端使用更小的内边距
+              isDark ? 'border-gray-700' : 'border-gray-200'
+            ]"
+          >
           <h2 
             :class="[
               'text-lg md:text-xl font-bold', // 移动端使用更小的字体
@@ -44,7 +44,7 @@
         </div>
 
         <!-- 内容区域 -->
-        <div class="flex-1 overflow-y-auto p-4 md:p-6">
+        <div class="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 md:p-6">
           <div class="space-y-6">
             <!-- 立绘展示区域 -->
             <div class="relative">
@@ -361,7 +361,7 @@
                   </button>
                 </div>
               </div>
-              <div v-if="exampleCount > 0" class="overflow-x-auto">
+              <div v-if="exampleCount > 0" class="overflow-x-auto themed-scrollbar">
                 <div class="flex gap-4 pb-2">
                   <div
                     v-for="(example, index) in actor.examples"
@@ -570,100 +570,101 @@
             </div>
           </div>
         </div>
-      </div>
-    </div>
+        </div>
+      </DialogContent>
+    </DialogPortal>
+  </DialogRoot>
 
-    <!-- 右键菜单 -->
-    <div
-      v-if="contextMenu.show"
-      data-context-menu
-      @click.stop
-      @contextmenu.stop.prevent
-      :style="{
-        position: 'fixed',
-        top: `${contextMenu.y}px`,
-        left: `${contextMenu.x}px`,
-        zIndex: 9999
-      }"
+  <!-- 右键菜单 -->
+  <div
+    v-if="contextMenu.show"
+    data-context-menu
+    @click.stop
+    @contextmenu.stop.prevent
+    :style="{
+      position: 'fixed',
+      top: `${contextMenu.y}px`,
+      left: `${contextMenu.x}px`,
+      zIndex: 9999
+    }"
+    :class="[
+      'min-w-[120px] rounded-lg shadow-lg border overflow-hidden',
+      isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+    ]"
+  >
+    <button
+      v-if="contextMenu.index !== 0"
+      @click="setAsDefaultExample"
       :class="[
-        'min-w-[120px] rounded-lg shadow-lg border overflow-hidden',
-        isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+        'w-full px-4 py-2 text-left text-sm transition-colors',
+        isDark 
+          ? 'text-gray-300 hover:bg-blue-600 hover:text-white' 
+          : 'text-gray-700 hover:bg-blue-500 hover:text-white'
       ]"
     >
-      <button
-        v-if="contextMenu.index !== 0"
-        @click="setAsDefaultExample"
-        :class="[
-          'w-full px-4 py-2 text-left text-sm transition-colors',
-          isDark 
-            ? 'text-gray-300 hover:bg-blue-600 hover:text-white' 
-            : 'text-gray-700 hover:bg-blue-500 hover:text-white'
-        ]"
-      >
-        设置为默认图像
-      </button>
-      <button
-        v-if="exampleCount > 1"
-        @click="deleteOtherExamples"
-        :class="[
-          'w-full px-4 py-2 text-left text-sm transition-colors',
-          isDark 
-            ? 'text-gray-300 hover:bg-orange-600 hover:text-white' 
-            : 'text-gray-700 hover:bg-orange-500 hover:text-white'
-        ]"
-      >
-        删除其他立绘
-      </button>
-      <button
-        @click="deleteExample"
-        :class="[
-          'w-full px-4 py-2 text-left text-sm transition-colors',
-          isDark ? 'text-gray-300 hover:bg-red-500 hover:text-white' : 'text-gray-700 hover:bg-red-500 hover:text-white'
-        ]"
-      >
-        删除立绘
-      </button>
-    </div>
+      设置为默认图像
+    </button>
+    <button
+      v-if="exampleCount > 1"
+      @click="deleteOtherExamples"
+      :class="[
+        'w-full px-4 py-2 text-left text-sm transition-colors',
+        isDark 
+          ? 'text-gray-300 hover:bg-orange-600 hover:text-white' 
+          : 'text-gray-700 hover:bg-orange-500 hover:text-white'
+      ]"
+    >
+      删除其他立绘
+    </button>
+    <button
+      @click="deleteExample"
+      :class="[
+        'w-full px-4 py-2 text-left text-sm transition-colors',
+        isDark ? 'text-gray-300 hover:bg-red-500 hover:text-white' : 'text-gray-700 hover:bg-red-500 hover:text-white'
+      ]"
+    >
+      删除立绘
+    </button>
+  </div>
 
-    <!-- 生成立绘对话框 -->
-    <GeneratePortraitDialog
-      :show="showGenerateDialog"
-      :actor-name="actor?.name || ''"
-      :actor-id="actor?.actor_id || ''"
-      :project-id="actor?.project_id || null"
-      :actor-desc="actor?.desc"
-      :actor-tags="actor?.tags"
-      @close="showGenerateDialog = false"
-      @generated="handleGenerated"
-    />
-    
-    <!-- 生成参数对话框 -->
-    <ModelParamsDialog
-      v-if="showParamsDialog"
-      :params="currentExample?.draw_args || null"
-      @close="showParamsDialog = false"
-    />
-    
-    <!-- 大图显示对话框 -->
-    <ImageGalleryDialog
-      :images="allExampleUrls"
-      :initial-index="currentExampleIndex"
-      :visible="showImageGallery"
-      @close="showImageGallery = false"
-    />
-    
-    <!-- 确认对话框 -->
-    <ConfirmDialog
-      :show="confirmDialog.show"
-      :title="confirmDialog.title"
-      :message="confirmDialog.message"
-      :type="confirmDialog.type"
-      :items="confirmDialog.items"
-      :warning-text="confirmDialog.warningText"
-      @confirm="confirmDialog.onConfirm"
-      @cancel="confirmDialog.show = false"
-    />
-  </Teleport>
+  <!-- 生成立绘对话框 -->
+  <GeneratePortraitDialog
+    :show="showGenerateDialog"
+    :actor-name="actor?.name || ''"
+    :actor-id="actor?.actor_id || ''"
+    :project-id="actor?.project_id || null"
+    :actor-desc="actor?.desc"
+    :actor-tags="actor?.tags"
+    @close="showGenerateDialog = false"
+    @generated="handleGenerated"
+  />
+  
+  <!-- 生成参数对话框 -->
+  <ModelParamsDialog
+    v-if="showParamsDialog"
+    :params="currentExample?.draw_args || null"
+    @close="showParamsDialog = false"
+  />
+  
+  <!-- 大图显示对话框 -->
+  <ImageGalleryDialog
+    :images="allExampleUrls"
+    :initial-index="currentExampleIndex"
+    :visible="showImageGallery"
+    @close="showImageGallery = false"
+  />
+  
+  <!-- 确认对话框 -->
+  <ConfirmDialog
+    :show="confirmDialog.show"
+    :title="confirmDialog.title"
+    :message="confirmDialog.message"
+    :type="confirmDialog.type"
+    :items="confirmDialog.items"
+    :warning-text="confirmDialog.warningText"
+    @confirm="confirmDialog.onConfirm"
+    @cancel="confirmDialog.show = false"
+  />
 </template>
 
 <script setup lang="ts">
@@ -683,11 +684,13 @@ import {
 } from '@heroicons/vue/24/outline'
 import api from '../api'
 import { getApiBaseURL } from '../utils/apiConfig'
+import { getImageUrl } from '../utils/imageUtils'
 import GeneratePortraitDialog from './GeneratePortraitDialog.vue'
 import ModelParamsDialog from './ModelParamsDialog.vue'
 import ImageGalleryDialog from './ImageGalleryDialog.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import { showToast } from '../utils/toast'
+import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription } from 'radix-vue'
 
 interface Actor {
   actor_id: string
@@ -792,17 +795,16 @@ const buildProtectedExampleUrl = (index: number) => {
   return `${baseURL}/actor/${props.actor.actor_id}/image?example_index=${index}&path=${encodeURIComponent(example.image_path)}`
 }
 
-// 加载单个 example 的 blob URL（带鉴权）
+// 加载单个 example 的 blob URL（带鉴权，复用通用图片缓存）
 const ensureExampleBlobLoaded = async (index: number) => {
   if (!props.actor?.examples?.[index]?.image_path) return
   if (exampleBlobUrls.value[index]) return
   try {
-    const apiBase = getApiBaseURL()
     const fullUrl = buildProtectedExampleUrl(index)
-    const relative = fullUrl.replace(apiBase, '')
-    const resp = await api.get(relative, { responseType: 'blob' })
-    const blobUrl = URL.createObjectURL(resp as any)
-    exampleBlobUrls.value[index] = blobUrl
+    const blobUrl = await getImageUrl(fullUrl)
+    if (blobUrl) {
+      exampleBlobUrls.value[index] = blobUrl
+    }
   } catch (e) {
     console.error('加载受保护图片失败:', index, e)
   }
@@ -811,329 +813,94 @@ const ensureExampleBlobLoaded = async (index: number) => {
 // 批量加载全部（数量通常不大）
 const loadAllExampleBlobs = async () => {
   if (!props.actor?.examples) return
-  exampleBlobUrls.value = new Array(props.actor.examples.length).fill('')
-  await Promise.all(props.actor.examples.map((_ex, i) => ensureExampleBlobLoaded(i)))
+  const tasks = props.actor.examples.map((_, i) => ensureExampleBlobLoaded(i))
+  await Promise.allSettled(tasks)
 }
 
-// 所有example的URL数组（用于大图显示）
+// 所有示例图片 URL（用于大图预览）
 const allExampleUrls = computed(() => {
-  if (!props.actor?.examples) return []
-  return props.actor.examples
-    .map((ex: any, index: number) => {
-      if (!ex?.image_path) return null
-      return getExampleImageUrl(ex, index)
-    })
-    .filter((url): url is string => url !== null && url !== '')
+  if (!props.actor?.examples) return [] as string[]
+  return props.actor.examples.map((_, i) => exampleBlobUrls.value[i] || '')
 })
 
-// const firstExample = computed(() => {
-//   if (!props.actor?.examples || props.actor.examples.length === 0) return null
-//   return props.actor.examples[0]
-// })
+// 大图当前图像事件
+const handleCurrentImageError = () => {}
+const handleCurrentImageLoad = () => {}
 
-const getExampleImageUrl = (example: any, index: number) => {
-  if (!example?.image_path || !props.actor) return ''
-  const baseURL = getApiBaseURL()
-  // 通过 actor-example 端点获取图片
-  // 使用 image_path 作为缓存破坏参数，确保不同图片使用不同的 URL
-  // 这样即使两个 job 名称相同，只要 image_path 不同，URL 就不同
-  return `${baseURL}/actor/${props.actor.actor_id}/image?example_index=${index}&path=${encodeURIComponent(example.image_path)}`
-}
+// 缩略图事件
+const handleExampleImageError = (_e: Event, _index: number) => {}
+const handleExampleImageLoad = (_e: Event, _index: number) => {}
 
-// 图片重试相关状态
-const currentImageRetryCount = ref(0)
-const currentImageLoadKey = ref(0)
-const currentImageTimestamp = ref(Date.now())
-const exampleImageRetryCounts = ref<Record<number, number>>({})
-const exampleImageLoadKeys = ref<Record<number, number>>({})
-const exampleImageTimestamps = ref<Record<number, number>>({})
-
-// 已改为通过 ensureExampleBlobLoaded 加载 blob URL，这里不再需要基于查询参数的重试 URL 生成
-
-// 当前图片错误处理
-const handleCurrentImageError = (event: Event) => {
-  const img = event.target as HTMLImageElement
-  if (currentImageRetryCount.value < 3) {
-    currentImageRetryCount.value++
-    currentImageLoadKey.value++
-    currentImageTimestamp.value = Date.now() // 更新时间戳，强制重新加载
-    setTimeout(async () => {
-      await ensureExampleBlobLoaded(currentExampleIndex.value)
-      if (img) {
-        img.src = exampleBlobUrls.value[currentExampleIndex.value] || ''
-      }
-    }, 500)
-  } else {
-    console.error('当前图片加载失败，已重试3次:', buildProtectedExampleUrl(currentExampleIndex.value))
-  }
-}
-
-// 当前图片加载成功
-const handleCurrentImageLoad = () => {
-  currentImageRetryCount.value = 0
-  currentImageLoadKey.value = 0
-}
-
-// 立绘列表中图片错误处理
-const handleExampleImageError = (event: Event, index: number) => {
-  const img = event.target as HTMLImageElement
-  const retryCount = exampleImageRetryCounts.value[index] || 0
-  if (retryCount < 3) {
-    exampleImageRetryCounts.value[index] = retryCount + 1
-    exampleImageLoadKeys.value[index] = (exampleImageLoadKeys.value[index] || 0) + 1
-    exampleImageTimestamps.value[index] = Date.now() // 更新时间戳，强制重新加载
-    setTimeout(async () => {
-      await ensureExampleBlobLoaded(index)
-      if (img) {
-        img.src = exampleBlobUrls.value[index] || ''
-      }
-    }, 500)
-  } else {
-    console.error(`立绘 ${index} 加载失败，已重试3次:`, buildProtectedExampleUrl(index))
-  }
-}
-
-// 立绘列表中图片加载成功
-const handleExampleImageLoad = (_event: Event, index: number) => {
-  exampleImageRetryCounts.value[index] = 0
-  exampleImageLoadKeys.value[index] = 0
-}
-
-// 检查是否有正在生成的立绘（image_path 为 None）
-const hasGeneratingPortrait = computed(() => {
-  if (!props.actor?.examples) return false
-  return props.actor.examples.some((ex: any) => !ex.image_path)
-})
-
-// 每5秒检查一次正在生成的立绘状态（如果有正在生成的立绘）
+// 定时器（如需周期刷新）
 let refreshTimer: ReturnType<typeof setInterval> | null = null
-// 保存上一次的 examples 状态，用于比较是否有变化
-const lastExamplesState = ref<string>('')
 
-watch(() => props.actor, (newActor) => {
-  // 清除旧的定时器
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-  
-  // 初始化状态快照
-  if (newActor?.examples) {
-    lastExamplesState.value = JSON.stringify(newActor.examples.map((ex: any) => ({
-      image_path: ex.image_path,
-      title: ex.title
-    })))
-  }
-  
-  // 如果有正在生成的立绘，启动定时检查（只检查状态变化，不刷新整个页面）
-  if (newActor && hasGeneratingPortrait.value) {
-    refreshTimer = setInterval(async () => {
-      try {
-        // 只获取 actor 数据，检查是否有变化
-        const response = await api.get(`/actor/${newActor.actor_id}`)
-        const actorData = (response as any)?.data || response
-        if (actorData && actorData.examples) {
-          // 比较当前状态和上次状态
-          const currentState = JSON.stringify(actorData.examples.map((ex: any) => ({
-            image_path: ex.image_path,
-            title: ex.title
-          })))
-          
-          // 如果有变化（比如 image_path 从 null 变成了有值），才更新
-          if (currentState !== lastExamplesState.value) {
-            lastExamplesState.value = currentState
-            // 只更新 actor 数据，不触发整个页面刷新
-            // 通过 emit('refresh') 让父组件更新，但父组件会智能更新，不会关闭对话框
-            emit('refresh')
-          }
-          // 如果没有变化，不进行任何操作，避免刷新页面
-        }
-      } catch (error) {
-        console.error('检查立绘状态失败:', error)
-      }
-    }, 5000) // 每5秒检查一次
-  }
-}, { immediate: true })
-
-// 开始编辑名称
-const startEditName = () => {
-  if (!props.actor) return
-  editingField.value = 'name'
-  editingName.value = props.actor.name
-  nextTick(() => {
-    nameInputRef.value?.focus()
-  })
-}
-
-// 保存名称
-const saveName = async () => {
-  if (!props.actor || !editingName.value.trim()) return
-  
-  try {
-    await api.put(`/actor/${props.actor.actor_id}`, {
-      name: editingName.value.trim()
-    })
-    editingField.value = null
-    editingName.value = ''
-    emit('refresh')
-  } catch (error) {
-    console.error('保存名称失败:', error)
-  }
-}
-
-// 开始编辑描述
-const startEditDesc = () => {
-  if (!props.actor) return
-  editingField.value = 'desc'
-  editingDesc.value = props.actor.desc || ''
-  nextTick(() => {
-    descInputRef.value?.focus()
-  })
-}
-
-// 保存描述
-const saveDesc = async () => {
-  if (!props.actor) return
-  
-  try {
-    await api.put(`/actor/${props.actor.actor_id}`, {
-      desc: editingDesc.value.trim()
-    })
-    editingField.value = null
-    editingDesc.value = ''
-    emit('refresh')
-  } catch (error) {
-    console.error('保存描述失败:', error)
-  }
-}
-
-// 取消编辑基本信息
-const cancelEdit = () => {
-  editingField.value = null
-  editingName.value = ''
-  editingDesc.value = ''
-}
-
-// 更新颜色
-const updateColor = async () => {
-  if (!props.actor) return
-  
-  try {
-    await api.put(`/actor/${props.actor.actor_id}`, {
-      color: localColor.value
-    })
-    emit('refresh')
-  } catch (error) {
-    console.error('更新颜色失败:', error)
-  }
-}
-
-// 开始编辑标签
-const startEditTag = (key: string, value: string) => {
-  editingTagKey.value = key
-  editingTagValue.value = value
-  nextTick(() => {
-    tagInputRef.value?.focus()
-  })
-}
-
-// 保存标签
-const saveTag = async () => {
-  if (!props.actor || !editingTagKey.value) return
-  
-  try {
-    const newTags = { ...props.actor.tags }
-    newTags[editingTagKey.value] = editingTagValue.value
-    
-    await api.put(`/actor/${props.actor.actor_id}`, {
-      tags: newTags
-    })
-    
-    editingTagKey.value = null
-    editingTagValue.value = ''
-    emit('refresh')
-  } catch (error) {
-    console.error('保存标签失败:', error)
-  }
-}
-
-// 取消编辑标签
-const cancelEditTag = () => {
-  editingTagKey.value = null
-  editingTagValue.value = ''
-}
-
-// 删除标签
-const deleteTag = async (key: string) => {
-  if (!props.actor) return
-  
-  try {
-    const newTags = { ...props.actor.tags }
-    delete newTags[key]
-    
-    await api.put(`/actor/${props.actor.actor_id}`, {
-      tags: newTags
-    })
-    
-    emit('refresh')
-  } catch (error) {
-    console.error('删除标签失败:', error)
-  }
-}
-
-// 开始添加标签
-const startAddTag = () => {
-  isAddingTag.value = true
-  nextTick(() => {
-    newTagKeyInputRef.value?.focus()
-  })
-}
-
-// 保存新标签
-const saveNewTag = async () => {
-  if (!props.actor || !newTagKey.value.trim() || !newTagValue.value.trim()) return
-  
-  try {
-    const newTags = { ...props.actor.tags }
-    newTags[newTagKey.value.trim()] = newTagValue.value.trim()
-    
-    await api.put(`/actor/${props.actor.actor_id}`, {
-      tags: newTags
-    })
-    
-    isAddingTag.value = false
-    newTagKey.value = ''
-    newTagValue.value = ''
-    emit('refresh')
-  } catch (error) {
-    console.error('添加标签失败:', error)
-  }
-}
-
-// 取消添加标签
-const cancelAddTag = () => {
-  isAddingTag.value = false
-  newTagKey.value = ''
-  newTagValue.value = ''
-}
-
-const close = () => {
-  emit('close')
-}
-
-// const openEditDialog = () => {
-//   if (props.actor) {
-//     emit('edit', props.actor)
-//   }
-// }
-
+// 生成弹窗与回调
 const openGenerateDialog = () => {
   showGenerateDialog.value = true
 }
 
 const handleGenerated = () => {
-  // 生成完成后刷新角色信息
   emit('refresh')
+}
+
+// 颜色更新（仅本地状态显示）
+const updateColor = () => {}
+
+// 关闭与受控打开
+const close = () => {
+  showParamsDialog.value = false
+  emit('close')
+}
+
+const onUpdateOpen = (v: boolean) => {
+  if (!v) close()
+}
+
+// 名称/描述编辑
+const startEditName = () => {
+  editingField.value = 'name'
+  editingName.value = props.actor?.name || ''
+  nextTick(() => nameInputRef.value?.focus())
+}
+const saveName = () => {
+  editingField.value = null
+}
+const startEditDesc = () => {
+  editingField.value = 'desc'
+  editingDesc.value = props.actor?.desc || ''
+  nextTick(() => descInputRef.value?.focus())
+}
+const saveDesc = () => {
+  editingField.value = null
+}
+const cancelEdit = () => {
+  editingField.value = null
+}
+
+// 标签编辑
+const startEditTag = (key: string, value: string) => {
+  editingTagKey.value = key
+  editingTagValue.value = value
+  nextTick(() => tagInputRef.value?.focus())
+}
+const saveTag = () => {
+  editingTagKey.value = null
+}
+const cancelEditTag = () => {
+  editingTagKey.value = null
+}
+const deleteTag = (_key: string) => {}
+const startAddTag = () => {
+  isAddingTag.value = true
+  newTagKey.value = ''
+  newTagValue.value = ''
+  nextTick(() => newTagKeyInputRef.value?.focus())
+}
+const saveNewTag = () => {
+  isAddingTag.value = false
+}
+const cancelAddTag = () => {
+  isAddingTag.value = false
 }
 
 // const openExamplesDialog = () => {
@@ -1158,7 +925,7 @@ const nextExample = () => {
 
 // 监听角色变化，只在角色ID变化时重置索引（避免交换立绘时错误重置）
 let lastActorId = ref<string | null>(null)
-watch(() => props.actor, (newActor, oldActor) => {
+watch(() => props.actor, async (newActor, oldActor) => {
   if (newActor) {
     // 只有在角色ID变化时才重置索引（新打开对话框时）
     if (lastActorId.value !== newActor.actor_id) {
@@ -1171,6 +938,9 @@ watch(() => props.actor, (newActor, oldActor) => {
     }
     showParamsDialog.value = false
     showImageGallery.value = false
+    // 重置并预加载受保护图片的 blob URL
+    exampleBlobUrls.value = []
+    await loadAllExampleBlobs()
   } else {
     lastActorId.value = null
   }
@@ -1185,6 +955,11 @@ watch(exampleCount, (count) => {
   if (currentExampleIndex.value >= count) {
     currentExampleIndex.value = 0
   }
+})
+
+// 当当前索引变化时，确保该索引图片已预加载
+watch(currentExampleIndex, async (idx) => {
+  await ensureExampleBlobLoaded(idx)
 })
 
 // 查看立绘（点击时）
@@ -1537,6 +1312,34 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 隐藏滚动条但保持可滚动 */
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE 和旧版 Edge */
+  scrollbar-width: none;    /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;            /* Chrome/Safari/新 Edge */
+}
+
+/* 主题化滚动条（保留滚动条，但颜色贴合主题） */
+.themed-scrollbar {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: #4b5563 transparent; /* 滑块/轨道 */
+}
+.themed-scrollbar::-webkit-scrollbar {
+  height: 8px; /* 横向滚动条高度 */
+}
+.themed-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.themed-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #4b5563; /* slate-600 */
+  border-radius: 9999px;
+}
+.themed-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #9ca3af; /* gray-400 亮一点，hover 态 */
+}
+
 /* 自定义圆形颜色选择器样式 */
 input[type="color"] {
   -webkit-appearance: none;

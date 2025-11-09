@@ -7,6 +7,7 @@ AI 驱动的小说转漫画工具：基于 FastAPI + Vue 3 的前后端分离架
 ## ✨ 核心功能
 
 ### 🤖 AI 对话系统
+
 - **多提供商**：OpenAI / xAI (Grok) / Ollama / Anthropic / Google / 自定义端点
 - **双模式**：invoke（直接返回）和 stream（SSE 流式输出）
 - **工具调用**：基于 LangChain + LangGraph，集成 43+ MCP 工具（项目、角色、记忆、小说、绘图等）
@@ -14,24 +15,28 @@ AI 驱动的小说转漫画工具：基于 FastAPI + Vue 3 的前后端分离架
 - **迭代模式**：批量处理章节内容
 
 ### 🎨 图像生成
+
 - **本地生成**：对接 SD-Forge/sd-webui（LoRA/模型切换）
 - **Civitai 集成**：模型元数据导入（AIR 标识符）
 - **任务管理**：批量创建（1-16），状态跟踪，图片预览
 - **AI 参数生成**：LLM 自动生成绘图参数
 
 ### 📦 模型元数据
+
 - **本地扫描**：自动扫描 Checkpoint/LoRA
 - **Civitai 集成**：抓取示例图、参数、描述
 - **筛选/喜爱**：按生态系统/基础模型筛选，标记常用模型
 - **隐私模式**：隐藏预览图
 
 ### 👥 角色管理
+
 - **创建编辑**：支持角色、地点、组织等实体
 - **标签系统**：预定义标签（外观、服装、性格等）
 - **立绘生成**：双模式（创建新任务/选择已有任务）
 - **示例图管理**：多图上传，自动清理
 
 ### 🧠 记忆 & 小说
+
 - **记忆系统**：键值对存储，预定义键，批量操作
 - **小说阅读**：单行/批量/章节读取，摘要生成
 
@@ -42,12 +47,13 @@ ComicForge/
 ├── src/
 │   ├── api/                      # 后端 FastAPI
 │   │   ├── main.py               # 应用入口
-│   │   ├── routers/              # API 路由（11个）
+│   │   ├── routers/              # API 路由（13个）
 │   │   │   ├── chat.py           # 对话（invoke/stream/iteration）
 │   │   │   ├── context.py        # 内容服务（小说/章节/段落/图像）
 │   │   │   ├── draw.py           # 绘图任务管理
 │   │   │   ├── model_meta.py     # 模型元数据
 │   │   │   ├── actor.py          # 角色管理
+│   │   │   ├── auth.py           # 认证与授权
 │   │   │   ├── project.py        # 项目管理
 │   │   │   ├── memory.py         # 记忆管理
 │   │   │   ├── history.py        # 会话历史
@@ -122,8 +128,7 @@ git clone <repository-url>
 cd ComicForge
 
 # 2. 配置环境变量（可选）
-cp .env.example .env
-# 编辑 .env 文件，添加 API Keys
+# 在项目根目录创建 .env 并设置所需 API Keys（也可直接用环境变量或 Web 设置页）
 
 # 3. 启动服务
 docker-compose up -d
@@ -134,6 +139,7 @@ docker-compose up -d
 ```
 
 **Docker 说明**：
+
 - 自动构建前后端镜像
 - 数据持久化（`./storage` 目录）
 - 支持环境变量配置
@@ -172,6 +178,7 @@ export CIVITAI_API_TOKEN="..."
 ```
 
 或在 `config.json` 中配置：
+
 ```json
 {
   "llm": {
@@ -190,6 +197,7 @@ export CIVITAI_API_TOKEN="..."
 ## 🏗 技术架构
 
 ### 前端（Vue 3 + TypeScript）
+
 - **构建工具**：Vite (rolldown)
 - **UI 框架**：Tailwind CSS + Headless UI
 - **状态管理**：Pinia（project/theme/connection/navigation/privacy）
@@ -199,6 +207,7 @@ export CIVITAI_API_TOKEN="..."
 - **缓存**：localStorage（图片/状态持久化）
 
 ### 后端（FastAPI + Python 3.13）
+
 - **Web 框架**：FastAPI
 - **数据库**：SQLite + SQLModel
 - **LLM**：LangChain + LangGraph（状态图管理）
@@ -208,13 +217,15 @@ export CIVITAI_API_TOKEN="..."
 - **日志**：loguru
 
 ### 主要 API 端点
+
 - `/chat/*` - 对话（invoke/stream/iteration）
 - `/draw/*` - 绘图任务（CRUD/批量/状态）
 - `/model-meta/*` - 模型元数据（扫描/导入）
 - `/actor/*` - 角色管理
+- `/auth/*` - 认证与授权（注册/登录/刷新/登出/个人信息）
 - `/project/*` - 项目管理
 - `/memory/*` - 记忆管理
-- `/novel/*` - 小说内容
+- `/context/*` - 内容服务
 - `/history/*` - 会话历史
 - `/settings/*` - 配置管理
 - `/health` - 健康检查
@@ -222,6 +233,7 @@ export CIVITAI_API_TOKEN="..."
 ## 📝 开发指南
 
 ### 项目特点
+
 - **前后端分离**：清晰的架构，独立开发部署
 - **类型安全**：全面类型提示（TypeScript + Python）
 - **模块化设计**：分层架构（Router → Service → DB）
@@ -247,7 +259,8 @@ uv run pytest tests/ --cov=src/api --cov-report=html
 ## 📊 功能状态
 
 ### ✅ 核心功能（已完成）
-- **后端**：11 个 API 路由，SQLite 数据库，LangChain + LangGraph 工具调用
+
+- **后端**：13 个 API 路由，SQLite 数据库，LangChain + LangGraph 工具调用
 - **前端**：9 个 Vue 视图，Pinia 状态管理，Axios HTTP 客户端
 - **AI 对话**：invoke/stream/iteration 三种模式，43+ MCP 工具
 - **图像生成**：SD-Forge 本地生成，Civitai 集成，批量任务管理
@@ -256,6 +269,7 @@ uv run pytest tests/ --cov=src/api --cov-report=html
 - **部署**：Docker Compose 容器化，健康检查，自动重启
 
 ### 🚧 持续改进
+
 - 前端性能优化（虚拟滚动）
 - 测试覆盖率提升
 - 错误处理增强
