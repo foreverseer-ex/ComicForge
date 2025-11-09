@@ -35,7 +35,7 @@ option = {
     "params": {
         "prompt": "masterpiece, best quality, 1girl, IncrsAhri, multiple tails, fox tail, korean clothes, skirt, braid, arms behind back",
         "negativePrompt": "(worst quality:1.4), (low quality:1.4), simple background, bad anatomy",
-        "scheduler": "EulerA",
+        "scheduler": "DPMPP2MKarras",
         "steps": 25,
         "cfgScale": 7,
         "width": 512,

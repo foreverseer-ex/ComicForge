@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 import type { RouteRecordRaw } from 'vue-router'
 
 const routes: RouteRecordRaw[] = [
@@ -55,12 +56,31 @@ const routes: RouteRecordRaw[] = [
     name: 'Help',
     component: () => import('../views/HelpView.vue'),
     meta: { title: '帮助' }
+  },
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('../views/LoginView.vue'),
+    meta: { title: '登录', public: true }
   }
 ]
 
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+// 全局路由守卫
+router.beforeEach((to, _from, next) => {
+  const auth = useAuthStore()
+  const isPublic = (to.meta as any)?.public === true
+  if (!isPublic && !auth.isAuthenticated) {
+    if (to.name !== 'Login') return next({ name: 'Login', query: { redirect: to.fullPath } })
+  }
+  if (to.name === 'Login' && auth.isAuthenticated) {
+    return next({ name: 'Home' })
+  }
+  next()
 })
 
 export default router

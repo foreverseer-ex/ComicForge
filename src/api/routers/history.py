@@ -66,7 +66,7 @@ def create_chat_message(
 
 # ==================== 查询操作（固定路径必须放在动态路径之前） ====================
 
-@router.get("/by_index", response_model=ChatMessage, summary="根据索引获取聊天消息")
+@router.get("/by_index", summary="根据索引获取聊天消息")
 def get_chat_message_by_index(
     project_id: Optional[str] = None,
     index: int = 0
@@ -99,7 +99,7 @@ def get_chat_message_by_index(
     return message
 
 
-@router.get("/all", response_model=List[ChatMessage], summary="列出项目的所有消息")
+@router.get("/all", summary="列出项目的所有消息")
 def get_all_chat_messages(
     project_id: Optional[str] = None,
     limit: Optional[int] = None,
@@ -117,7 +117,7 @@ def get_all_chat_messages(
         聊天消息列表（按索引排序）
     """
     messages = HistoryService.get_all(project_id)
-    messages_list = list(messages)
+    messages_list = messages
     
     # 应用分页
     if limit is not None:
@@ -162,7 +162,7 @@ def get_chat_message_count(
 # ==================== 基于ID的CRUD操作 ====================
 # 注意：ID参数通过路径参数传递，权限验证在服务层进行
 
-@router.get("/{message_id}", response_model=ChatMessage, summary="获取聊天消息")
+@router.get("/{message_id}", summary="获取聊天消息")
 def get_chat_message(message_id: str) -> ChatMessage:
     """
     根据消息ID获取聊天消息。
@@ -180,7 +180,7 @@ def get_chat_message(message_id: str) -> ChatMessage:
     if not message:
         raise HTTPException(status_code=404, detail=f"聊天消息不存在: {message_id}")
     
-    return message
+    return message.model_dump()
 
 
 # ==================== 更新和删除操作 ====================
@@ -256,7 +256,7 @@ def remove_chat_message_by_index(
     }
 
 
-@router.put("/{message_id}", response_model=ChatMessage, summary="更新聊天消息")
+@router.put("/{message_id}", summary="更新聊天消息")
 def update_chat_message(
     message_id: str,
     status: Optional[str] = None,

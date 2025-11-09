@@ -265,10 +265,15 @@
             <p :class="['text-xs mb-2 font-bold', isDark ? 'text-gray-400' : 'text-gray-600']">
               支持多行输入，每行一个 AIR，无效行将自动忽略
             </p>
-            <p :class="['text-xs mb-4', isDark ? 'text-gray-500' : 'text-gray-500']">
+            <p :class="['text-xs mb-2', isDark ? 'text-gray-500' : 'text-gray-500']">
               格式：urn:air:{'{ecosystem}'}:{'{type}'}:civitai:{'{model_id}'}@{'{version_id}'}<br/>
               示例：urn:air:sd1:checkpoint:civitai:348620@390021
             </p>
+            <!-- 下载示例图片选项 -->
+            <label class="inline-flex items-center gap-2 mb-2 select-none">
+              <input type="checkbox" v-model="downloadExamples" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+              <span :class="['text-sm', isDark ? 'text-gray-300' : 'text-gray-700']">下载模型示例图片（可能较慢，移动网络可取消）</span>
+            </label>
             
             <textarea
               v-model="importAirInput"
@@ -509,6 +514,7 @@ const importAirInput = ref('')
 const importStatus = ref('')
 const importStatusColor = ref('')
 const importing = ref(false)
+const downloadExamples = ref(true)
 
 // 右键菜单
 const contextMenu = ref({
@@ -658,7 +664,8 @@ const batchImport = async () => {
     try {
       const response = await api.post('/model-meta/import', {
         air: air,
-        parallel_download: parallelDownload
+        parallel_download: parallelDownload,
+        download_examples: downloadExamples.value
       })
       
       const data = (response as any)?.data || response

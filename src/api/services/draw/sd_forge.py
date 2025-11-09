@@ -7,6 +7,7 @@ import base64
 import io
 from pathlib import Path
 from typing import Optional, Dict, Any
+from api.services.model_meta import model_meta_db_service
 
 import httpx
 from PIL import Image
@@ -176,7 +177,7 @@ class SdForgeDrawService(AbstractDrawService):
         :param desc: 任务描述（可选）
         :return: batch_id
         """
-        from api.services.model_meta import local_model_meta_service
+        from api.services.model_meta import model_meta_db_service
         from api.services.db import JobService, BatchJobService
         from api.schemas.draw import Job, BatchJob
         from datetime import datetime
@@ -241,7 +242,7 @@ class SdForgeDrawService(AbstractDrawService):
                 
                 # 检查 model
                 if args.model:
-                    model_meta = local_model_meta_service.get_by_version_name(args.model)
+                    model_meta = model_meta_db_service.get_by_version_name(args.model)
                     if not model_meta:
                         raise RuntimeError(f"未找到模型元数据: {args.model}")
                     
@@ -264,7 +265,7 @@ class SdForgeDrawService(AbstractDrawService):
                 
                 # 检查 vae
                 if args.vae:
-                    vae_meta = local_model_meta_service.get_by_version_name(args.vae)
+                    vae_meta = model_meta_db_service.get_by_version_name(args.vae)
                     if not vae_meta:
                         raise RuntimeError(f"未找到 VAE 元数据: {args.vae}")
                     
@@ -282,7 +283,7 @@ class SdForgeDrawService(AbstractDrawService):
             loras_for_sd_forge: Dict[str, float] = {}
             if args.loras:
                 for lora_version_name, strength in args.loras.items():
-                    lora_meta = local_model_meta_service.get_by_version_name(lora_version_name)
+                    lora_meta = model_meta_db_service.get_by_version_name(lora_version_name)
                     if not lora_meta:
                         logger.warning(f"未找到 LoRA 元数据: {lora_version_name}，跳过")
                         continue

@@ -19,8 +19,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 uv（如果可用，否则使用 pip）
-RUN pip install --no-cache-dir uv || echo "uv not available, using pip"
+# 安装 uv
+RUN pip install --no-cache-dir uv
 
 # 复制依赖文件和源代码（安装依赖需要源代码）
 COPY pyproject.toml uv.lock* ./
@@ -28,12 +28,7 @@ COPY src/ ./src/
 COPY config.json* ./
 
 # 安装 Python 依赖
-# 优先使用 uv，如果失败则使用 pip
-RUN if command -v uv &> /dev/null; then \
-        uv pip install --system . || pip install --no-cache-dir .; \
-    else \
-        pip install --no-cache-dir .; \
-    fi
+RUN uv pip install --system .
 
 # 创建必要的目录
 RUN mkdir -p storage/data storage/temp

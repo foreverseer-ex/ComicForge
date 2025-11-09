@@ -1,0 +1,14 @@
+{
+  "model": "urn:air:sdxl:checkpoint:civitai:827184@2167369",
+  "params": {
+    "prompt": "1girl, solo, beautiful transgender woman, completely feminized beauty, long white hair, slender slim figure, smooth tender skin, D cup breasts, detailed face, expressive eyes, standing pose, full body portrait, elegant posture, soft lighting, intricate details, masterpiece, best quality, highly detailed, beautiful composition",
+    "negativePrompt": "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, deformed, ugly, mutated, extra limbs",
+    "scheduler": "DPMPP2MKarras",
+    "steps": 30,
+    "cfgScale": 7.0,
+    "width": 1024,
+    "height": 1024,
+    "seed": -1,
+    "clipSkip": 2
+  }
+}

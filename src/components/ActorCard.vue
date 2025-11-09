@@ -32,8 +32,8 @@
       </div>
       <!-- 有图片时显示图片 -->
       <img 
-        v-else-if="firstExampleImage && !privacyMode"
-        :src="firstExampleImageWithRetry"
+        v-else-if="firstExampleBlobUrl && !privacyMode"
+        :src="firstExampleBlobUrl"
         :alt="actor.name"
         class="w-full h-full object-cover"
         @error="handleImageError"
@@ -98,6 +98,7 @@ import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { PhotoIcon, TagIcon } from '@heroicons/vue/24/outline'
 import { getApiBaseURL } from '../utils/apiConfig'
+import api from '../api'
 
 interface Actor {
   actor_id: string
@@ -130,87 +131,90 @@ const { isDark } = storeToRefs(themeStore)
 const exampleCount = computed(() => props.actor.examples?.length || 0)
 const tagCount = computed(() => Object.keys(props.actor.tags || {}).length)
 
-// 检查是否有正在生成的立绘（image_path 为 null）
+// 仅当“第一张 example 正在生成（image_path 为空）”时显示 loading
 const hasGeneratingExample = computed(() => {
   if (!props.actor.examples || exampleCount.value === 0) return false
-  return props.actor.examples.some((ex: any) => !ex.image_path)
+  const first = props.actor.examples[0]
+  return !first?.image_path
 })
 
-const firstExampleImage = computed(() => {
+const firstExampleImagePath = computed(() => {
   if (!props.actor.examples || exampleCount.value === 0) return null
   const firstExample = props.actor.examples[0]
-  if (!firstExample?.image_path) return null  // image_path 为 None 时返回 null（不显示图片）
-  
-  const baseURL = getApiBaseURL()
-  // 注意：image_path 可能是相对路径，需要根据实际情况处理
-  // 如果是相对路径，需要通过 /file/actor-example 端点获取
-  // 这里暂时保持原样，因为 image_path 可能已经是完整路径
-  if (firstExample.image_path.startsWith('http://') || firstExample.image_path.startsWith('https://')) {
-    return firstExample.image_path
-  }
-  // 如果是相对路径，需要通过actor-example端点
-  // 但这里我们不知道example_index，所以暂时返回null
-  // 实际上应该通过 /file/actor-example?actor_id=...&example_index=0 获取
-  // 使用 image_path 作为缓存破坏参数，确保不同图片使用不同的 URL
-  return `${baseURL}/actor/${props.actor.actor_id}/image?example_index=0&path=${encodeURIComponent(firstExample.image_path)}`
+  if (!firstExample?.image_path) return null
+  return firstExample.image_path as string
 })
+
+const firstExampleBlobUrl = ref<string | null>(null)
+
+const buildProtectedUrl = () => {
+  if (!firstExampleImagePath.value) return ''
+  const baseURL = getApiBaseURL()
+  if (firstExampleImagePath.value.startsWith('http://') || firstExampleImagePath.value.startsWith('https://')) {
+    return firstExampleImagePath.value
+  }
+  return `${baseURL}/actor/${props.actor.actor_id}/image?example_index=0&path=${encodeURIComponent(firstExampleImagePath.value)}`
+}
+
+const loadFirstBlob = async () => {
+  firstExampleBlobUrl.value = null
+  const full = buildProtectedUrl()
+  if (!full) return
+  try {
+    const base = getApiBaseURL()
+    if (full.startsWith(base) && /\/actor\/.+\/image/.test(full)) {
+      const relative = full.replace(base, '')
+      const resp = await api.get(relative, { responseType: 'blob' })
+      firstExampleBlobUrl.value = URL.createObjectURL(resp as any)
+    } else {
+      firstExampleBlobUrl.value = full
+    }
+  } catch (e) {
+    console.error('加载缩略图失败:', e)
+    firstExampleBlobUrl.value = null
+  }
+}
 
 // 图片重试相关状态
 const imageRetryCount = ref(0)
-const imageLoadKey = ref(0) // 用于强制重新加载图片
-const imageTimestamp = ref(Date.now()) // 初始时间戳
 
 // 带重试的图片URL
-const firstExampleImageWithRetry = computed(() => {
-  if (!firstExampleImage.value) return undefined
-  // 添加时间戳和重试次数作为查询参数，避免浏览器缓存
-  const separator = firstExampleImage.value.includes('?') ? '&' : '?'
-  return `${firstExampleImage.value}${separator}_t=${imageTimestamp.value}&_retry=${imageRetryCount.value}&_key=${imageLoadKey.value}`
-})
+watch(firstExampleImagePath, async () => {
+  imageRetryCount.value = 0
+  await loadFirstBlob()
+}, { immediate: true })
 
 const handleImageError = (event: Event) => {
   const img = event.target as HTMLImageElement
   // 如果重试次数小于3，尝试重新加载
   if (imageRetryCount.value < 3) {
     imageRetryCount.value++
-    imageLoadKey.value++
-    imageTimestamp.value = Date.now() // 更新时间戳，强制重新加载
-    // 强制重新加载图片
-    setTimeout(() => {
-      if (img && firstExampleImage.value) {
-        img.src = firstExampleImageWithRetry.value || ''
+    setTimeout(async () => {
+      await loadFirstBlob()
+      if (img && firstExampleBlobUrl.value) {
+        img.src = firstExampleBlobUrl.value
       }
-    }, 500) // 延迟500ms后重试
+    }, 500)
   } else {
     // 重试3次后仍然失败，隐藏图片
-    console.error('图片加载失败，已重试3次:', firstExampleImage.value)
+    console.error('图片加载失败，已重试3次:', buildProtectedUrl())
   }
 }
 
 const handleImageLoad = () => {
   // 图片加载成功，重置重试计数
   imageRetryCount.value = 0
-  imageLoadKey.value = 0
 }
 
-// 监听 actor.examples 的变化，当 image_path 从 null 变为有值时，强制刷新图片
+// 监听第一张 example 的变化：仅当首图的 image_path 从空变为有值或路径发生变化时刷新缩略图
 watch(
-  () => props.actor.examples,
-  (newExamples, oldExamples) => {
-    // 检查是否有 example 的 image_path 从 null 变为有值
-    if (newExamples && oldExamples) {
-      const hadNullImage = oldExamples.some((ex: any) => !ex.image_path)
-      const hasImageNow = newExamples.some((ex: any) => ex.image_path)
-      
-      // 如果之前有 null 的 image_path，现在有了，强制刷新图片
-      if (hadNullImage && hasImageNow) {
-        imageTimestamp.value = Date.now()
-        imageLoadKey.value++
-        imageRetryCount.value = 0
-      }
+  () => props.actor.examples ? props.actor.examples[0]?.image_path : undefined,
+  (newPath, oldPath) => {
+    if (newPath && newPath !== oldPath) {
+      imageRetryCount.value = 0
+      loadFirstBlob()
     }
-  },
-  { deep: true }
+  }
 )
 
 const openDetailDialog = () => {

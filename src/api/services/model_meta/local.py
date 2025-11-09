@@ -194,7 +194,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         async with aiofiles.open(meta_file, 'w', encoding='utf-8') as f:
             await f.write(meta.model_dump_json(indent=2))
     
-    async def save(self, model_meta: ModelMeta, parallel_download: bool = False) -> tuple[ModelMeta, int, int]:
+    async def save(self, model_meta: ModelMeta, parallel_download: bool = False, download_examples: bool = True) -> tuple[ModelMeta, int, int]:
         """
         将模型元数据本地化并保存。
         
@@ -224,7 +224,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         base_path = home / Path(model_meta.filename).stem
         base_path.mkdir(parents=True, exist_ok=True)
         
-        # 处理示例图片（支持串行或并行下载）
+        # 处理示例图片（支持串行或并行下载；可禁用下载）
         localized_examples: list[Example] = []
         
         # 分离本地和远程的示例图片
@@ -243,9 +243,10 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         
         # 下载远程示例图片
         failed_image_count = 0
-        total_image_count = len(remote_examples)
+        total_image_count = 0
         
-        if remote_examples:
+        if remote_examples and download_examples:
+            total_image_count = len(remote_examples)
             if parallel_download:
                 # 并行下载
                 logger.debug(f"并行下载 {len(remote_examples)} 张示例图片")
@@ -289,7 +290,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
                         # 下载失败，跳过这张图片（download_file 已经记录了警告日志）
                         logger.warning(f"下载失败，跳过示例图片: {example.filename}")
 
-        # 创建本地化的 ModelMeta
+        # 创建本地化的 ModelMeta（如果未下载远程示例，则仅包含本地示例）
         localized_meta = ModelMeta(
             filename=model_meta.filename,
             name=model_meta.name,

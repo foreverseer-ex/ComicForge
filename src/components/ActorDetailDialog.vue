@@ -129,7 +129,7 @@
                 <div class="flex-1 flex items-center justify-center">
                   <img
                     v-if="!privacyMode"
-                    :src="getExampleImageUrlWithRetry(currentExample, currentExampleIndex)"
+                    :src="exampleBlobUrls[currentExampleIndex] || ''"
                     :alt="currentExample.title || actor.name"
                     class="w-full h-full object-contain"
                     @error="handleCurrentImageError"
@@ -383,7 +383,7 @@
                       <template v-if="example.image_path">
                         <img
                           v-if="!privacyMode"
-                          :src="getExampleImageUrlWithRetry(example, index)"
+                          :src="exampleBlobUrls[index] || ''"
                           :alt="example.title || `立绘 ${index + 1}`"
                           class="w-full h-full object-cover"
                           @error="(e) => handleExampleImageError(e, index)"
@@ -781,6 +781,40 @@ const currentExample = computed(() => {
   return props.actor.examples[currentExampleIndex.value]
 })
 
+// 受保护图片的 blob URL 缓存（索引 -> blob URL）
+const exampleBlobUrls = ref<string[]>([])
+
+// 依据 index 生成后端受保护图片 URL
+const buildProtectedExampleUrl = (index: number) => {
+  if (!props.actor?.examples?.[index]?.image_path || !props.actor) return ''
+  const example = props.actor.examples[index]
+  const baseURL = getApiBaseURL()
+  return `${baseURL}/actor/${props.actor.actor_id}/image?example_index=${index}&path=${encodeURIComponent(example.image_path)}`
+}
+
+// 加载单个 example 的 blob URL（带鉴权）
+const ensureExampleBlobLoaded = async (index: number) => {
+  if (!props.actor?.examples?.[index]?.image_path) return
+  if (exampleBlobUrls.value[index]) return
+  try {
+    const apiBase = getApiBaseURL()
+    const fullUrl = buildProtectedExampleUrl(index)
+    const relative = fullUrl.replace(apiBase, '')
+    const resp = await api.get(relative, { responseType: 'blob' })
+    const blobUrl = URL.createObjectURL(resp as any)
+    exampleBlobUrls.value[index] = blobUrl
+  } catch (e) {
+    console.error('加载受保护图片失败:', index, e)
+  }
+}
+
+// 批量加载全部（数量通常不大）
+const loadAllExampleBlobs = async () => {
+  if (!props.actor?.examples) return
+  exampleBlobUrls.value = new Array(props.actor.examples.length).fill('')
+  await Promise.all(props.actor.examples.map((_ex, i) => ensureExampleBlobLoaded(i)))
+}
+
 // 所有example的URL数组（用于大图显示）
 const allExampleUrls = computed(() => {
   if (!props.actor?.examples) return []
@@ -814,21 +848,7 @@ const exampleImageRetryCounts = ref<Record<number, number>>({})
 const exampleImageLoadKeys = ref<Record<number, number>>({})
 const exampleImageTimestamps = ref<Record<number, number>>({})
 
-// 带重试的当前图片URL
-const getExampleImageUrlWithRetry = (example: any, index: number) => {
-  const baseUrl = getExampleImageUrl(example, index)
-  if (!baseUrl) return ''
-  
-  // 根据是否是当前显示的图片，使用不同的重试计数
-  const isCurrent = index === currentExampleIndex.value
-  const retryCount = isCurrent ? currentImageRetryCount.value : (exampleImageRetryCounts.value[index] || 0)
-  const loadKey = isCurrent ? currentImageLoadKey.value : (exampleImageLoadKeys.value[index] || 0)
-  const timestamp = isCurrent ? currentImageTimestamp.value : (exampleImageTimestamps.value[index] || Date.now())
-  
-  // 添加时间戳和重试次数作为查询参数，避免浏览器缓存
-  const separator = baseUrl.includes('?') ? '&' : '?'
-  return `${baseUrl}${separator}_t=${timestamp}&_retry=${retryCount}&_key=${loadKey}`
-}
+// 已改为通过 ensureExampleBlobLoaded 加载 blob URL，这里不再需要基于查询参数的重试 URL 生成
 
 // 当前图片错误处理
 const handleCurrentImageError = (event: Event) => {
@@ -837,13 +857,14 @@ const handleCurrentImageError = (event: Event) => {
     currentImageRetryCount.value++
     currentImageLoadKey.value++
     currentImageTimestamp.value = Date.now() // 更新时间戳，强制重新加载
-    setTimeout(() => {
-      if (img && currentExample.value) {
-        img.src = getExampleImageUrlWithRetry(currentExample.value, currentExampleIndex.value)
+    setTimeout(async () => {
+      await ensureExampleBlobLoaded(currentExampleIndex.value)
+      if (img) {
+        img.src = exampleBlobUrls.value[currentExampleIndex.value] || ''
       }
     }, 500)
   } else {
-    console.error('当前图片加载失败，已重试3次:', getExampleImageUrl(currentExample.value!, currentExampleIndex.value))
+    console.error('当前图片加载失败，已重试3次:', buildProtectedExampleUrl(currentExampleIndex.value))
   }
 }
 
@@ -861,13 +882,14 @@ const handleExampleImageError = (event: Event, index: number) => {
     exampleImageRetryCounts.value[index] = retryCount + 1
     exampleImageLoadKeys.value[index] = (exampleImageLoadKeys.value[index] || 0) + 1
     exampleImageTimestamps.value[index] = Date.now() // 更新时间戳，强制重新加载
-    setTimeout(() => {
-      if (img && props.actor?.examples[index]) {
-        img.src = getExampleImageUrlWithRetry(props.actor.examples[index], index)
+    setTimeout(async () => {
+      await ensureExampleBlobLoaded(index)
+      if (img) {
+        img.src = exampleBlobUrls.value[index] || ''
       }
     }, 500)
   } else {
-    console.error(`立绘 ${index} 加载失败，已重试3次:`, getExampleImageUrl(props.actor!.examples[index], index))
+    console.error(`立绘 ${index} 加载失败，已重试3次:`, buildProtectedExampleUrl(index))
   }
 }
 
@@ -932,8 +954,6 @@ watch(() => props.actor, (newActor) => {
     }, 5000) // 每5秒检查一次
   }
 }, { immediate: true })
-
-
 
 // 开始编辑名称
 const startEditName = () => {
@@ -1478,8 +1498,11 @@ const handleKeydown = (e: KeyboardEvent) => {
 }
 
 // 组件挂载时添加键盘事件监听
-onMounted(() => {
+onMounted(async () => {
   document.addEventListener('keydown', handleKeydown)
+  if (props.actor) {
+    await loadAllExampleBlobs()
+  }
 })
 
 // 组件卸载时移除键盘事件监听

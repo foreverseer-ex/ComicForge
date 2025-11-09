@@ -9,3 +9,4 @@ from .novel import *
 from .actor import *
 from .project import *
 from .memory import *
+from .user import *

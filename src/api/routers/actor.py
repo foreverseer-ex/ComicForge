@@ -10,7 +10,6 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from loguru import logger
-from pydantic import BaseModel
 import asyncio
 
 from api.schemas.actor import Actor, ActorExample
@@ -67,7 +66,7 @@ async def create_actor(
     return {"actor_id": actor.actor_id}
 
 
-@router.get("/all", response_model=List[Actor], summary="列出所有Actor")
+@router.get("/all", summary="列出所有Actor")
 async def get_all_actors(
     project_id: Optional[str] = None,
     limit: int = 100,
@@ -133,7 +132,7 @@ async def get_all_tag_descriptions() -> Dict[str, str]:
 # ==================== 基于ID的CRUD操作 ====================
 # 注意：ID参数通过路径参数传递，权限验证在服务层进行
 
-@router.get("/{actor_id}", response_model=Actor, summary="获取Actor信息")
+@router.get("/{actor_id}", summary="获取Actor信息")
 async def get_actor(actor_id: str) -> Actor:
     """
     获取 Actor 详细信息。
@@ -154,25 +153,23 @@ async def get_actor(actor_id: str) -> Actor:
     return actor
 
 
-class ActorUpdateRequest(BaseModel):
-    """Actor 更新请求"""
-    name: Optional[str] = None
-    desc: Optional[str] = None
-    color: Optional[str] = None
-    tags: Optional[Dict[str, str]] = None
-
-
-@router.put("/{actor_id}", response_model=Actor, summary="更新Actor")
+@router.put("/{actor_id}", summary="更新Actor")
 async def update_actor(
     actor_id: str,
-    request: ActorUpdateRequest
+    name: Optional[str] = None,
+    desc: Optional[str] = None,
+    color: Optional[str] = None,
+    tags: Optional[Dict[str, str]] = None
 ) -> Actor:
     """
     更新 Actor 信息。
     
     Args:
         actor_id: Actor ID（路径参数）
-        request: 更新请求体
+        name: 名称
+        desc: 描述
+        color: 卡片颜色
+        tags: 标签字典
     
     Returns:
         更新后的 Actor 对象
@@ -187,14 +184,14 @@ async def update_actor(
     
     # 构建更新字典
     update_data = {}
-    if request.name is not None:
-        update_data["name"] = request.name
-    if request.desc is not None:
-        update_data["desc"] = request.desc
-    if request.color is not None:
-        update_data["color"] = request.color
-    if request.tags is not None:
-        update_data["tags"] = request.tags
+    if name is not None:
+        update_data["name"] = name
+    if desc is not None:
+        update_data["desc"] = desc
+    if color is not None:
+        update_data["color"] = color
+    if tags is not None:
+        update_data["tags"] = tags
     
     # 更新 Actor
     updated_actor = ActorService.update(actor_id, **update_data)
@@ -253,7 +250,7 @@ async def remove_actor(actor_id: str) -> dict:
 
 # ==================== 示例图管理 ====================
 
-@router.post("/{actor_id}/example", response_model=Actor, summary="添加示例图")
+@router.post("/{actor_id}/example", summary="添加示例图")
 async def add_example(
     actor_id: str,
     project_id: str,
@@ -343,7 +340,7 @@ async def add_example(
     return updated
 
 
-@router.delete("/{actor_id}/example", response_model=Actor, summary="删除示例图")
+@router.delete("/{actor_id}/example", summary="删除示例图")
 async def remove_example(
     actor_id: str,
     example_index: int,
@@ -412,7 +409,7 @@ async def remove_example(
     return updated
 
 
-@router.post("/{actor_id}/example/swap", response_model=Actor, summary="交换示例图位置")
+@router.post("/{actor_id}/example/swap", summary="交换示例图位置")
 async def swap_examples(
     actor_id: str,
     index1: int,
@@ -464,7 +461,7 @@ async def swap_examples(
     return updated
 
 
-@router.delete("/{actor_id}/examples/clear", response_model=Actor, summary="清空所有示例图")
+@router.delete("/{actor_id}/examples/clear", summary="清空所有示例图")
 async def clear_examples(
     actor_id: str,
     project_id: Optional[str] = None
@@ -518,7 +515,7 @@ async def clear_examples(
     return updated
 
 
-@router.post("/{actor_id}/examples/batch-remove", response_model=Actor, summary="批量删除示例图")
+@router.post("/{actor_id}/examples/batch-remove", summary="批量删除示例图")
 async def batch_remove_examples(
     actor_id: str,
     example_indices: list[int],

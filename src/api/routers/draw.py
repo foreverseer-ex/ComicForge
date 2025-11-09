@@ -269,15 +269,31 @@ async def delete_draw_jobs_batch(job_ids: list[str]) -> dict:
 
 
 @router.delete("/clear", summary="清空所有绘图任务")
-async def clear_draw_jobs() -> dict:
+async def clear_draw_jobs(only_failed: bool = False) -> dict:
     """
     清空所有绘图任务。
+    
+    Query:
+        only_failed: 仅清空失败任务（默认 False）
     
     Returns:
         删除的任务数量
     """
-    count = JobService.clear()
-    return {"count": count}
+    if only_failed:
+        jobs = JobService.get_all()
+        count = 0
+        for job in jobs:
+            try:
+                if getattr(job, "status", None) == "failed":
+                    if JobService.delete(job.job_id):
+                        count += 1
+            except Exception as e:
+                logger.warning(f"删除失败任务时出错: {job.job_id}: {e}")
+        logger.info(f"仅清空失败任务: {count} 条")
+        return {"count": count}
+    else:
+        count = JobService.clear()
+        return {"count": count}
 
 
 @router.get("/image", response_class=FileResponse, summary="获取生成的图像")

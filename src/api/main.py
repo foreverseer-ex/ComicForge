@@ -4,7 +4,7 @@ FastAPI 应用入口文件。
 启动 FastAPI 服务，注册所有路由，初始化数据库。
 """
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 import logging
@@ -21,9 +21,11 @@ from api.routers import (
     settings,
     help,
     model_meta,
+    auth,
 )
 from api.services.db.base import init_db
 from api.settings import AppSettings
+from api.security import get_current_user_claims
 
 # 配置 uvicorn.access logger：过滤掉 /health 端点的访问日志
 class HealthCheckFilter(logging.Filter):
@@ -82,17 +84,19 @@ app.add_middleware(
 )
 
 # 注册所有路由
-app.include_router(project.router)
-app.include_router(actor.router)
-app.include_router(memory.router)
-app.include_router(context.router)
-app.include_router(draw.router)
-app.include_router(llm.router)
-app.include_router(chat.router)
-app.include_router(history.router)
-app.include_router(settings.router)
-app.include_router(help.router)
-app.include_router(model_meta.router)
+protected = [Depends(get_current_user_claims)]
+app.include_router(project.router, dependencies=protected)
+app.include_router(actor.router, dependencies=protected)
+app.include_router(memory.router, dependencies=protected)
+app.include_router(context.router, dependencies=protected)
+app.include_router(draw.router, dependencies=protected)
+app.include_router(llm.router, dependencies=protected)
+app.include_router(chat.router, dependencies=protected)
+app.include_router(history.router, dependencies=protected)
+app.include_router(settings.router, dependencies=protected)
+app.include_router(help.router, dependencies=protected)
+app.include_router(model_meta.router, dependencies=protected)
+app.include_router(auth.router)
 
 
 @app.get("/", tags=["根路径"])

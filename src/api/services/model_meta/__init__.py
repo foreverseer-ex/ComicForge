@@ -5,7 +5,7 @@
 """
 from .base import AbstractModelMetaService
 from .civitai import CivitaiModelMetaService, civitai_model_meta_service
-from .local import LocalModelModelMetaService, local_model_meta_service
+from .db import ModelMetaDbService, model_meta_db_service
 
 __all__ = [
     # 基类
@@ -13,7 +13,7 @@ __all__ = [
     # Civitai 服务
     "CivitaiModelMetaService",
     "civitai_model_meta_service",
-    # 本地服务
-    "LocalModelModelMetaService",
-    "local_model_meta_service",
+    # 数据库服务
+    "ModelMetaDbService",
+    "model_meta_db_service",
 ]

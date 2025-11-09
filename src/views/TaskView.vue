@@ -208,6 +208,7 @@
           <!-- Job ID（移动端隐藏） -->
           <div class="hidden md:flex md:col-span-2 items-center">
             <div 
+              v-if="job.job_id"
               @click="copyToClipboard(job.job_id)"
               :class="[
                 'text-xs font-mono truncate cursor-pointer hover:underline',
@@ -217,6 +218,7 @@
             >
               {{ job.job_id.substring(0, 20) }}...
             </div>
+            <div v-else :class="['text-xs', isDark ? 'text-gray-400' : 'text-gray-500']">-</div>
           </div>
 
           <!-- 状态标识 -->
@@ -337,7 +339,22 @@
       :message="confirmDialog.message"
       @confirm="confirmDialog.onConfirm"
       @cancel="confirmDialog.show = false"
-    />
+    >
+      <template #extra>
+        <div v-if="showClearOnlyFailedOption" class="flex items-center gap-2">
+          <input
+            id="onlyFailed"
+            type="checkbox"
+            v-model="clearOnlyFailed"
+            :class="[
+              'w-4 h-4 rounded cursor-pointer',
+              isDark ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+            ]"
+          />
+          <label for="onlyFailed" :class="isDark ? 'text-gray-300' : 'text-gray-700'">仅清空失败项目</label>
+        </div>
+      </template>
+    </ConfirmDialog>
 
     <!-- 提示对话框 -->
     <AlertDialog
@@ -409,6 +426,42 @@ const confirmDialog = ref({
   onConfirm: () => {}
 })
 
+// 是否显示“仅清空失败项目”选项（仅在点击清空全部时展示）
+const showClearOnlyFailedOption = ref(false)
+// “仅清空失败项目”勾选状态（默认不勾选）
+const clearOnlyFailed = ref(false)
+
+// 清空任务
+const handleClearAll = async () => {
+  // 打开对话框并显示额外选项
+  showClearOnlyFailedOption.value = true
+  clearOnlyFailed.value = false
+  confirmDialog.value = {
+    show: true,
+    title: '确认清空',
+    message: '确定要清空所有任务吗？此操作不可恢复！',
+    onConfirm: async () => {
+      confirmDialog.value.show = false
+      try {
+        await api.delete('/draw/clear', { params: { only_failed: clearOnlyFailed.value ? 'true' : 'false' } })
+        selectedJobIds.value.clear()
+        await loadJobs()
+        showToast(clearOnlyFailed.value ? '已清空失败任务' : '清空成功', 'success')
+      } catch (error: any) {
+        console.error('清空任务失败:', error)
+        alertDialog.value = {
+          show: true,
+          title: '清空失败',
+          message: error?.response?.data?.detail || error.message || '未知错误'
+        }
+      } finally {
+        // 关闭额外选项显示
+        showClearOnlyFailedOption.value = false
+      }
+    }
+  }
+}
+
 const alertDialog = ref({
   show: false,
   title: '',
@@ -456,7 +509,8 @@ const updateJobStatusesFromData = () => {
 
 // 只检查那些可能还在生成中的任务（completed_at 为 null）
 const checkPendingJobStatuses = async () => {
-  const pendingJobs = jobs.value.filter(job => !job.completed_at)
+  // 仅检查未完成且具有有效 job_id 的任务
+  const pendingJobs = jobs.value.filter(job => !job.completed_at && !!job.job_id)
   
   // 并行检查所有待处理任务
   const promises = pendingJobs.map(async (job) => {
@@ -575,44 +629,14 @@ const handleDeleteSelected = async () => {
   }
 }
 
-// 清空所有任务
-const handleClearAll = async () => {
-  confirmDialog.value = {
-    show: true,
-    title: '确认清空',
-    message: '确定要清空所有任务吗？此操作不可恢复！',
-    onConfirm: async () => {
-      confirmDialog.value.show = false
-      try {
-        await api.delete('/draw/clear')
-        selectedJobIds.value.clear() // 清除选中状态
-        await loadJobs()
-        showToast('清空成功', 'success')
-      } catch (error: any) {
-        console.error('清空任务失败:', error)
-        alertDialog.value = {
-          show: true,
-          title: '清空失败',
-          message: error.response?.data?.detail || error.message || '未知错误'
-        }
-      }
-    }
-  }
-}
-
 // 下载图片
 const handleDownload = async (jobId: string) => {
   try {
     const baseURL = getApiBaseURL()
     const url = `${baseURL}/draw/${encodeURIComponent(jobId)}/image`
-    
-    const response = await fetch(url)
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-    
-    const blob = await response.blob()
-    const blobUrl = URL.createObjectURL(blob)
+    const relative = url.replace(baseURL, '')
+    const resp = await api.get(relative, { responseType: 'blob' })
+    const blobUrl = URL.createObjectURL(resp as any)
     const link = document.createElement('a')
     link.href = blobUrl
     link.download = `job_${jobId}.png`
@@ -626,7 +650,7 @@ const handleDownload = async (jobId: string) => {
     alertDialog.value = {
       show: true,
       title: '下载失败',
-      message: error.message || '未知错误'
+      message: error?.response?.status ? `HTTP ${error.response.status}` : (error.message || '未知错误')
     }
   }
 }

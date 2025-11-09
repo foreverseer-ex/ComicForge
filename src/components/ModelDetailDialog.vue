@@ -30,6 +30,22 @@
             {{ versionName }}
           </h2>
           <div class="flex items-center gap-2">
+            <!-- 下载示例图按钮 -->
+            <button
+              @click.stop="handleDownloadExamples"
+              :disabled="downloadingExamples"
+              :class="[
+                'p-2 rounded-lg transition-colors',
+                downloadingExamples
+                  ? 'opacity-50 cursor-not-allowed'
+                  : isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'
+              ]"
+              title="仅下载示例图片，不改变其他元数据"
+            >
+              <ArrowDownTrayIcon v-if="!downloadingExamples" class="w-5 h-5" />
+              <div v-else class="animate-spin rounded-full h-5 w-5 border-b-2" 
+                   :class="isDark ? 'border-blue-400' : 'border-blue-600'"></div>
+            </button>
             <!-- 重置按钮 -->
             <button
               @click.stop="handleReset"
@@ -391,7 +407,8 @@ import {
   ClipboardIcon,
   EyeIcon,
   EyeSlashIcon,
-  ArrowPathIcon
+  ArrowPathIcon,
+  ArrowDownTrayIcon
 } from '@heroicons/vue/24/outline'
 import { getImageUrl } from '../utils/imageUtils'
 import { showToast } from '../utils/toast'
@@ -724,6 +741,28 @@ const togglePrivacyMode = () => {
 
 // 重置模型元数据
 const resetting = ref(false)
+const downloadingExamples = ref(false)
+const handleDownloadExamples = async () => {
+  if (!props.model || downloadingExamples.value) return
+  try {
+    downloadingExamples.value = true
+    showToast('开始下载示例图...', 'info')
+    const resp = await api.post(`/model-meta/${props.model.version_id}/download-examples`, { parallel_download: false })
+    const data = (resp as any)?.data || resp
+    if (data?.success) {
+      showToast(`下载完成（成功 ${data.total_image_count - data.failed_image_count} / ${data.total_image_count}）`, 'success')
+      emit('model-updated')
+      // 不强制关闭对话框，用户可继续浏览
+    } else {
+      showToast('下载失败', 'error')
+    }
+  } catch (e: any) {
+    const msg = e?.response?.data?.detail || e?.message || '下载失败'
+    showToast(msg, 'error')
+  } finally {
+    downloadingExamples.value = false
+  }
+}
 const handleReset = () => {
   if (!props.model || resetting.value) return
   

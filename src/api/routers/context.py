@@ -148,7 +148,7 @@ async def create_line(
     return {"id": created.id}
 
 
-@router.get("/line", summary="获取指定行内容", response_model=NovelContent)
+@router.get("/line", summary="获取指定行内容")
 async def get_line(
     project_id: str,
     chapter: int,
@@ -177,7 +177,7 @@ async def get_line(
     return content
 
 
-@router.put("/line", summary="更新行内容", response_model=NovelContent)
+@router.put("/line", summary="更新行内容")
 async def update_line(
     project_id: str,
     chapter: int,
@@ -243,7 +243,7 @@ async def delete_line(
 
 # ==================== 批量行操作 ====================
 
-@router.post("/lines/batch", summary="批量创建内容行", response_model=List[NovelContent])
+@router.post("/lines/batch", summary="批量创建内容行")
 async def create_lines_batch(
     contents: List[dict]
 ) -> List[NovelContent]:
@@ -270,7 +270,7 @@ async def create_lines_batch(
     return created
 
 
-@router.get("/lines", summary="获取章节的所有行", response_model=List[NovelContent])
+@router.get("/lines", summary="获取章节的所有行")
 async def get_chapter_lines(
     project_id: str,
     chapter: int
@@ -288,7 +288,7 @@ async def get_chapter_lines(
     return NovelContentService.get_by_chapter(project_id, chapter)
 
 
-@router.get("/lines/range", summary="获取行范围的内容", response_model=List[NovelContent])
+@router.get("/lines/range", summary="获取行范围的内容")
 async def get_lines_range(
     project_id: str,
     start_line: int,
@@ -389,7 +389,7 @@ async def insert_lines_batch(
 
 # ==================== 章节管理 ====================
 
-@router.get("/chapters", summary="获取所有章节", response_model=List[ChapterSummary])
+@router.get("/chapters", summary="获取所有章节")
 async def get_chapters(project_id: str) -> List[ChapterSummary]:
     """
     获取项目的所有章节摘要列表。
@@ -403,7 +403,7 @@ async def get_chapters(project_id: str) -> List[ChapterSummary]:
     return SummaryService.get_all(project_id)
 
 
-@router.get("/chapter", summary="获取章节详情", response_model=ChapterSummary)
+@router.get("/chapter", summary="获取章节详情")
 async def get_chapter(
     project_id: str,
     chapter_index: int
@@ -430,7 +430,7 @@ async def get_chapter(
     return summary
 
 
-@router.put("/chapter", summary="更新章节详情", response_model=ChapterSummary)
+@router.put("/chapter", summary="更新章节详情")
 async def update_chapter(
     project_id: str,
     chapter_index: int,
@@ -499,7 +499,7 @@ async def delete_chapter(project_id: str, chapter: int) -> dict:
 
 # ==================== 项目级操作 ====================
 
-@router.get("/project", summary="获取项目的所有内容", response_model=List[NovelContent])
+@router.get("/project", summary="获取项目的所有内容")
 async def get_project_content(
     project_id: str,
     limit: Optional[int] = None

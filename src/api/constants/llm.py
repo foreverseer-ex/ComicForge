@@ -491,27 +491,19 @@ GENERATE_DRAW_PARAMS_BASE_TEMPLATE = """请根据以下信息生成文生图参�
 GENERATE_DRAW_PARAMS_DESC_SECTION = "任务描述：{desc}"
 GENERATE_DRAW_PARAMS_NO_DESC = "无任务描述"
 
-GENERATE_DRAW_PARAMS_STEPS_WITHOUT_PROJECT = """1. 查看模型的示例图像（examples）和生成参数（args），学习最佳实践
-2. 根据任务名称和描述，选择合适的模型、LoRA、prompt、negative_prompt 等参数
+GENERATE_DRAW_PARAMS_STEPS = """1. 若提供了角色信息（actors），先按如下方式参考：
+   - 找到任务名称中提到的角色
+   - 查看该角色已生成的立绘（examples）及其生成参数（draw_args），在同一角色或相似场景时保持一致性
+   - 若未提供角色信息或未匹配到角色，则直接进入下一步
+2. 查看模型的示例图像（examples）和生成参数（args），学习最佳实践
+3. 根据任务名称和描述，选择合适的模型、LoRA、prompt、negative_prompt 等参数
    ⚠️ **核心原则（必须严格遵守）**：
-   - **尺寸限制**：width 和 height 必须始终为 1024，不允许超过（即使示例图显示其他尺寸）
+   - **尺寸限制**：width 和 height 必须始终为 1024，不允许超过
    - **模型匹配**：所有 LoRA 的 ecosystem 和 base_model 必须与 Checkpoint 完全匹配
    - **LoRA 使用限制**：
      * 画风类通用 LoRA：通常只需要添加一个（或者不添加），因为画风 LoRA 之间会互相冲突
      * 特定类 LoRA：同类 LoRA 最多只需要添加一个，不同类 LoRA 没有限制，但总数最好不要超过 10 个
-3. 返回符合 DrawArgs 格式的 JSON 对象（注意：必须使用 `version_name` 作为模型和 LoRA 名称，使用 `sampler` 字段而不是 `sampler_name`，width 和 height 必须为 1024）"""
-
-GENERATE_DRAW_PARAMS_STEPS_WITH_PROJECT = """1. 查看已提供的角色信息（actors），找到任务名称中提到的角色
-2. 查看该角色已生成的立绘（examples）及其生成参数（draw_args），参考已有参数保持一致性
-3. 查看模型的示例图像（examples）和生成参数（args），学习最佳实践
-4. 根据任务名称和描述，选择合适的模型、LoRA、prompt、negative_prompt 等参数
-   ⚠️ **核心原则（必须严格遵守）**：
-   - **尺寸限制**：width 和 height 必须始终为 1024，不允许超过（即使已有立绘或示例图显示其他尺寸）
-   - **模型匹配**：所有 LoRA 的 ecosystem 和 base_model 必须与 Checkpoint 完全匹配（即使已有立绘使用了不匹配的模型）
-   - **LoRA 使用限制**：
-     * 画风类通用 LoRA：通常只需要添加一个（或者不添加），因为画风 LoRA 之间会互相冲突
-     * 特定类 LoRA：同类 LoRA 最多只需要添加一个，不同类 LoRA 没有限制，但总数最好不要超过 10 个
-5. 返回符合 DrawArgs 格式的 JSON 对象（注意：必须使用 `version_name` 作为模型和 LoRA 名称，使用 `sampler` 字段而不是 `sampler_name`，width 和 height 必须为 1024）"""
+4. 返回符合 DrawArgs 格式的 JSON 对象（注意：必须使用 `version_name` 作为模型和 LoRA 名称，使用 `sampler` 字段而不是 `sampler_name`，width 和 height 必须为 1024）"""
 
 GENERATE_DRAW_PARAMS_ACTOR_CONTEXT_TEMPLATE = """
 ⚠️ 重要：这是一个角色立绘生成任务（project_id={project_id}）。

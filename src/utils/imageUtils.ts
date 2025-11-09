@@ -4,6 +4,8 @@
  * 处理 file:// URL 和远程 URL，统一转换为可通过 API 访问的 URL
  */
 import { imageCache } from './imageCache'
+import api from '../api'
+import { getApiBaseURL } from './apiConfig'
 
 /**
  * 获取图片 URL（支持缓存）
@@ -22,7 +24,21 @@ export async function getImageUrl(
     return null
   }
 
-  // 如果是远程 URL，直接返回
+  // 如果是受保护的后端 API 图片（/draw/.../image 或 /actor/.../image），使用带鉴权的请求获取 blob
+  try {
+    const base = getApiBaseURL()
+    if (imageUrl.startsWith(base) && (/\/draw\/.+\/image/.test(imageUrl) || /\/actor\/.+\/image/.test(imageUrl))) {
+      // 去掉 base，改用 axios 实例以便自动注入 Authorization
+      const relativeUrl = imageUrl.replace(base, '')
+      const resp = await api.get(relativeUrl, { responseType: 'blob' })
+      return URL.createObjectURL(resp as any)
+    }
+  } catch (e) {
+    console.error('获取受保护图片失败:', imageUrl, e)
+    // 失败则回退为原始 URL（可能仍可匿名访问，或由 <img> 自行失败）
+  }
+
+  // 如果是远程公开 URL，直接返回
   if (!imageUrl.startsWith('file://')) {
     return imageUrl
   }
@@ -35,4 +51,3 @@ export async function getImageUrl(
     return null
   }
 }
-

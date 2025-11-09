@@ -30,6 +30,7 @@ if app_settings.civitai.api_token:
     os.environ["CIVITAI_API_TOKEN"] = app_settings.civitai.api_token
 
 import civitai
+from civitai.api_config import HTTPException as CivitaiHTTPException
 
 
 class CivitaiDrawService(AbstractDrawService):
@@ -41,23 +42,33 @@ class CivitaiDrawService(AbstractDrawService):
 
     # SD-Forge sampler 名称到 Civitai scheduler 名称的映射
     SCHEDULER_MAP = {
+        # Euler 系列
         "Euler a": "EulerA",
         "Euler": "Euler",
-        "DPM++ 2M Karras": "DPMPP2MKarras",
-        "DPM++ SDE Karras": "DPMPPSDEKarras",
-        "DPM++ 2S a": "DPMPP2SAncestral",
-        "DPM++ 2M": "DPMPP2M",
-        "DPM++ SDE": "DPMPPSDE",
+        # DPM++/DPM2 系列映射到文档允许的 DPM2 家族
+        "DPM++ 2M Karras": "DPM2MKarras",
+        "DPM++ SDE Karras": "DPMSDEKarras",
+        "DPM++ 2S a": "DPM2SA",
+        "DPM++ 2M": "DPM2M",
+        "DPM++ SDE": "DPMSDE",
+        "DPM++ 2S a Karras": "DPM2SAKarras",
+        # 其他调度器
         "DPM fast": "DPMFast",
         "DPM adaptive": "DPMAdaptive",
         "LMS": "LMS",
         "LMS Karras": "LMSKarras",
         "Heun": "Heun",
         "DPM2": "DPM2",
-        "DPM2 a": "DPM2Ancestral",
+        "DPM2 a": "DPM2A",
         "DPM2 Karras": "DPM2Karras",
-        "DPM2 a Karras": "DPM2AncestralKarras",
-        "DPM++ 2S a Karras": "DPMPP2SAncestralKarras",
+        "DPM2 a Karras": "DPM2AKarras",
+        # 直映射支持（如有）
+        "DDIM": "DDIM",
+        "PLMS": "PLMS",
+        "UniPC": "UniPC",
+        "LCM": "LCM",
+        "DDPM": "DDPM",
+        "DEIS": "DEIS",
     }
 
     @classmethod
@@ -134,49 +145,41 @@ class CivitaiDrawService(AbstractDrawService):
         :param args: 绘图参数
         :return: 包含 model_air, prompt, negative_prompt, scheduler, steps, cfg_scale, width, height, seed, clip_skip, positive_lora_airs, vae_air 的字典
         """
-        from api.services.model_meta import local_model_meta_service
+        from api.services.model_meta import model_meta_db_service
 
         # 获取模型的 AIR 标识符
-        model_meta = local_model_meta_service.get_by_version_name(args.model)
+        model_meta = model_meta_db_service.get_by_version_name(args.model)
         if not model_meta:
             raise RuntimeError(f"未找到模型: {args.model}")
 
         model_air = model_meta.air
         logger.debug(f"模型 AIR: {model_air}")
 
-        # 转换 LoRAs 名称为 AIR
+        # 转换 LoRAs 名称为 AIR（仅保留正向权重，忽略负向）
         positive_lora_airs: Dict[str, float] = {}
-        negative_lora_airs: Dict[str, float] = {}
         if args.loras:
             for lora_name, strength in args.loras.items():
-                lora_meta = local_model_meta_service.get_by_version_name(lora_name)
+                lora_meta = model_meta_db_service.get_by_version_name(lora_name)
                 if not lora_meta:
                     logger.warning(f"未找到 LoRA 元数据: {lora_name}，跳过")
                     continue
-                if strength < 0:
-                    negative_lora_airs[lora_meta.air] = abs(strength)
-                else:
-                    positive_lora_airs[lora_meta.air] = strength
+                if strength is None or strength <= 0:
+                    # 暂不支持负向 LoRA，忽略非正值
+                    logger.warning(f"忽略非正向 LoRA 权重: {lora_name} -> {strength}")
+                    continue
+                positive_lora_airs[lora_meta.air] = float(strength)
                 logger.debug(f"LoRA AIR: {lora_meta.air}, strength: {strength}")
 
         # 转换 VAE 名称为 AIR
         vae_air: Optional[str] = None
         if args.vae:
-            vae_meta = local_model_meta_service.get_by_version_name(args.vae)
+            vae_meta = model_meta_db_service.get_by_version_name(args.vae)
             if vae_meta:
                 vae_air = vae_meta.air
                 logger.debug(f"VAE AIR: {vae_air}")
 
-        # 处理负面 LoRA
+        # 负向 LoRA 不再拼接到负面提示，保持原始 negative_prompt
         final_negative_prompt = args.negative_prompt or ""
-        if negative_lora_airs:
-            negative_lora_names = []
-            for lora_air, strength in negative_lora_airs.items():
-                negative_lora_names.append(f"{lora_air} (strength: {strength})")
-            if negative_lora_names:
-                negative_lora_text = ", ".join(negative_lora_names)
-                final_negative_prompt = f"{final_negative_prompt}, {negative_lora_text}".strip(", ")
-                logger.info(f"已将负面 LoRA 添加到负面提示词: {negative_lora_names}")
 
         # 验证宽高
         width = args.width
@@ -186,7 +189,7 @@ class CivitaiDrawService(AbstractDrawService):
         if width > 1024 or height > 1024:
             raise ValueError(f"宽高超过 Civitai API 限制（最大 1024）: {width}x{height}")
 
-        return {
+        payload = {
             "model_air": model_air,
             "prompt": args.prompt,
             "negative_prompt": final_negative_prompt,
@@ -199,7 +202,14 @@ class CivitaiDrawService(AbstractDrawService):
             "clip_skip": args.clip_skip or 2,
             "positive_lora_airs": positive_lora_airs,
             "vae_air": vae_air,
+            "ecosystem": model_meta.ecosystem,
         }
+        try:
+            import json
+            logger.debug(f"[Civitai] civitai_params (after convert): {json.dumps(payload, ensure_ascii=False)}")
+        except Exception:
+            logger.debug(f"[Civitai] civitai_params (after convert): {payload}")
+        return payload
 
     async def _create_job_token_async(self, civitai_params: Dict[str, Any]) -> str:
         """
@@ -289,6 +299,7 @@ class CivitaiDrawService(AbstractDrawService):
             clip_skip: int = 2,
             positive_lora_airs: Optional[Dict[str, float]] = None,
             vae_air: Optional[str] = None,
+            ecosystem: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         异步创建 Civitai 文生图任务，返回 { token }。
@@ -322,13 +333,14 @@ class CivitaiDrawService(AbstractDrawService):
             },
         }
 
-        # 处理 additionalNetworks（LoRA 和 VAE）
+        # 不再设置 baseModel，避免 civitai 库的 FromTextSchema 校验报 "Extra inputs are not permitted"
+
+        # 处理 additionalNetworks（LoRA 和 VAE）使用字典结构
         additional: Dict[str, Any] = {}
 
         # 添加正面 LoRA
-        if positive_lora_airs:
-            for air, strength in positive_lora_airs.items():
-                additional[air] = {"type": "Lora", "strength": float(strength)}
+        for air, strength in positive_lora_airs.items():
+            additional[air] = {"type": "Lora", "strength": float(strength)}
 
         # 添加 VAE
         if vae_air:
@@ -337,15 +349,58 @@ class CivitaiDrawService(AbstractDrawService):
         if additional:
             option["additionalNetworks"] = additional
 
-        logger.debug(f"civitai.image.create option={option}")
+        try:
+            import json
+            logger.debug("[Civitai] SDK request option (about to send): " + json.dumps(option, ensure_ascii=False))
+        except Exception:
+            logger.debug(f"[Civitai] SDK request option (about to send): {option}")
 
-        # 调用 Civitai API（异步）
-        async def _do_create():
-            return await civitai.image.create(option)
+        # 调用 Civitai API（异步），若 400 则去除 additionalNetworks 重试一次
+        async def _do_create_with_fallback():
+            try:
+                return await civitai.image.create(option)
+            except CivitaiHTTPException as e:
+                logger.warning(f"Civitai 返回 {e.status_code}，准备去掉 additionalNetworks 重试一次")
+                # 去掉 additionalNetworks 后重试
+                option_fallback = {**option}
+                option_fallback.pop("additionalNetworks", None)
+                try:
+                    import json
+                    logger.debug("[Civitai] SDK fallback option (no additionalNetworks): " + json.dumps(option_fallback, ensure_ascii=False))
+                except Exception:
+                    logger.debug(f"[Civitai] SDK fallback option (no additionalNetworks): {option_fallback}")
+                try:
+                    return await civitai.image.create(option_fallback)
+                except Exception as e2:
+                    logger.warning(f"SDK 再次失败，尝试使用 httpx 直接创建任务: {e2}")
+                    # 直接请求 Civitai 接口作为兜底
+                    job_input = {
+                        "$type": "textToImage",
+                        "model": model_air,
+                        "params": option_fallback.get("params", {}),
+                    }
+                    url = "https://civitai.com/api/v1/consumer/jobs"
+                    headers = {}
+                    if app_settings.civitai.api_token:
+                        headers["Authorization"] = f"Bearer {app_settings.civitai.api_token}"
+                    async with httpx.AsyncClient(timeout=app_settings.civitai.timeout) as client:
+                        resp = await client.post(url, json=job_input, params={"wait": "false"}, headers=headers)
+                        try:
+                            resp.raise_for_status()
+                        except httpx.HTTPStatusError as he:
+                            logger.error(f"Civitai 直连创建失败: {he.response.status_code} {he.response.text}")
+                            raise
+                        data = resp.json()
+                        # 兼容 token 字段
+                        token = data.get("token") or data.get("job", {}).get("token")
+                        if not token:
+                            logger.error(f"Civitai 返回无 token: {data}")
+                            raise RuntimeError("Civitai 未返回 token")
+                        return {"token": token}
 
         # 使用超时机制
         return await with_timeout_async(
-            _do_create,
+            _do_create_with_fallback,
             timeout_seconds=app_settings.civitai.timeout,
             operation_name="创建 Civitai 绘图任务"
         )

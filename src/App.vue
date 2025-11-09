@@ -5,24 +5,33 @@
       isDark ? 'bg-gray-900' : 'bg-gray-50'
     ]"
   >
-    <Navigation />
-    
-    <!-- 主内容区域 -->
-    <main 
-      :class="[
-        'transition-all duration-300 relative',
-        isDark ? 'text-gray-100' : 'text-gray-900'
-      ]"
-      :style="{ marginLeft: `${navigationWidth}px` }"
-    >
-      <div class="p-8">
-        <router-view />
-      </div>
-    </main>
+    <!-- 已登录：显示导航 + 主内容 -->
+    <template v-if="isAuthenticated">
+      <Navigation />
+      <!-- 主内容区域 -->
+      <main 
+        :class="[
+          'transition-all duration-300 relative',
+          isDark ? 'text-gray-100' : 'text-gray-900'
+        ]"
+        :style="{ marginLeft: `${navigationWidth}px` }"
+      >
+        <div class="p-8">
+          <router-view />
+        </div>
+      </main>
+    </template>
 
-    <!-- 服务端未连接遮罩层 -->
+    <!-- 未登录：仅显示路由内容（登录页） -->
+    <template v-else>
+      <main :class="[ 'min-h-screen flex items-center justify-center', isDark ? 'text-gray-100' : 'text-gray-900' ]">
+        <router-view />
+      </main>
+    </template>
+
+    <!-- 服务端未连接遮罩层（仅登录后显示；检查进行中不显示，避免登录后闪现） -->
     <div 
-      v-if="!isConnected"
+      v-if="isAuthenticated && !isConnected && !isChecking"
       class="fixed inset-0 z-50 flex items-center justify-center"
       :class="isDark ? 'bg-gray-900/80 backdrop-blur-sm' : 'bg-gray-50/80 backdrop-blur-sm'"
     >
@@ -73,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, watch } from 'vue'
 import Navigation from './components/Navigation.vue'
 import { useThemeStore } from './stores/theme'
 import { useProjectStore } from './stores/project'
@@ -81,6 +90,7 @@ import { useConnectionStore } from './stores/connection'
 import { useNavigationStore } from './stores/navigation'
 import { storeToRefs } from 'pinia'
 import { getApiBaseURL } from './utils/apiConfig'
+import { useAuthStore } from './stores/auth'
 
 const themeStore = useThemeStore()
 const { isDark } = storeToRefs(themeStore)
@@ -88,11 +98,14 @@ const { isDark } = storeToRefs(themeStore)
 const projectStore = useProjectStore()
 
 const connectionStore = useConnectionStore()
-const { isConnected } = storeToRefs(connectionStore)
+const { isConnected, isChecking } = storeToRefs(connectionStore)
 const { checkConnection } = connectionStore
 
 const navigationStore = useNavigationStore()
 const { width: navigationWidth } = storeToRefs(navigationStore)
+
+const authStore = useAuthStore()
+const isAuthenticated = computed(() => authStore.isAuthenticated)
 
 // 获取 API 基础 URL
 const apiBaseUrl = computed(() => {
@@ -102,8 +115,14 @@ const apiBaseUrl = computed(() => {
 onMounted(() => {
   // 初始化主题
   themeStore.loadTheme()
-  // 初始化项目 store
-  projectStore.init()
-  projectStore.loadProjects()
 })
+
+// 登录后再初始化项目与连接检测
+watch(isAuthenticated, (authed) => {
+  if (authed) {
+    checkConnection()
+    projectStore.init()
+    projectStore.loadProjects()
+  }
+}, { immediate: false })
 </script>

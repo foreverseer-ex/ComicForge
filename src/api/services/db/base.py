@@ -68,7 +68,8 @@ class DatabaseSession:
 
     def __enter__(self) -> Session:
         """进入上下文，创建会话"""
-        self.session = Session(engine)
+        # 避免提交后对象属性过期，导致响应序列化时触发懒加载报 DetachedInstanceError
+        self.session = Session(engine, expire_on_commit=False)
         return self.session
 
     def __exit__(self, exc_type, exc_val, exc_tb):

@@ -5,7 +5,7 @@
 设置包括：LLM、绘图、Civitai、SD Forge 等子系统的配置。
 """
 from typing import Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from loguru import logger
 from pydantic import BaseModel
 
@@ -25,7 +25,7 @@ router = APIRouter(
 # ==================== 请求/响应模型 ====================
 
 class SettingsUpdateRequest(BaseModel):
-    """更新设置的请求模型（支持部分更新）"""
+    """兼容占位：后续不再在路由中使用此模型"""
     llm: Dict[str, Any] | None = None
     draw: Dict[str, Any] | None = None
     civitai: Dict[str, Any] | None = None
@@ -34,7 +34,7 @@ class SettingsUpdateRequest(BaseModel):
 
 # ==================== 设置读取 ====================
 
-@router.get("/", response_model=AppSettings, summary="获取所有设置")
+@router.get("/", summary="获取所有设置")
 async def get_settings() -> AppSettings:
     """
     获取所有应用设置。
@@ -45,25 +45,25 @@ async def get_settings() -> AppSettings:
     return app_settings
 
 
-@router.get("/llm", response_model=LlmSettings, summary="获取 LLM 设置")
+@router.get("/llm", summary="获取 LLM 设置")
 async def get_llm_settings() -> LlmSettings:
     """获取 LLM（大语言模型）配置"""
     return app_settings.llm
 
 
-@router.get("/draw", response_model=DrawSettings, summary="获取绘图设置")
+@router.get("/draw", summary="获取绘图设置")
 async def get_draw_settings() -> DrawSettings:
     """获取绘图服务配置"""
     return app_settings.draw
 
 
-@router.get("/civitai", response_model=CivitaiSettings, summary="获取 Civitai 设置")
+@router.get("/civitai", summary="获取 Civitai 设置")
 async def get_civitai_settings() -> CivitaiSettings:
     """获取 Civitai 服务配置"""
     return app_settings.civitai
 
 
-@router.get("/sd-forge", response_model=SdForgeSettings, summary="获取 SD Forge 设置")
+@router.get("/sd-forge", summary="获取 SD Forge 设置")
 async def get_sd_forge_settings() -> SdForgeSettings:
     """获取 SD Forge 服务配置"""
     return app_settings.sd_forge
@@ -71,8 +71,8 @@ async def get_sd_forge_settings() -> SdForgeSettings:
 
 # ==================== 设置更新 ====================
 
-@router.put("/llm", response_model=LlmSettings, summary="更新 LLM 设置")
-async def update_llm_settings(settings: Dict[str, Any]) -> LlmSettings:
+@router.put("/llm", summary="更新 LLM 设置")
+async def update_llm_settings(settings: Dict[str, Any] = Body(...)) -> LlmSettings:
     """
     更新 LLM 设置。
     
@@ -108,8 +108,8 @@ async def update_llm_settings(settings: Dict[str, Any]) -> LlmSettings:
         raise HTTPException(status_code=400, detail=f"更新 LLM 设置失败: {str(e)}")
 
 
-@router.put("/draw", response_model=DrawSettings, summary="更新绘图设置")
-async def update_draw_settings(settings: Dict[str, Any]) -> DrawSettings:
+@router.put("/draw", summary="更新绘图设置")
+async def update_draw_settings(settings: Dict[str, Any] = Body(...)) -> DrawSettings:
     """
     更新绘图设置。
     
@@ -136,8 +136,8 @@ async def update_draw_settings(settings: Dict[str, Any]) -> DrawSettings:
         raise HTTPException(status_code=400, detail=f"更新绘图设置失败: {str(e)}")
 
 
-@router.put("/civitai", response_model=CivitaiSettings, summary="更新 Civitai 设置")
-async def update_civitai_settings(settings: Dict[str, Any]) -> CivitaiSettings:
+@router.put("/civitai", summary="更新 Civitai 设置")
+async def update_civitai_settings(settings: Dict[str, Any] = Body(...)) -> CivitaiSettings:
     """
     更新 Civitai 设置。
     
@@ -164,8 +164,8 @@ async def update_civitai_settings(settings: Dict[str, Any]) -> CivitaiSettings:
         raise HTTPException(status_code=400, detail=f"更新 Civitai 设置失败: {str(e)}")
 
 
-@router.put("/sd-forge", response_model=SdForgeSettings, summary="更新 SD Forge 设置")
-async def update_sd_forge_settings(settings: Dict[str, Any]) -> SdForgeSettings:
+@router.put("/sd-forge", summary="更新 SD Forge 设置")
+async def update_sd_forge_settings(settings: Dict[str, Any] = Body(...)) -> SdForgeSettings:
     """
     更新 SD Forge 设置。
     
@@ -192,8 +192,13 @@ async def update_sd_forge_settings(settings: Dict[str, Any]) -> SdForgeSettings:
         raise HTTPException(status_code=400, detail=f"更新 SD Forge 设置失败: {str(e)}")
 
 
-@router.put("/", response_model=AppSettings, summary="批量更新设置")
-async def update_settings(request: SettingsUpdateRequest) -> AppSettings:
+@router.put("/", summary="批量更新设置")
+async def update_settings(
+    llm: Dict[str, Any] | None = Body(None),
+    draw: Dict[str, Any] | None = Body(None),
+    civitai: Dict[str, Any] | None = Body(None),
+    sd_forge: Dict[str, Any] | None = Body(None),
+) -> Dict[str, Any]:
     """
     批量更新多个设置部分。
     
@@ -212,30 +217,30 @@ async def update_settings(request: SettingsUpdateRequest) -> AppSettings:
         updated_sections = []
         
         # 更新 LLM 设置
-        if request.llm is not None:
+        if llm is not None:
             current_dict = app_settings.llm.model_dump()
-            current_dict.update(request.llm)
+            current_dict.update(llm)
             app_settings.llm = LlmSettings(**current_dict)
             updated_sections.append("llm")
         
         # 更新绘图设置
-        if request.draw is not None:
+        if draw is not None:
             current_dict = app_settings.draw.model_dump()
-            current_dict.update(request.draw)
+            current_dict.update(draw)
             app_settings.draw = DrawSettings(**current_dict)
             updated_sections.append("draw")
         
         # 更新 Civitai 设置
-        if request.civitai is not None:
+        if civitai is not None:
             current_dict = app_settings.civitai.model_dump()
-            current_dict.update(request.civitai)
+            current_dict.update(civitai)
             app_settings.civitai = CivitaiSettings(**current_dict)
             updated_sections.append("civitai")
         
         # 更新 SD Forge 设置
-        if request.sd_forge is not None:
+        if sd_forge is not None:
             current_dict = app_settings.sd_forge.model_dump()
-            current_dict.update(request.sd_forge)
+            current_dict.update(sd_forge)
             app_settings.sd_forge = SdForgeSettings(**current_dict)
             updated_sections.append("sd_forge")
         
@@ -252,7 +257,7 @@ async def update_settings(request: SettingsUpdateRequest) -> AppSettings:
         raise HTTPException(status_code=400, detail=f"批量更新设置失败: {str(e)}")
 
 
-@router.post("/reload", response_model=AppSettings, summary="重新加载设置")
+@router.post("/reload", summary="重新加载设置")
 async def reload_settings() -> AppSettings:
     """
     从配置文件重新加载设置。

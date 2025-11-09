@@ -57,6 +57,11 @@
               <li v-for="(item, index) in items" :key="index">{{ item }}</li>
             </ul>
           </div>
+
+          <!-- 额外自定义区域（可选插槽） -->
+          <div v-if="$slots.extra" class="mt-3">
+            <slot name="extra" />
+          </div>
           
           <!-- 警告文本（如果 type 为 danger） -->
           <p v-if="type === 'danger' && warningText" class="text-sm text-red-600 font-bold text-center mt-4">
