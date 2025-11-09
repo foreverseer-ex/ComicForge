@@ -13,11 +13,9 @@ from api.routers import (
     project,
     actor,
     memory,
-    reader,
-    file,
+    context,
     draw,
     llm,
-    novel,
     chat,
     history,
     settings,
@@ -87,11 +85,9 @@ app.add_middleware(
 app.include_router(project.router)
 app.include_router(actor.router)
 app.include_router(memory.router)
-app.include_router(reader.router)
-app.include_router(file.router)
+app.include_router(context.router)
 app.include_router(draw.router)
 app.include_router(llm.router)
-app.include_router(novel.router)
 app.include_router(chat.router)
 app.include_router(history.router)
 app.include_router(settings.router)

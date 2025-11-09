@@ -604,7 +604,7 @@ const handleClearAll = async () => {
 const handleDownload = async (jobId: string) => {
   try {
     const baseURL = getApiBaseURL()
-    const url = `${baseURL}/draw/job/image?job_id=${encodeURIComponent(jobId)}`
+    const url = `${baseURL}/draw/${encodeURIComponent(jobId)}/image`
     
     const response = await fetch(url)
     if (!response.ok) {
@@ -645,7 +645,7 @@ const completedJobImageUrls = computed(() => {
     .filter(job => jobStatuses.value[job.job_id] === true)
     .map(job => {
       // 使用 API URL 而不是 blob URL，因为 ImageGalleryDialog 可能需要重新加载
-      return `${baseURL}/draw/job/image?job_id=${encodeURIComponent(job.job_id)}`
+      return `${baseURL}/draw/${encodeURIComponent(job.job_id)}/image`
     })
 })
 

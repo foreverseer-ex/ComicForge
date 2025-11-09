@@ -152,7 +152,7 @@ const firstExampleImage = computed(() => {
   // 但这里我们不知道example_index，所以暂时返回null
   // 实际上应该通过 /file/actor-example?actor_id=...&example_index=0 获取
   // 使用 image_path 作为缓存破坏参数，确保不同图片使用不同的 URL
-  return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=0&path=${encodeURIComponent(firstExample.image_path)}`
+  return `${baseURL}/actor/${props.actor.actor_id}/image?example_index=0&path=${encodeURIComponent(firstExample.image_path)}`
 })
 
 // 图片重试相关状态

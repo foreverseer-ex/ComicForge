@@ -803,7 +803,7 @@ const getExampleImageUrl = (example: any, index: number) => {
   // 通过 actor-example 端点获取图片
   // 使用 image_path 作为缓存破坏参数，确保不同图片使用不同的 URL
   // 这样即使两个 job 名称相同，只要 image_path 不同，URL 就不同
-  return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=${index}&path=${encodeURIComponent(example.image_path)}`
+  return `${baseURL}/actor/${props.actor.actor_id}/image?example_index=${index}&path=${encodeURIComponent(example.image_path)}`
 }
 
 // 图片重试相关状态

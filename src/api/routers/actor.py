@@ -8,6 +8,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
 import asyncio
@@ -1108,3 +1109,35 @@ async def add_portrait_from_batch_tool(
         "job_count": job_count,
         "message": f"已启动 {job_count} 个监控任务，立绘将在 job 完成后自动添加到角色 {actor.name}"
     }
+
+# ==================== 示例图文件访问 ====================
+
+@router.get("/{actor_id}/image", response_class=FileResponse, summary="获取角色示例图")
+async def get_example_image(actor_id: str, example_index: int):
+    """获取角色示例图文件。"""
+    actor = ActorService.get(actor_id)
+    if not actor:
+        raise HTTPException(status_code=404, detail=f"Actor 不存在: {actor_id}")
+    
+    if example_index < 0 or example_index >= len(actor.examples):
+        raise HTTPException(status_code=404, detail=f"示例图索引越界: {example_index}")
+    
+    example_dict = actor.examples[example_index]
+    example = ActorExample(**example_dict)
+    
+    # 如果 image_path 为 None，说明正在生成中
+    if example.image_path is None:
+        raise HTTPException(status_code=404, detail="示例图正在生成中")
+    
+    # image_path 只保存文件名，实际文件保存在 projects/{project_id}/actors/{filename}
+    actual_project_id = actor.project_id if actor.project_id is not None else "default"
+    image_path = project_home / actual_project_id / "actors" / example.image_path
+    
+    if not image_path.exists():
+        raise HTTPException(status_code=404, detail=f"示例图文件不存在: {example.image_path}")
+    
+    return FileResponse(
+        path=str(image_path),
+        media_type="image/png",
+        filename=image_path.name
+    )

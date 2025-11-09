@@ -513,3 +513,37 @@ async def clear_batch_jobs() -> dict:
     return {"count": count}
 
 
+# ==================== 任务图像访问 ====================
+
+@router.get("/{job_id}/image", response_class=FileResponse, summary="获取任务生成的图像")
+async def get_job_image(job_id: str) -> FileResponse:
+    """
+    获取绘图任务生成的图像文件。
+    
+    Args:
+        job_id: 任务ID（路径参数）
+    
+    Returns:
+        图像文件
+    
+    Raises:
+        HTTPException: 任务不存在或图像文件不存在时返回 404
+    """
+    # 检查任务是否存在
+    job = JobService.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
+    
+    # 从 jobs 文件夹读取图像文件
+    job_image_path = jobs_home / f"{job_id}.png"
+    
+    if not job_image_path.exists():
+        raise HTTPException(status_code=404, detail=f"任务图像文件不存在: {job_id}")
+    
+    return FileResponse(
+        path=str(job_image_path),
+        media_type="image/png",
+        filename=f"job_{job_id}.png"
+    )
+
+

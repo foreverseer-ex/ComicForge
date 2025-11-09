@@ -38,8 +38,9 @@ from api.routers.memory import (
     create_memory, get_memory, get_all_memories, update_memory,
     delete_memory, clear_memories, get_key_description, get_all_key_descriptions,
 )
-from api.routers.novel import (
-    get_chapter_content, get_line_content, get_project_content,
+from api.routers.context import (
+    get_chapter_lines, get_line, get_project_content,
+    get_lines_range, get_chapters, get_chapter, update_chapter, get_stats,
 )
 # ============================================================================
 # ⚠️ 安全要求：所有MCP工具函数必须来自routers，不能直接调用服务函数
@@ -48,10 +49,6 @@ from api.routers.novel import (
 # 注意：绝对不能导入 services 层的函数，只能使用 routers 层的函数
 from api.routers.project import (
     get_project, update_project,
-)
-from api.routers.reader import (
-    get_line, get_chapter_lines, get_lines_range, get_chapters,
-    get_chapter, put_chapter, get_stats,
 )
 from api.schemas.chat import ChatMessage, ChatIteration
 from api.services.db import MemoryService, HistoryService
@@ -140,11 +137,9 @@ class AbstractLlmService(ABC):
             # Memory 管理
             create_memory, get_memory, get_all_memories, update_memory,
             delete_memory, clear_memories, get_key_description, get_all_key_descriptions,
-            # Reader 功能
+            # Context 功能（内容管理）
             get_line, get_chapter_lines, get_lines_range, get_chapters,
-            get_chapter, put_chapter, get_stats,
-            # Novel 内容管理
-            get_project_content, get_chapter_content, get_line_content,
+            get_chapter, update_chapter, get_stats, get_project_content,
             # Draw 功能
             get_loras, get_checkpoints, create_draw, get_draw_job, delete_draw_job, get_image,
         ]
