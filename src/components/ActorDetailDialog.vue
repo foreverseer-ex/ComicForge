@@ -1176,6 +1176,17 @@ watch(() => props.actor, (newActor, oldActor) => {
   }
 }, { immediate: true, deep: true })
 
+// 当示例数量变化导致索引越界时，将索引归零
+watch(exampleCount, (count) => {
+  if (count <= 0) {
+    currentExampleIndex.value = 0
+    return
+  }
+  if (currentExampleIndex.value >= count) {
+    currentExampleIndex.value = 0
+  }
+})
+
 // 查看立绘（点击时）
 const viewExample = (index: number) => {
   // 设置当前索引并打开大图
@@ -1322,6 +1333,8 @@ const deleteExample = async () => {
     })
     
     contextMenu.value.show = false
+    // 删除单张立绘后，将预览索引重置为 0，防止越界
+    currentExampleIndex.value = 0
     emit('refresh')
   } catch (error) {
     console.error('删除立绘失败:', error)
@@ -1350,6 +1363,8 @@ const clearAllExamples = () => {
         })
         
         showToast('已清空所有立绘', 'success')
+        // 清空后重置预览索引
+        currentExampleIndex.value = 0
         emit('refresh')
       } catch (error: any) {
         console.error('清空立绘失败:', error)
@@ -1409,6 +1424,8 @@ const deleteOtherExamples = () => {
         })
         
         showToast('已删除其他立绘', 'success')
+        // 删除其他立绘后，首图为默认，预览索引重置到 0
+        currentExampleIndex.value = 0
         contextMenu.value.show = false
         emit('refresh')
       } catch (error: any) {
