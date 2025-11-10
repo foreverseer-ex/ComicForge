@@ -88,33 +88,41 @@
         </button>
       </div>
       
-      <!-- 服务端连接状态 -->
+      <!-- 已登录用户信息 -->
       <div :class="isCollapsed ? 'px-2 pt-1 pb-3' : 'px-3 pt-1 pb-3'">
-        <div class="flex items-center justify-center py-1.5 rounded-lg text-xs"
-             :class="[
-               isCollapsed ? 'px-1 gap-1' : 'px-2 gap-2',
-               isConnected 
-                 ? isDark ? 'text-green-400' : 'text-green-700'
-                 : isDark ? 'bg-red-900/30 text-red-400' : 'bg-red-50 text-red-700'
-             ]">
-          <div class="w-2 h-2 rounded-full flex-shrink-0" 
-               :class="isConnected 
-                 ? isDark ? 'bg-green-400' : 'bg-green-600'
-                 : isDark ? 'bg-red-400' : 'bg-red-600'">
+        <button
+          v-if="authStore.user"
+          @click="copyToken"
+          :class="[
+            'w-full flex items-center py-2 rounded-lg transition-colors text-xs cursor-pointer',
+            isCollapsed ? 'px-1 justify-center' : 'px-2 gap-2',
+            isDark
+              ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          ]"
+          :title="isCollapsed ? authStore.user.username : '点击复制 Token'"
+        >
+          <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
+               :class="isDark ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'">
+            {{ authStore.user.username?.[0]?.toUpperCase() || 'U' }}
           </div>
-          <span v-if="!isCollapsed">{{ isConnected ? '服务端已连接' : '服务端未连接' }}</span>
-        </div>
+          <div v-if="!isCollapsed" class="flex-1 text-left truncate">
+            <div class="font-medium">{{ authStore.user.username }}</div>
+            <div class="text-[10px] opacity-70">{{ copied ? '已复制!' : '点击复制 Token' }}</div>
+          </div>
+        </button>
       </div>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useThemeStore } from '../stores/theme'
 import { useConnectionStore } from '../stores/connection'
 import { useNavigationStore } from '../stores/navigation'
+import { useAuthStore } from '../stores/auth'
 import { storeToRefs } from 'pinia'
 import type { Component } from 'vue'
 import {
@@ -149,6 +157,24 @@ const { startChecking, stopChecking } = connectionStore
 const navigationStore = useNavigationStore()
 const { isCollapsed } = storeToRefs(navigationStore)
 const { toggleCollapse: toggleCollapseFn } = navigationStore
+
+const authStore = useAuthStore()
+const copied = ref(false)
+
+// 复制 token 到剪贴板（用于 FastAPI 后端调试）
+const copyToken = async () => {
+  if (authStore.accessToken) {
+    try {
+      await navigator.clipboard.writeText(authStore.accessToken)
+      copied.value = true
+      setTimeout(() => {
+        copied.value = false
+      }, 2000)
+    } catch (error) {
+      console.error('复制失败:', error)
+    }
+  }
+}
 
 onMounted(() => {
   startChecking()

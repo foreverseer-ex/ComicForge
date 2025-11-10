@@ -1,61 +1,58 @@
-"""数据库化的模型元数据定义（SQLModel）。"""
+"""应用内使用的 Pydantic 数据模型。
+
+包含整合的模型元数据（ModelMeta，通常由 Civitai 获取并在本地缓存）。
+"""
 from pathlib import Path
-from typing import Literal, TYPE_CHECKING, Any
-import httpx
-from pydantic import BaseModel, computed_field
-from sqlmodel import SQLModel, Field, Column
-from sqlalchemy.dialects.sqlite import JSON as SQLITE_JSON
+from typing import Literal
+
+from pydantic import BaseModel
 from api.utils.civitai import AIR
-
-if TYPE_CHECKING:
-    from .draw import DrawArgs
+from .draw import DrawArgs, Example
 
 
-class Example(BaseModel):
-    """单个示例图片引用及其对应生成参数（仅用于序列化，DB 中以 dict 列表存储）。"""
-    url: str | None = None
-    # 兼容：避免 forward ref 与 | 运算在 Py3.13 报错，这里保持为可选 dict
-    args: dict[str, Any] | None = None
-
-    @property
-    def filename(self) -> Path | None:
-        if self.url is None:
-            return None
-        return Path(httpx.URL(self.url).path.split('/')[-1])
-
-
-class ModelMeta(SQLModel, table=True):
+class ModelMeta(BaseModel):
     """
-    模型元数据（数据库表）。
+    模型元数据。
     
-    - 使用 version_id 作为主键（Civitai 的版本 ID）
-    - list/dict 字段使用 JSON 列存储
-    - 示例图片文件仍存本地；DB 仅存示例的元信息（url/args）
+    概念说明：
+    - ecosystem: 生态系统/技术代际（sd1, sd2, sdxl）
+    - base_model: 基础模型（pony, illustrious, standard 等）
     """
-    version_id: int = Field(primary_key=True)
     filename: str
     name: str
     version: str
-    desc: str | None = None
+    desc: str | None
     model_id: int
-    type: str
-    ecosystem: str
-    base_model: str | None = None
+    version_id: int
+    type: Literal['checkpoint', 'lora', 'vae']  # 模型类型
+    ecosystem: Literal['sd1', 'sd2', 'sdxl']  # 生态系统/技术代际
+    base_model: str | None = None  # 基础模型（pony, illustrious, standard 等），可选
     sha256: str
-    trained_words: list[str] = Field(default_factory=list, sa_column=Column(SQLITE_JSON))
-    url: str | None = None
-    web_page_url: str | None = None
-    examples: list[dict] = Field(default_factory=list, sa_column=Column(SQLITE_JSON))
-    preference: str = 'neutral'
+    trained_words: list[str] = []
+    url: str | None = None  # 下载链接（可选）
+    web_page_url: str | None = None  # 模型网页链接（如 Civitai 页面）
+    examples: list[Example] = []
+    preference: Literal['liked', 'neutral', 'disliked'] = 'neutral'  # 模型偏好：喜欢、中性、不喜欢（默认中性）
 
-    @computed_field
     @property
     def version_name(self) -> str:
-        return f"{self.name}-{self.version}"
+        """
+        获取模型版本名称。
+        """
+        return f'{self.name}-{self.version}'
 
-    @computed_field
+
     @property
     def air(self) -> str:
+        """
+        生成 AIR (Artificial Intelligence Resources) 标识符。
+        
+        格式：urn:air:{ecosystem}:{type}:civitai:{model_id}@{version_id}
+        
+        示例：
+        - Checkpoint: urn:air:sd1:checkpoint:civitai:4384@128713
+        - LoRA: urn:air:sdxl:lora:civitai:328553@368189
+        """
         air = AIR(
             ecosystem=self.ecosystem,
             type=self.type,

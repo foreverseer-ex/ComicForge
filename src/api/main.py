@@ -4,7 +4,7 @@ FastAPI 应用入口文件。
 启动 FastAPI 服务，注册所有路由，初始化数据库。
 """
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 import logging
@@ -13,9 +13,10 @@ from api.routers import (
     project,
     actor,
     memory,
-    context,
+    file,
     draw,
     llm,
+    context,
     chat,
     history,
     settings,
@@ -24,8 +25,8 @@ from api.routers import (
     auth,
 )
 from api.services.db.base import init_db
+from api.services.admin_init import init_admin_user
 from api.settings import AppSettings
-from api.security import get_current_user_claims
 
 # 配置 uvicorn.access logger：过滤掉 /health 端点的访问日志
 class HealthCheckFilter(logging.Filter):
@@ -53,6 +54,9 @@ async def lifespan(app: FastAPI):
     
     # 初始化数据库
     init_db()
+    
+    # 初始化管理员账户
+    init_admin_user()
     
     logger.success("ComicForge API 服务启动成功！")
     logger.info(f"API 文档地址: http://127.0.0.1:7864/docs")
@@ -84,19 +88,20 @@ app.add_middleware(
 )
 
 # 注册所有路由
-protected = [Depends(get_current_user_claims)]
-app.include_router(project.router, dependencies=protected)
-app.include_router(actor.router, dependencies=protected)
-app.include_router(memory.router, dependencies=protected)
-app.include_router(context.router, dependencies=protected)
-app.include_router(draw.router, dependencies=protected)
-app.include_router(llm.router, dependencies=protected)
-app.include_router(chat.router, dependencies=protected)
-app.include_router(history.router, dependencies=protected)
-app.include_router(settings.router, dependencies=protected)
-app.include_router(help.router, dependencies=protected)
-app.include_router(model_meta.router, dependencies=protected)
+app.include_router(project.router)
+app.include_router(actor.router)
+app.include_router(memory.router)
+app.include_router(file.router)
+app.include_router(draw.router)
+app.include_router(llm.router)
+app.include_router(context.router)
+app.include_router(chat.router)
+app.include_router(history.router)
+app.include_router(settings.router)
+app.include_router(help.router)
+app.include_router(model_meta.router)
 app.include_router(auth.router)
+
 
 
 @app.get("/", tags=["根路径"])

@@ -14,6 +14,7 @@ from api.settings.llm_setting import LlmSettings
 from api.settings.draw_setting import DrawSettings
 from api.settings.civitai_setting import CivitaiSettings
 from api.settings.sd_forge_setting import SdForgeSettings
+from api.constants.llm import DEFAULT_SYSTEM_PROMPT
 
 router = APIRouter(
     prefix="/settings",
@@ -285,4 +286,28 @@ async def reload_settings() -> AppSettings:
     except Exception as e:
         logger.exception(f"重新加载设置失败: {e}")
         raise HTTPException(status_code=500, detail=f"重新加载设置失败: {str(e)}")
+
+
+@router.post("/llm/reset-system-prompt", summary="重置系统提示词")
+async def reset_system_prompt() -> Dict[str, str]:
+    """
+    重置 LLM 系统提示词为默认值。
+    
+    Returns:
+        包含新系统提示词的字典
+    """
+    try:
+        # 重置为默认值
+        app_settings.llm.system_prompt = DEFAULT_SYSTEM_PROMPT
+        
+        # 保存到配置文件
+        if app_settings.save(reason="重置系统提示词"):
+            logger.info("系统提示词已重置为默认值并保存")
+        else:
+            logger.warning("系统提示词已重置，但保存到文件失败")
+        
+        return {"system_prompt": DEFAULT_SYSTEM_PROMPT}
+    except Exception as e:
+        logger.exception(f"重置系统提示词失败: {e}")
+        raise HTTPException(status_code=500, detail=f"重置系统提示词失败: {str(e)}")
 

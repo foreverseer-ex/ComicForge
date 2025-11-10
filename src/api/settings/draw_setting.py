@@ -14,14 +14,14 @@ class DrawSettings(BaseModel):
     """
     
     backend: Literal["sd_forge", "civitai"] = Field(
-        default="sd_forge",
+        default="civitai",
         description="绘图后端：sd_forge（本地 SD-Forge）或 civitai（Civitai 云端）"
     )
     
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "backend": "sd_forge"
+                "backend": "civitai"
             }
         }
     )

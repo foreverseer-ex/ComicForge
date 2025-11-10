@@ -303,15 +303,63 @@
       </div>
     </Teleport>
 
-    <!-- 删除确认对话框（radix-vue/shadcn） -->
-    <ConfirmDialog
-      :show="showDeleteDialog"
-      title="确认删除"
-      :message="deletingContent ? '确定要删除这条内容吗？此操作不可恢复。\n\n' + deletingContent.content : '确定要删除这条内容吗？此操作不可恢复。'"
-      type="danger"
-      @confirm="handleDelete"
-      @cancel="() => { showDeleteDialog = false; deletingContent = null }"
-    />
+    <!-- 删除确认对话框 -->
+    <Teleport to="body">
+      <div
+        v-if="showDeleteDialog"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        @click.self="showDeleteDialog = false"
+      >
+        <div
+          :class="[
+            'w-full max-w-md rounded-lg shadow-xl',
+            isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border-gray-200'
+          ]"
+          @click.stop
+        >
+          <div class="p-6">
+            <h2 class="text-xl font-bold mb-4 text-red-600">确认删除</h2>
+            <p :class="['mb-4', isDark ? 'text-gray-300' : 'text-gray-700']">
+              确定要删除这条内容吗？此操作不可恢复。
+            </p>
+            <div 
+              v-if="deletingContent"
+              :class="[
+                'p-3 rounded border mb-4 text-sm',
+                isDark ? 'bg-gray-700 border-gray-600 text-gray-300' : 'bg-gray-50 border-gray-200 text-gray-700'
+              ]"
+            >
+              {{ deletingContent.content }}
+            </div>
+            <div class="flex justify-end gap-3">
+              <button
+                @click="showDeleteDialog = false; deletingContent = null"
+                :class="[
+                  'px-4 py-2 rounded-lg font-medium transition-colors',
+                  isDark
+                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                ]"
+              >
+                取消
+              </button>
+              <button
+                @click="handleDelete"
+                :disabled="deleting"
+                :class="[
+                  'px-4 py-2 rounded-lg font-medium transition-colors',
+                  deleting
+                    ? 'bg-gray-400 cursor-not-allowed text-white'
+                    : 'bg-red-600 hover:bg-red-700 text-white'
+                ]"
+              >
+                {{ deleting ? '删除中...' : '确认删除' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -321,7 +369,6 @@ import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
 import { storeToRefs } from 'pinia'
 import { DocumentTextIcon } from '@heroicons/vue/24/outline'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
 import api from '../api'
 
 interface NovelContent {
@@ -378,7 +425,7 @@ const loadContents = async () => {
   if (!selectedProjectId.value) return
   
   loading.value = true
-  try {
+    try {
     // 加载所有内容（不限制数量）
     const data = await api.get('/context/project', {
       params: {
@@ -466,12 +513,12 @@ const saveEdit = async () => {
   if (!editingContent.value || !selectedProjectId.value) return
   
   try {
-    const text = editingText.value.trim()
+  const text = editingText.value.trim()
     
     // 如果内容是多行，需要切分成多个段落
     const lines = text.split('\n').map(l => l.trim()).filter(l => l)
     
-    if (lines.length === 0) {
+      if (lines.length === 0) {
       // 如果删除所有内容，删除这个段落
       await api.delete('/context/line', {
         params: {
@@ -480,7 +527,7 @@ const saveEdit = async () => {
           line: editingContent.value.line
         }
       })
-    } else if (lines.length === 1) {
+      } else if (lines.length === 1) {
       // 单行，直接更新
       await api.put('/context/line', {
         content: lines[0]
@@ -602,7 +649,7 @@ const showContextMenu = async (event: MouseEvent, content: NovelContent, index: 
     
     if (hasChanged) {
       // 有修改，先保存
-      try {
+    try {
         await api.put('/context/line', {
           content: editingText.value.trim()
         }, {
@@ -843,7 +890,7 @@ const handleDelete = async () => {
   
   deleting.value = true
   try {
-    await api.delete('/novel/content', {
+    await api.delete('/context/line', {
       params: {
         project_id: deletingContent.value.project_id,
         chapter: deletingContent.value.chapter,

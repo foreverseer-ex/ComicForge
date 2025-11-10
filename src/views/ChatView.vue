@@ -435,20 +435,31 @@
               >
                 建议：
               </div>
-              <div class="flex flex-wrap gap-2">
-                <button
-                  v-for="(suggest, index) in message.suggests"
-                  :key="index"
-                  @click="useSuggest(suggest)"
-                  :class="[
-                    'px-3 py-1 rounded text-sm transition-colors',
-                    isDark
-                      ? 'bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600'
-                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300'
-                  ]"
-                >
-                  {{ formatSuggest(suggest) }}
-                </button>
+              <div>
+                <!-- 图片建议 -->
+                <ImageSuggestions
+                  v-if="getImageSuggestions(message.suggests).length > 0"
+                  :images="getImageSuggestions(message.suggests)"
+                  mode="multiple"
+                  :initial-selected="Array.from(importedJobIds)"
+                  @select="handleSelectPictureSuggest"
+                  @unselect="handleUnselectPictureSuggest"
+                />
+                
+                <!-- 文字建议按钮 -->
+                <div v-if="getTextSuggestions(message.suggests).length > 0" class="flex flex-wrap gap-2 mt-2">
+                  <button v-for="(suggest, index) in getTextSuggestions(message.suggests)" :key="index"
+                          @click="useSuggest(suggest)"
+                          :class="[
+                            'px-3 py-1 rounded text-sm transition-colors',
+                            isDark
+                              ? 'bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600'
+                              : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300'
+                          ]"
+                  >
+                    {{ formatSuggest(suggest) }}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -459,15 +470,55 @@
     </div>
 
 
-    <!-- 清空历史确认对话框（radix-vue/shadcn） -->
-    <ConfirmDialog
-      :show="showClearHistoryDialog"
-      title="确认清空历史"
-      :message="'确定要清空所有历史记录吗？\n\n此操作不可恢复，将删除该项目的所有聊天消息。'"
-      type="danger"
-      @confirm="confirmClearHistory"
-      @cancel="() => { showClearHistoryDialog = false }"
-    />
+    <!-- 清空历史确认对话框 -->
+    <Teleport to="body">
+      <div
+        v-if="showClearHistoryDialog"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        @click="showClearHistoryDialog = false"
+      >
+      <div
+        @click.stop
+        :class="[
+          'w-full max-w-md rounded-lg shadow-xl',
+          isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
+        ]"
+      >
+        <div class="p-6">
+          <h2 :class="['text-xl font-bold mb-4', isDark ? 'text-white' : 'text-gray-900']">
+            确认清空历史
+          </h2>
+          <p :class="['mb-6', isDark ? 'text-gray-300' : 'text-gray-700']">
+            确定要清空所有历史记录吗？
+            <br />
+            <span class="text-sm text-red-600">此操作不可恢复，将删除该项目的所有聊天消息。</span>
+          </p>
+          <div class="flex justify-end gap-3">
+            <button
+              @click="showClearHistoryDialog = false"
+              :class="[
+                'px-4 py-2 rounded-lg font-medium transition-colors',
+                isDark
+                  ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+              ]"
+            >
+              取消
+            </button>
+            <button
+              @click="confirmClearHistory"
+              :class="[
+                'px-4 py-2 rounded-lg font-medium transition-colors',
+                'bg-red-600 hover:bg-red-700 text-white'
+              ]"
+            >
+              确认清空
+            </button>
+          </div>
+        </div>
+      </div>
+      </div>
+    </Teleport>
 
     <!-- 输入区域：固定在底部 -->
     <div 
@@ -513,7 +564,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick, computed, provide } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
 import { useNavigationStore } from '../stores/navigation'
@@ -521,10 +572,103 @@ import { storeToRefs } from 'pinia'
 import api from '../api'
 import { getApiBaseURL } from '../utils/apiConfig'
 import { marked } from 'marked'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
 import hljs from 'highlight.js'
 // 动态导入 highlight.js 样式（根据主题）
 import 'highlight.js/styles/github-dark.css'
+import { toast } from 'vue-sonner'
+import ImageSuggestions from '../components/ImageSuggestions.vue'
+
+// ==================== 协议建议与图片卡片（置顶，确保先于使用处声明） ====================
+// 协议建议格式：[key]:value
+// 当前仅支持：[actor_example_job]:<job_id>
+const jobStates = ref<Record<string, { completed: boolean; imageUrl: string | null }>>({})
+const jobPollTimers = new Map<string, number>()
+const importedJobIds = ref<Set<string>>(new Set())
+
+const isProtocolSuggest = (s: string): boolean => /^\[[^\]]+\]:.+$/.test(s || '')
+const getProtocolKey = (s: string): string => {
+  const m = (s || '').match(/^\[([^\]]+)\]:/)
+  return (m && m[1]) ? m[1] : ''
+}
+const getProtocolValue = (s: string): string => {
+  const i = (s || '').indexOf(']:')
+  return i >= 0 ? s.slice(i + 2) : ''
+}
+const isActorExampleJobSuggest = (s: string): boolean => isProtocolSuggest(s) && getProtocolKey(s) === 'actor_example_job'
+const getJobIdFromSuggest = (s: string): string => isActorExampleJobSuggest(s) ? getProtocolValue(s) : ''
+
+const getJobState = (jobId: string): { completed: boolean; imageUrl: string | null } => {
+  if (!jobId) return { completed: false, imageUrl: null }
+  if (!jobStates.value[jobId]) {
+    jobStates.value[jobId] = { completed: false, imageUrl: null }
+    // 启动轮询
+    startJobPolling(jobId)
+  }
+  return jobStates.value[jobId]
+}
+
+// 从建议列表中提取图片建议
+const getImageSuggestions = (suggests: string[]) => {
+  if (!suggests) return []
+  return suggests
+    .filter(s => isActorExampleJobSuggest(s))
+    .map(s => {
+      const jobId = getJobIdFromSuggest(s)
+      const state = getJobState(jobId)
+      return {
+        id: jobId,
+        imageUrl: state.imageUrl || undefined,
+        metadata: { suggest: s }
+      }
+    })
+}
+
+// 从建议列表中提取文字建议
+const getTextSuggestions = (suggests: string[]) => {
+  if (!suggests) return []
+  return suggests.filter(s => !isActorExampleJobSuggest(s))
+}
+
+const startJobPolling = (jobId: string) => {
+  if (!jobId || jobPollTimers.has(jobId)) return
+  const poll = async () => {
+    try {
+      const resp = await api.get('/draw/job/status', { params: { job_id: jobId } })
+      const data = (resp as any)?.data || resp
+      const completed = !!data?.completed
+      if (completed) {
+        // 标记任务完成
+        jobStates.value[jobId] = jobStates.value[jobId] || { completed: false, imageUrl: null }
+        jobStates.value[jobId].completed = true
+
+        // 图片可用性探测：只有当 /draw/job/image 返回 200 时才设置 URL 并停止轮询
+        const imgUrl = `${getApiBaseURL()}/draw/job/image?job_id=${encodeURIComponent(jobId)}`
+        try {
+          const res = await fetch(imgUrl, { method: 'GET' })
+          if (res.ok) {
+            jobStates.value[jobId].imageUrl = imgUrl
+            const t2 = jobPollTimers.get(jobId)
+            if (t2) {
+              clearInterval(t2)
+              jobPollTimers.delete(jobId)
+            }
+            return
+          }
+        } catch (_) {
+          // 忽略错误，继续下一轮间隔检测
+        }
+        // 若图片尚不可用，不清理定时器，等待下一轮
+        return
+      }
+    } catch (e) {
+      // 静默失败，继续轮询
+    }
+  }
+  // 立即触发一次查询，再间隔轮询
+  poll()
+  const timer = window.setInterval(poll, 2000)
+  jobPollTimers.set(jobId, timer)
+}
 
 // 类型定义
 interface ChatMessage {
@@ -685,9 +829,33 @@ const loadHistory = async (forceReload: boolean = false) => {
       
       // 有变化，更新消息列表
       messages.value = mergedMessages
+      // 初始化已有历史消息中的 job 建议追踪
+      for (const m of messages.value) {
+        const suggests = (m as any)?.suggests as string[] | undefined
+        if (Array.isArray(suggests)) {
+          for (const s of suggests) {
+            if (typeof s === 'string' && isActorExampleJobSuggest(s)) {
+              const jid = getJobIdFromSuggest(s)
+              if (jid) getJobState(jid)
+            }
+          }
+        }
+      }
     } else {
       // 强制重新加载或首次加载，直接替换
       messages.value = newMessages
+      // 初始化已有历史消息中的 job 建议追踪（首次/强制刷新）
+      for (const m of messages.value) {
+        const suggests = (m as any)?.suggests as string[] | undefined
+        if (Array.isArray(suggests)) {
+          for (const s of suggests) {
+            if (typeof s === 'string' && isActorExampleJobSuggest(s)) {
+              const jid = getJobIdFromSuggest(s)
+              if (jid) getJobState(jid)
+            }
+          }
+        }
+      }
     }
     
     // 滚动到底部
@@ -875,6 +1043,13 @@ const handleStreamEvent = (data: any) => {
         }
         if (currentAssistantMessage.suggests) {
           messages.value[index].suggests = [...(currentAssistantMessage.suggests || [])]
+          // 初始化 job 建议的追踪
+          for (const s of currentAssistantMessage.suggests) {
+            if (typeof s === 'string' && isActorExampleJobSuggest(s)) {
+              const jid = getJobIdFromSuggest(s)
+              if (jid) getJobState(jid)
+            }
+          }
         }
       }
       scrollToBottom()
@@ -916,6 +1091,14 @@ const handleStreamEvent = (data: any) => {
     }
   } else if (eventType === 'suggests') {
     currentAssistantMessage.suggests = data.suggests || []
+    const _suggests: string[] = Array.isArray(currentAssistantMessage.suggests) ? (currentAssistantMessage.suggests as string[]) : []
+    // 初始化 job 建议的追踪
+    for (const s of _suggests) {
+      if (typeof s === 'string' && isActorExampleJobSuggest(s)) {
+        const jid = getJobIdFromSuggest(s)
+        if (jid) getJobState(jid)
+      }
+    }
     // 更新消息
     const index = messages.value.findIndex(m => m.message_id === currentAssistantMessage?.message_id)
     if (index !== -1) {
@@ -946,15 +1129,116 @@ const handleKeydown = (event: KeyboardEvent) => {
 
 // 使用建议
 const useSuggest = (suggest: string) => {
-  // 如果是图片建议，可能需要特殊处理
-  if (suggest.startsWith('image:')) {
-    // 处理图片建议
-    alert('图片建议功能待实现')
+  if (!suggest) return
+  if (isProtocolSuggest(suggest)) {
+    inputText.value = suggest
+    inputRef.value?.focus()
     return
   }
-  // 文字建议直接填入输入框
+  // 文字建议
   inputText.value = suggest
   inputRef.value?.focus()
+}
+
+// 选择图片建议（导入）
+const handleSelectPictureSuggest = async (jobId: string, metadata?: Record<string, any>) => {
+  try {
+    // 1) 查询当前项目下的所有角色
+    const actorsResp = await api.get('/actor/all', { params: { project_id: selectedProjectId.value || null } })
+    const actors = ((actorsResp as any)?.data || actorsResp) || []
+
+    // 2) 获取 job 详情，用于 title/desc
+    const jobResp = await api.get('/draw', { params: { job_id: jobId } })
+    const job = (jobResp as any)?.data || jobResp
+    const title = job?.name || 'portrait'
+    const desc = job?.desc || ''
+
+    if (Array.isArray(actors) && actors.length === 1) {
+      // 只有一个角色，直接添加立绘
+      const actorId = actors[0]?.actor_id
+      if (actorId) {
+        const addResp = await api.post(`/actor/${actorId}/add_portrait_from_job`, null, {
+          params: {
+            job_id: jobId,
+            title: title,
+            desc: desc || undefined,
+            project_id: selectedProjectId.value || null
+          }
+        })
+        const addData = (addResp as any)?.data || addResp
+        // 标记导入并提示
+        importedJobIds.value.add(jobId)
+        toast.success(addData?.completed ? '立绘已成功添加到角色' : '任务生成中，完成后将自动添加到角色')
+        return
+      }
+    }
+
+    // 多个角色或无角色：退回为把协议建议作为用户消息发送给LLM，让其决定
+    const suggest = metadata?.suggest
+    if (suggest) {
+      inputText.value = suggest
+      await nextTick()
+      await sendMessage()
+    }
+  } catch (e: any) {
+    console.error('处理图片建议失败:', e)
+    toast.error('处理失败：' + (e?.response?.data?.detail || e?.message || '未知错误'))
+  }
+}
+
+// 取消选择图片建议
+const handleUnselectPictureSuggest = (jobId: string) => {
+  importedJobIds.value.delete(jobId)
+}
+
+// 点击协议图片建议：标记导入 + 显示toast + 自动发送给LLM（已弃用，由 handleSelectPictureSuggest 替代）
+const handleClickPictureSuggest = async (suggest: string) => {
+  if (!isActorExampleJobSuggest(suggest)) return
+  const jobId = getJobIdFromSuggest(suggest)
+  if (!jobId) return
+  if (importedJobIds.value.has(jobId)) {
+    // 已导入，忽略重复点击
+    return
+  }
+  try {
+    // 1) 查询当前项目下的所有角色
+    const actorsResp = await api.get('/actor/all', { params: { project_id: selectedProjectId.value || null } })
+    const actors = ((actorsResp as any)?.data || actorsResp) || []
+
+    // 2) 获取 job 详情，用于 title/desc
+    const jobResp = await api.get('/draw', { params: { job_id: jobId } })
+    const job = (jobResp as any)?.data || jobResp
+    const title = job?.name || 'portrait'
+    const desc = job?.desc || ''
+
+    if (Array.isArray(actors) && actors.length === 1) {
+      // 只有一个角色，直接添加立绘
+      const actorId = actors[0]?.actor_id
+      if (actorId) {
+        const addResp = await api.post(`/actor/${actorId}/add_portrait_from_job`, null, {
+          params: {
+            job_id: jobId,
+            title: title,
+            desc: desc || undefined,
+            project_id: selectedProjectId.value || null
+          }
+        })
+        const addData = (addResp as any)?.data || addResp
+        // 标记导入并提示
+        importedJobIds.value.add(jobId)
+        toast.success(addData?.completed ? '立绘已成功添加到角色' : '任务生成中，完成后将自动添加到角色')
+        return
+      }
+    }
+
+    // 多个角色或无角色：退回为把协议建议作为用户消息发送给LLM，让其决定
+    inputText.value = suggest
+    await nextTick()
+    await sendMessage()
+  } catch (e: any) {
+    console.error('处理图片建议失败:', e)
+    toast.error('处理失败：' + (e?.response?.data?.detail || e?.message || '未知错误'))
+  }
 }
 
 // 格式化建议
@@ -1486,6 +1770,9 @@ onUnmounted(() => {
     btn.removeEventListener('click', handler)
   })
   codeBlockCopyHandlers.clear()
+  // 清理图片建议的轮询
+  jobPollTimers.forEach((t) => clearInterval(t))
+  jobPollTimers.clear()
 })
 </script>
 

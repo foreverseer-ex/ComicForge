@@ -19,16 +19,17 @@ from api.constants.llm import (
     DEVELOP_MODE_PROMPTS, MCP_TOOLS_GUIDE,
     ERROR_SD_FORGE_CONNECTION, ERROR_CONNECTION_FAILED, ERROR_TOOL_CALL_FAILED,
     ERROR_TIMEOUT_TEMPLATE, ERROR_CONNECTION_TEMPLATE,
-    SESSION_INFO_TEMPLATE, TOOL_USAGE_REMINDER_TEMPLATE,
+    SESSION_INFO_TEMPLATE,
     SUMMARY_MESSAGE_TEMPLATE, ITERATION_GUIDE, ITERATION_PROMPT_TEMPLATE, FINAL_OPERATION_PROMPT_TEMPLATE,
 )
 from api.routers.actor import (
     create_actor, get_actor, get_all_actors, update_actor,
     remove_actor, get_tag_description, get_all_tag_descriptions,
-    add_example, remove_example, add_portrait_from_batch_tool
+    add_example, remove_example, add_portrait_from_batch_tool, add_portrait_from_job_tool
 )
 from api.routers.draw import (
-    create_draw, get_draw_job, delete_draw_job, get_image,
+    create_draw_job, create_batch_job, batch_from_jobs,
+    get_draw_job, delete_draw_job, get_image,
 )
 from api.routers.model_meta import (
     get_loras, get_checkpoints,
@@ -38,10 +39,6 @@ from api.routers.memory import (
     create_memory, get_memory, get_all_memories, update_memory,
     delete_memory, clear_memories, get_key_description, get_all_key_descriptions,
 )
-from api.routers.context import (
-    get_chapter_lines, get_line, get_project_content,
-    get_lines_range, get_chapters, get_chapter, update_chapter, get_stats,
-)
 # ============================================================================
 # ⚠️ 安全要求：所有MCP工具函数必须来自routers，不能直接调用服务函数
 # ============================================================================
@@ -49,6 +46,10 @@ from api.routers.context import (
 # 注意：绝对不能导入 services 层的函数，只能使用 routers 层的函数
 from api.routers.project import (
     get_project, update_project,
+)
+from api.routers.context import (
+    get_line, get_chapter_lines, get_lines_range, get_chapters,
+    get_chapter, update_chapter, get_stats, get_project_content,
 )
 from api.schemas.chat import ChatMessage, ChatIteration
 from api.services.db import MemoryService, HistoryService
@@ -132,16 +133,22 @@ class AbstractLlmService(ABC):
             get_project, update_project,
             # Actor 管理
             create_actor, get_actor, get_all_actors, update_actor,
-            remove_actor, add_example, remove_example, add_portrait_from_batch_tool,
+            remove_actor, add_example, remove_example, add_portrait_from_batch_tool, add_portrait_from_job_tool,
             get_tag_description, get_all_tag_descriptions,
             # Memory 管理
             create_memory, get_memory, get_all_memories, update_memory,
             delete_memory, clear_memories, get_key_description, get_all_key_descriptions,
-            # Context 功能（内容管理）
+            # Reader / Context 功能（使用合并后的 context 接口）
             get_line, get_chapter_lines, get_lines_range, get_chapters,
-            get_chapter, update_chapter, get_stats, get_project_content,
+            get_chapter, update_chapter, get_stats,
+            # 项目/内容管理
+            get_project_content,
+            # 建议写入工具（支持负索引）
+            self._add_suggestions,
             # Draw 功能
-            get_loras, get_checkpoints, create_draw, get_draw_job, delete_draw_job, get_image,
+            get_loras, get_checkpoints, 
+            create_draw_job, create_batch_job, batch_from_jobs,
+            get_draw_job, delete_draw_job, get_image,
         ]
         # 先包装，再转换为工具
         self.tools = [tool(tool_wrapper(func)) for func in all_functions]
@@ -178,18 +185,7 @@ class AbstractLlmService(ABC):
                     "description": memory.description,
                 }
 
-            # 如果 project_id 为 None，返回默认工作空间的上下文（只包含记忆）
-            if project_id is None:
-                default_context = {
-                    "workspace": "default",
-                    "description": "默认工作空间（无项目）"
-                }
-                session_info = SESSION_INFO_TEMPLATE.format(
-                    context_json=json.dumps(default_context, ensure_ascii=False, indent=2),
-                    memories_count=len(memories),
-                    memories_dict_json=json.dumps(memories_dict, ensure_ascii=False, indent=2),
-                )
-                return session_info
+
 
             # 查询项目信息（项目不存在时返回 None，不抛出异常）
             project = ProjectService.get(project_id)
@@ -197,8 +193,9 @@ class AbstractLlmService(ABC):
                 logger.debug(f"项目不存在: {project_id}，只返回记忆信息")
                 # 项目不存在，但返回记忆信息
                 default_context = {
-                    "project_id": project_id,
-                    "description": "项目不存在，但包含记忆信息"
+                    'project_id': None,
+                    "description": "目前在临时工作空间中，具有临时记忆和临时角色，但是没有项目内容"
+                                   "注意project_id是python类型None，不是空字符串或者null什么都"
                 }
                 session_info = SESSION_INFO_TEMPLATE.format(
                     context_json=json.dumps(default_context, ensure_ascii=False, indent=2),
@@ -248,17 +245,22 @@ class AbstractLlmService(ABC):
         if app_settings.llm.system_prompt and app_settings.llm.system_prompt.strip():
             messages.append(("system", app_settings.llm.system_prompt))
 
-        # 3. 添加强制工具调用提示
-        tool_usage_reminder = TOOL_USAGE_REMINDER_TEMPLATE.format(tools_count=len(self.tools))
-        messages.append(("system", tool_usage_reminder))
-
-        # 4. 添加 MCP 工具使用指南
+        # 3. 添加 MCP 工具使用指南（已包含工具调用提示和建议功能要求）
         messages.append(("system", MCP_TOOLS_GUIDE))
+        
+        # 4. 添加建议条数配置
+        suggestion_config = f"""
+**建议条数配置**：
+- **文字建议条数**：{app_settings.llm.text_suggestion_count} 条（每次对话后提供的文字操作建议数量）
+- **图片建议条数**：{app_settings.llm.image_suggestion_count} 条（生成立绘等图像时提供的选项数量）
+- **⚠️ 重要**：建议只能是纯文字或纯图片，不能同时返回文字建议和图片建议。如果生成了图片任务，必须只返回图片建议；否则只返回文字建议。
+"""
+        messages.append(("system", suggestion_config))
 
         # 合并记录所有系统提示词
         if len(messages) > 0:
             logger.debug(
-                f"已添加 {len(messages)} 条基础系统提示词（开发者模式、系统提示词、工具调用提示、MCP指南）")
+                f"已添加 {len(messages)} 条基础系统提示词（开发者模式、系统提示词、MCP指南、建议配置）")
         return messages
 
     async def chat_invoke(self, message: str, project_id: Optional[str] = None,
@@ -276,20 +278,20 @@ class AbstractLlmService(ABC):
         try:
             # 1. 构建系统消息（不包含历史消息和摘要）
             messages = self.build_system_messages()
-            
+
             # 2. 添加项目上下文信息（支持 project_id=None，表示默认工作空间）
             session_info = self.get_session_context(project_id)
             if session_info:
                 messages.append(("system", session_info))
-            
+
             # 3. 如果 project_id 为 None，添加工具使用说明
             if project_id is None:
                 from api.constants.llm import NO_PROJECT_ID_WARNING
                 messages.append(("system", NO_PROJECT_ID_WARNING))
-            
+
             # 4. 添加用户消息
             messages.append(("human", message))
-            
+
             # 5. 如果有输出 schema，需要重新初始化 agent 以支持结构化输出
             if output_schema is not None:
                 logger.info(
@@ -304,17 +306,17 @@ class AbstractLlmService(ABC):
             result: dict = await self.agent.ainvoke({"messages": messages}, config=config, stream_mode='values')
             result_message: AIMessage = result['messages'][-1]
             context = result_message.content  # json text
-            
+
             # 7. 如果有结构化输出，直接返回文本（LLM 已经返回了 JSON）
             if output_schema is not None:
                 logger.info(f"✅ LLM 调用完成，返回结构化输出，长度={len(context)}")
                 return context
-            
+
             # 8. 如果没有结构化输出，返回普通文本内容
             logger.info(f"✅ LLM 调用完成，返回长度={len(context)}")
             logger.debug(f"最终提取的内容: {context[:500] if context else '(空)'}")
             return context
-            
+
         except Exception as e:
             logger.exception(f"LLM 调用失败: {e}")
             return f"错误：LLM 调用失败 - {str(e)}"
@@ -336,12 +338,12 @@ class AbstractLlmService(ABC):
                 # 获取最近的消息
                 start_index = count - app_settings.llm.summary_epoch
                 messages = self.build_system_messages()
-                
+
                 # 添加项目上下文信息
                 session_info = self.get_session_context(project_id)
                 if session_info:
                     messages.append(("system", session_info))
-                
+
                 recent_messages = HistoryService.get_all(project_id, start_index=start_index, end_index=count)
 
                 # 获取现有摘要
@@ -399,12 +401,12 @@ class AbstractLlmService(ABC):
         try:
             # 1. 构建系统消息和历史消息
             messages = self.build_system_messages()
-            
+
             # 添加项目上下文信息
             session_info = self.get_session_context(project_id)
             if session_info:
                 messages.append(("system", session_info))
-            
+
             # 生成摘要（仅在有项目时）
             if project_id:
                 self.summary_history(project_id)
@@ -486,44 +488,49 @@ class AbstractLlmService(ABC):
 
                 # 处理工具调用开始事件
                 elif event_type == "on_tool_start":
+                    tool_name = chunk.get("name", "")
+                    
+                    # 处理工具调用（内部函数不会被添加到列表）
                     self._process_tool_start_event(chunk, assistant_tools)
 
                     # 更新数据库
                     assistant_message.tools = assistant_tools.copy()
                     HistoryService.update(assistant_message)
 
-                    # 发送工具调用开始事件
-                    tool_name = chunk.get("name", "")
-                    tool_input = chunk.get("data", {}).get("input", {})
-                    yield {
-                        'type': 'tool_start',
-                        'name': tool_name,
-                        'args': tool_input if isinstance(tool_input, dict) else {}
-                    }
-                    # 发送完整的工具列表
-                    yield {'type': 'tools', 'tools': assistant_tools.copy()}
+                    # 只为非内部函数发送工具调用事件
+                    if not tool_name.startswith("_"):
+                        tool_input = chunk.get("data", {}).get("input", {})
+                        yield {
+                            'type': 'tool_start',
+                            'name': tool_name,
+                            'args': tool_input if isinstance(tool_input, dict) else {}
+                        }
+                        # 发送完整的工具列表
+                        yield {'type': 'tools', 'tools': assistant_tools.copy()}
 
                 # 处理工具调用结束事件
                 elif event_type == "on_tool_end":
+                    tool_name = chunk.get("name", "")
                     tool_output: ToolMessage = chunk.get("data", {}).get("output")
                     logger.info(
-                        f"✅ 工具调用完成: {chunk.get('name', '')}, 结果长度={len(str(tool_output.content)) if tool_output.content else 0}")
+                        f"✅ 工具调用完成: {tool_name}, 结果长度={len(str(tool_output.content)) if tool_output.content else 0}")
 
+                    # 处理工具调用结束（内部函数不会被更新到列表）
                     self._process_tool_end_event(chunk, assistant_tools)
 
                     # 更新数据库
                     assistant_message.tools = assistant_tools.copy()
                     HistoryService.update(assistant_message)
 
-                    # 发送工具调用结束事件
-                    tool_name = chunk.get("name", "")
-                    yield {
-                        'type': 'tool_end',
-                        'name': tool_name,
-                        'result': tool_output.content
-                    }
-                    # 发送完整的工具列表
-                    yield {'type': 'tools', 'tools': assistant_tools.copy()}
+                    # 只为非内部函数发送工具调用结束事件
+                    if not tool_name.startswith("_"):
+                        yield {
+                            'type': 'tool_end',
+                            'name': tool_name,
+                            'result': tool_output.content
+                        }
+                        # 发送完整的工具列表
+                        yield {'type': 'tools', 'tools': assistant_tools.copy()}
 
                     # 特殊处理：如果工具是 add_choices，更新 suggests
                     if tool_name == "add_choices":
@@ -792,6 +799,11 @@ class AbstractLlmService(ABC):
         prefix = f"[{log_prefix}] " if log_prefix else ""
         logger.info(f"✅ {prefix}工具调用: {tool_name}, 参数: {tool_input}")
 
+        # 跳过以 _ 开头的内部函数（如 _add_suggestions）
+        if tool_name.startswith("_"):
+            logger.debug(f"跳过内部函数工具调用记录: {tool_name}")
+            return
+
         args = tool_input if isinstance(tool_input, dict) else {}
         if 'request' in args and len(args) == 1:
             args = args['request']
@@ -816,6 +828,11 @@ class AbstractLlmService(ABC):
         prefix = f"[{log_prefix}] " if log_prefix else ""
         logger.info(f"✅ {prefix}工具调用完成: {tool_name}")
 
+        # 跳过以 _ 开头的内部函数（如 _add_suggestions）
+        if tool_name.startswith("_"):
+            logger.debug(f"跳过内部函数工具调用结果记录: {tool_name}")
+            return
+
         if tools_list:
             try:
                 result = json.loads(tool_output.content)
@@ -825,6 +842,37 @@ class AbstractLlmService(ABC):
             tools_list[-1]["result"] = result
             tools_list[-1]["status"] = tool_output.status
             tools_list[-1]["tool_call_id"] = tool_output.tool_call_id
+
+    async def _add_suggestions(self, project_id: Optional[str], index: int, suggests: list) -> None:
+        """
+        将建议写入指定索引的消息（支持负索引）。
+
+        说明：部分代码会以负索引表示从末尾倒数的位置（例如 -1 表示最后一条消息），
+        这里需要将负索引转换为实际索引后再进行更新。
+
+        :param project_id: 会话/项目 ID（None 表示默认工作空间）
+        :param index: 消息索引，支持负数（-1 表示最后一条）
+        :param suggests: 建议列表
+        """
+        if project_id=='null':
+            project_id=None
+        try:
+            # 负索引支持：将 -1 表示最后一条转换为实际索引
+            if index < 0:
+                count = HistoryService.count(project_id)
+                index = count + index
+
+            # 获取目标消息并更新 suggests
+            message = HistoryService.get_by_index(project_id, index)
+            if not message:
+                logger.debug(f"尝试为不存在的消息添加建议: project={project_id}, index={index}")
+                return
+
+            message.suggests = suggests or []
+            HistoryService.update(message)
+            logger.debug(f"已为消息添加建议: project={project_id}, index={index}, suggests_count={len(message.suggests)}")
+        except Exception as e:
+            logger.exception(f"添加建议失败: project={project_id}, index={index}, error={e}")
 
     async def _call_llm_final_operation(
             self,

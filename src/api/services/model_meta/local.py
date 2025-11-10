@@ -194,12 +194,12 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         async with aiofiles.open(meta_file, 'w', encoding='utf-8') as f:
             await f.write(meta.model_dump_json(indent=2))
     
-    async def save(self, model_meta: ModelMeta, parallel_download: bool = False, download_examples: bool = True) -> tuple[ModelMeta, int, int]:
+    async def save(self, model_meta: ModelMeta, download_images: bool = True, parallel_download: bool = False) -> tuple[ModelMeta, int, int]:
         """
         将模型元数据本地化并保存。
         
         此方法会：
-        1. 下载所有远程示例图片到本地
+        1. （可选）下载所有远程示例图片到本地
         2. 保持 example 的原始 URL（不替换为本地 file:// URL）
         3. 序列化 ModelMeta 到本地 metadata.json
         
@@ -207,6 +207,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         前端获取图片时，应根据 version_id 和 filename 查找本地文件。
         
         :param model_meta: 模型元数据（必须包含 type 字段，可以是远程的或本地的）
+        :param download_images: 是否下载示例图片，默认 True
         :param parallel_download: 是否并行下载示例图片，默认 False（串行下载）
         :return: (本地化后的 ModelMeta, 失败的图片数量, 总图片数量)
         """
@@ -224,14 +225,14 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         base_path = home / Path(model_meta.filename).stem
         base_path.mkdir(parents=True, exist_ok=True)
         
-        # 处理示例图片（支持串行或并行下载；可禁用下载）
+        # 处理示例图片（支持串行或并行下载）
         localized_examples: list[Example] = []
         
         # 分离本地和远程的示例图片
         local_examples = []
         remote_examples = []
         for example in model_meta.examples:
-            if is_local_url(example.url):
+            if is_local_url(example.extra.get('url')):
                 local_examples.append(example)
             else:
                 remote_examples.append(example)
@@ -241,12 +242,15 @@ class LocalModelModelMetaService(AbstractModelMetaService):
             localized_examples.append(example)
             logger.debug(f"示例图片已是本地: {example.filename}")
         
-        # 下载远程示例图片
+        # 下载远程示例图片（如果需要）
         failed_image_count = 0
-        total_image_count = 0
+        total_image_count = len(remote_examples)
         
-        if remote_examples and download_examples:
-            total_image_count = len(remote_examples)
+        if not download_images:
+            # 不下载图片，但保留所有示例的元数据
+            logger.debug(f"跳过下载 {len(remote_examples)} 张示例图片（用户选择不下载）")
+            localized_examples.extend(remote_examples)
+        elif remote_examples:
             if parallel_download:
                 # 并行下载
                 logger.debug(f"并行下载 {len(remote_examples)} 张示例图片")
@@ -280,7 +284,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
                     save_path = base_path / example.filename
                     logger.debug(f"下载示例图片: {example.filename}")
                     
-                    success = await download_file(example.url, save_path, app_settings.civitai.timeout)
+                    success = await download_file(example.extra.get('url'), save_path, app_settings.civitai.timeout)
                     if success:
                         # 下载成功，保持原始 URL（不替换为本地 file:// URL）
                         localized_examples.append(example)
@@ -290,7 +294,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
                         # 下载失败，跳过这张图片（download_file 已经记录了警告日志）
                         logger.warning(f"下载失败，跳过示例图片: {example.filename}")
 
-        # 创建本地化的 ModelMeta（如果未下载远程示例，则仅包含本地示例）
+        # 创建本地化的 ModelMeta
         localized_meta = ModelMeta(
             filename=model_meta.filename,
             name=model_meta.name,
@@ -324,7 +328,7 @@ class LocalModelModelMetaService(AbstractModelMetaService):
         :return: 下载成功返回 True，失败返回 False
         """
         try:
-            return await download_file(example.url, save_path, app_settings.civitai.timeout)
+            return await download_file(example.extra.get('url'), save_path, app_settings.civitai.timeout)
         except Exception as e:
             logger.exception(f"下载示例图片失败 ({example.filename}): {e}")
             return False

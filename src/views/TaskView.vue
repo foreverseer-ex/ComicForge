@@ -208,7 +208,6 @@
           <!-- Job ID（移动端隐藏） -->
           <div class="hidden md:flex md:col-span-2 items-center">
             <div 
-              v-if="job.job_id"
               @click="copyToClipboard(job.job_id)"
               :class="[
                 'text-xs font-mono truncate cursor-pointer hover:underline',
@@ -216,9 +215,8 @@
               ]"
               :title="job.job_id + ' (点击复制)'"
             >
-              {{ job.job_id.substring(0, 20) }}...
+              {{ job.job_id?.substring(0, 20) || 'N/A' }}{{ job.job_id ? '...' : '' }}
             </div>
-            <div v-else :class="['text-xs', isDark ? 'text-gray-400' : 'text-gray-500']">-</div>
           </div>
 
           <!-- 状态标识 -->
@@ -337,24 +335,11 @@
       :show="confirmDialog.show"
       :title="confirmDialog.title"
       :message="confirmDialog.message"
+      :checkbox-label="confirmDialog.checkboxLabel"
+      :checkbox-default-value="confirmDialog.checkboxDefaultValue"
       @confirm="confirmDialog.onConfirm"
       @cancel="confirmDialog.show = false"
-    >
-      <template #extra>
-        <div v-if="showClearOnlyFailedOption" class="flex items-center gap-2">
-          <input
-            id="onlyFailed"
-            type="checkbox"
-            v-model="clearOnlyFailed"
-            :class="[
-              'w-4 h-4 rounded cursor-pointer',
-              isDark ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
-            ]"
-          />
-          <label for="onlyFailed" :class="isDark ? 'text-gray-300' : 'text-gray-700'">仅清空失败项目</label>
-        </div>
-      </template>
-    </ConfirmDialog>
+    />
 
     <!-- 提示对话框 -->
     <AlertDialog
@@ -419,48 +404,19 @@ const selectedJobIds = ref<Set<string>>(new Set()) // 选中的任务ID集合
 const selectedJobForParams = ref<Job | null>(null) // 选中的任务（用于显示参数）
 
 // 对话框状态
-const confirmDialog = ref({
+const confirmDialog = ref<{
+  show: boolean
+  title: string
+  message: string
+  checkboxLabel?: string
+  checkboxDefaultValue?: boolean
+  onConfirm: (checkboxValue?: boolean) => void
+}>({
   show: false,
   title: '',
   message: '',
   onConfirm: () => {}
 })
-
-// 是否显示“仅清空失败项目”选项（仅在点击清空全部时展示）
-const showClearOnlyFailedOption = ref(false)
-// “仅清空失败项目”勾选状态（默认不勾选）
-const clearOnlyFailed = ref(false)
-
-// 清空任务
-const handleClearAll = async () => {
-  // 打开对话框并显示额外选项
-  showClearOnlyFailedOption.value = true
-  clearOnlyFailed.value = false
-  confirmDialog.value = {
-    show: true,
-    title: '确认清空',
-    message: '确定要清空所有任务吗？此操作不可恢复！',
-    onConfirm: async () => {
-      confirmDialog.value.show = false
-      try {
-        await api.delete('/draw/clear', { params: { only_failed: clearOnlyFailed.value ? 'true' : 'false' } })
-        selectedJobIds.value.clear()
-        await loadJobs()
-        showToast(clearOnlyFailed.value ? '已清空失败任务' : '清空成功', 'success')
-      } catch (error: any) {
-        console.error('清空任务失败:', error)
-        alertDialog.value = {
-          show: true,
-          title: '清空失败',
-          message: error?.response?.data?.detail || error.message || '未知错误'
-        }
-      } finally {
-        // 关闭额外选项显示
-        showClearOnlyFailedOption.value = false
-      }
-    }
-  }
-}
 
 const alertDialog = ref({
   show: false,
@@ -474,7 +430,8 @@ const loadJobs = async () => {
   try {
     const response = await api.get('/draw/all')
     const data = (response as any)?.data || response
-    jobs.value = Array.isArray(data) ? data : []
+    // 过滤掉没有 job_id 的无效记录
+    jobs.value = Array.isArray(data) ? data.filter(job => job && job.job_id) : []
     // 清除已删除任务的选中状态
     const existingJobIds = new Set(jobs.value.map(job => job.job_id))
     selectedJobIds.value = new Set(
@@ -509,11 +466,10 @@ const updateJobStatusesFromData = () => {
 
 // 只检查那些可能还在生成中的任务（completed_at 为 null）
 const checkPendingJobStatuses = async () => {
-  // 仅检查未完成且具有有效 job_id 的任务
-  const pendingJobs = jobs.value.filter(job => !job.completed_at && !!job.job_id)
+  const pendingJobs = jobs.value.filter(job => !job.completed_at)
   
   // 并行检查所有待处理任务
-  const promises = pendingJobs.map(async (job) => {
+  const promises = pendingJobs.filter(job => job && job.job_id).map(async (job) => {
     try {
       const response = await api.get('/draw', { params: { job_id: job.job_id } })
       const jobData = (response as any)?.data || response
@@ -629,14 +585,46 @@ const handleDeleteSelected = async () => {
   }
 }
 
+// 清空所有任务
+const handleClearAll = async () => {
+  confirmDialog.value = {
+    show: true,
+    title: '确认清空',
+    message: '确定要清空任务吗？此操作不可恢复！',
+    checkboxLabel: '仅清空未完成任务',
+    checkboxDefaultValue: false,
+    onConfirm: async (incompleteOnly: boolean = false) => {
+      confirmDialog.value.show = false
+      try {
+        await api.delete('/draw/clear', { params: { incomplete_only: incompleteOnly } })
+        selectedJobIds.value.clear() // 清除选中状态
+        await loadJobs()
+        showToast(incompleteOnly ? '未完成任务已清空' : '所有任务已清空', 'success')
+      } catch (error: any) {
+        console.error('清空任务失败:', error)
+        alertDialog.value = {
+          show: true,
+          title: '清空失败',
+          message: error.response?.data?.detail || error.message || '未知错误'
+        }
+      }
+    }
+  }
+}
+
 // 下载图片
 const handleDownload = async (jobId: string) => {
   try {
     const baseURL = getApiBaseURL()
-    const url = `${baseURL}/draw/${encodeURIComponent(jobId)}/image`
-    const relative = url.replace(baseURL, '')
-    const resp = await api.get(relative, { responseType: 'blob' })
-    const blobUrl = URL.createObjectURL(resp as any)
+    const url = `${baseURL}/draw/job/image?job_id=${encodeURIComponent(jobId)}`
+    
+    const response = await fetch(url)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    
+    const blob = await response.blob()
+    const blobUrl = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = blobUrl
     link.download = `job_${jobId}.png`
@@ -650,7 +638,7 @@ const handleDownload = async (jobId: string) => {
     alertDialog.value = {
       show: true,
       title: '下载失败',
-      message: error?.response?.status ? `HTTP ${error.response.status}` : (error.message || '未知错误')
+      message: error.message || '未知错误'
     }
   }
 }
@@ -669,7 +657,7 @@ const completedJobImageUrls = computed(() => {
     .filter(job => jobStatuses.value[job.job_id] === true)
     .map(job => {
       // 使用 API URL 而不是 blob URL，因为 ImageGalleryDialog 可能需要重新加载
-      return `${baseURL}/draw/${encodeURIComponent(job.job_id)}/image`
+      return `${baseURL}/draw/job/image?job_id=${encodeURIComponent(job.job_id)}`
     })
 })
 
@@ -722,7 +710,7 @@ const showErrorDialog = (job: Job) => {
   alertDialog.value = {
     show: true,
     title: '任务失败',
-    message: `任务执行失败（${job.job_id.substring(0, 8)}...），请检查参数或重试`
+    message: `任务执行失败（${job.job_id?.substring(0, 8) || 'unknown'}...），请检查参数或重试`
   }
 }
 
@@ -732,8 +720,14 @@ const handleTaskSubmit = async (data: any) => {
     // 构建 LoRA 字典
     const lorasDict: Record<string, number> = data.loras || {}
     
-    // 调用创建任务 API
-    const response = await api.post('/draw', null, {
+    const batchSize = data.batch_size || 1
+    
+    // 根据 batch_size 决定调用哪个端点
+    // batch_size > 1 或者用户明确要批量创建时，调用 /draw/batch
+    // batch_size = 1 时，调用 /draw（创建单个job）
+    const endpoint = batchSize > 1 ? '/draw/batch' : '/draw'
+    
+    const response = await api.post(endpoint, null, {
       params: {
         name: data.name || undefined,
         desc: data.desc || undefined,
@@ -749,18 +743,22 @@ const handleTaskSubmit = async (data: any) => {
         clip_skip: data.clip_skip || undefined,
         vae: data.vae || undefined,
         loras: Object.keys(lorasDict).length > 0 ? JSON.stringify(lorasDict) : undefined,
-        batch_size: data.batch_size || 1
+        ...(batchSize > 1 ? { batch_size: batchSize } : {})
       }
     })
     
-    // 后端直接返回 batch_id 字符串
-    const batch_id = response.data || response
+    // 后端返回 job_id（单个）或 batch_id（批量）
+    const result_id = response.data || response
     
-    if (!batch_id || typeof batch_id !== 'string') {
-      throw new Error('创建绘图任务失败：未返回 batch_id')
+    if (!result_id || typeof result_id !== 'string') {
+      throw new Error('创建绘图任务失败：未返回任务ID')
     }
     
-    showToast(`已创建批量任务（batch_id: ${batch_id.substring(0, 8)}...，包含 ${data.batch_size || 1} 个任务）`, 'success')
+    if (batchSize > 1) {
+      showToast(`已创建批量任务（batch_id: ${result_id.substring(0, 8)}...，包含 ${batchSize} 个任务）`, 'success')
+    } else {
+      showToast(`已创建绘图任务（job_id: ${result_id.substring(0, 8)}...）`, 'success')
+    }
   } catch (error: any) {
     console.error('创建任务失败:', error)
     const errorMessage = error.response?.data?.detail || error.message || '未知错误'

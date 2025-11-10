@@ -4,7 +4,7 @@
 专注于绘图功能：创建绘图任务、接受结果、管理绘图任务。
 """
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 import httpx
 from loguru import logger
@@ -77,8 +77,119 @@ async def get_loras() -> List[Dict[str, Any]]:
 
 # ==================== 图像生成 ====================
 
-@router.post("", summary="创建绘图任务（文生图）")
-async def create_draw(
+@router.post("", summary="创建单个绘图任务（文生图）")
+async def create_draw_job(
+    model: str,
+    prompt: str,
+    negative_prompt: str = "",
+    loras: Optional[Dict[str, float] | str] = None,
+    seed: int = -1,
+    sampler_name: str = "DPM++ 2M Karras",
+    steps: int = 30,
+    cfg_scale: float = 7.0,
+    width: int = 1024,
+    height: int = 1024,
+    clip_skip: Optional[int] = None,
+    vae: Optional[str] = None,
+    name: Optional[str] = None,
+    desc: Optional[str] = None,
+) -> str:
+    """
+    创建单个绘图任务（文生图），返回 job_id。
+    
+    Args:
+        model: SD模型的 version_name（必须使用 version_name 而不是 name！）
+               例如: "WAI-illustrious-SDXL-v15.0" 而不是 "WAI-illustrious-SDXL"
+        prompt: 正向提示词
+        negative_prompt: 负向提示词
+        loras: LoRA 配置 {version_name: weight}（键也必须是 version_name）
+        seed: 随机种子（-1 表示随机）
+        sampler_name: 采样器名称
+        steps: 采样步数
+        cfg_scale: CFG Scale
+        width: 图像宽度
+        height: 图像高度
+        clip_skip: CLIP skip
+        vae: VAE 模型的 version_name
+        name: 任务名称（可选）
+        desc: 任务描述（可选）
+    
+    Returns:
+        job_id（任务 ID）
+    """
+    try:
+        import json
+        
+        # 解析 loras
+        loras_dict: Optional[Dict[str, float]] = None
+        if loras:
+            if isinstance(loras, str):
+                try:
+                    loras_dict = json.loads(loras)
+                except json.JSONDecodeError:
+                    logger.warning(f"LoRA 参数格式错误: {loras}")
+                    loras_dict = None
+            elif isinstance(loras, dict):
+                loras_dict = loras
+        
+        args = DrawArgs(
+            model=model,
+            prompt=prompt,
+            negative_prompt=negative_prompt or "",
+            steps=steps,
+            cfg_scale=cfg_scale,
+            sampler=sampler_name,
+            seed=seed,
+            width=width,
+            height=height,
+            clip_skip=clip_skip,
+            vae=vae,
+            loras=loras_dict or {},
+        )
+        
+        # 如果是 Civitai 后端，检查并调整宽高限制（最大 1024）
+        backend = app_settings.draw.backend
+        if backend == "civitai":
+            original_width = args.width
+            original_height = args.height
+            
+            if args.width > 1024 or args.height > 1024:
+                if args.width > args.height:
+                    scale = 1024 / args.width
+                    args.width = 1024
+                    args.height = int(args.height * scale)
+                else:
+                    scale = 1024 / args.height
+                    args.height = 1024
+                    args.width = int(args.width * scale)
+                
+                if args.width > 1024:
+                    args.width = 1024
+                if args.height > 1024:
+                    args.height = 1024
+                
+                logger.warning(
+                    f"⚠️ Civitai 后端：图像尺寸已自动调整 "
+                    f"（{original_width}x{original_height} → {args.width}x{args.height}，最大限制 1024）"
+                )
+        
+        # 调用绘图服务
+        draw_service = get_current_draw_service()
+        job_id = draw_service.draw(args, name=name, desc=desc)
+        
+        return job_id
+        
+    except httpx.HTTPError as e:
+        backend = app_settings.draw.backend
+        raise HTTPException(status_code=502, detail=f"{backend} 连接失败: {e}") from e
+    except Exception as e:
+        import traceback
+        logger.exception(f"创建绘图任务失败: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/batch", summary="批量创建绘图任务（文生图）")
+async def create_batch_job(
     model: str,
     prompt: str,
     negative_prompt: str = "",
@@ -96,7 +207,7 @@ async def create_draw(
     batch_size: int = 1,
 ) -> str:
     """
-    创建绘图任务（文生图），返回 batch_id。
+    批量创建绘图任务（文生图），返回 batch_id。
     
     Args:
         model: SD模型名称
@@ -180,7 +291,7 @@ async def create_draw(
         
         # 调用绘图服务
         draw_service = get_current_draw_service()
-        batch_id = draw_service.draw(args, batch_size=batch_size, name=name, desc=desc)
+        batch_id = draw_service.draw_batch(args, batch_size=batch_size, name=name, desc=desc)
         
         return batch_id
         
@@ -189,7 +300,33 @@ async def create_draw(
         raise HTTPException(status_code=502, detail=f"{backend} 连接失败: {e}") from e
     except Exception as e:
         import traceback
-        logger.exception(f"创建绘图任务失败: {e}\n{traceback.format_exc()}")
+        logger.exception(f"批量创建绘图任务失败: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/batch/from-jobs", summary="从多个job组合成batch")
+async def batch_from_jobs(job_ids: List[str]) -> str:
+    """
+    从多个 job_id 组合成一个 batch。
+    
+    Args:
+        job_ids: job_id 列表
+    
+    Returns:
+        batch_id（批次 ID）
+    """
+    try:
+        if not job_ids:
+            raise HTTPException(status_code=400, detail="job_ids 不能为空")
+        
+        draw_service = get_current_draw_service()
+        batch_id = draw_service.batch_from_jobs(job_ids)
+        
+        return batch_id
+        
+    except Exception as e:
+        import traceback
+        logger.exception(f"组合batch失败: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -214,7 +351,7 @@ async def get_draw_job(job_id: str) -> Job:
 
 
 @router.delete("", summary="删除绘图任务")
-async def delete_draw_job(job_id: str) -> dict:
+async def delete_draw_job(job_id: str = Query(..., description="任务ID")) -> dict:
     """
     删除单个绘图任务。
     
@@ -269,31 +406,18 @@ async def delete_draw_jobs_batch(job_ids: list[str]) -> dict:
 
 
 @router.delete("/clear", summary="清空所有绘图任务")
-async def clear_draw_jobs(only_failed: bool = False) -> dict:
+async def clear_draw_jobs(incomplete_only: bool = Query(False, description="是否仅清空未完成任务")) -> dict:
     """
-    清空所有绘图任务。
+    清空所有绘图任务或仅清空未完成任务。
     
-    Query:
-        only_failed: 仅清空失败任务（默认 False）
+    Args:
+        incomplete_only: 是否仅清空未完成任务（status != 'completed'，包括失败和生成中，默认 False 清空所有）
     
     Returns:
         删除的任务数量
     """
-    if only_failed:
-        jobs = JobService.get_all()
-        count = 0
-        for job in jobs:
-            try:
-                if getattr(job, "status", None) == "failed":
-                    if JobService.delete(job.job_id):
-                        count += 1
-            except Exception as e:
-                logger.warning(f"删除失败任务时出错: {job.job_id}: {e}")
-        logger.info(f"仅清空失败任务: {count} 条")
-        return {"count": count}
-    else:
-        count = JobService.clear()
-        return {"count": count}
+    count = JobService.clear(incomplete_only=incomplete_only)
+    return {"count": count}
 
 
 @router.get("/image", response_class=FileResponse, summary="获取生成的图像")
@@ -343,33 +467,11 @@ async def check_job_status(job_id: str) -> dict:
     if not job:
         raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
     
-    # 获取当前绘图服务并检查状态
-    try:
-        draw_service = get_current_draw_service()
-        
-        # 对于 Civitai，需要从 job.data 中获取 civitai_job_token
-        civitai_token = None
-        if job.data and 'civitai_job_token' in job.data:
-            civitai_token = job.data['civitai_job_token']
-        
-        # 如果还没有 token，说明后台任务还在创建中
-        backend = app_settings.draw.backend
-        if backend == "civitai" and not civitai_token:
-            return {"completed": False, "pending": True}
-        
-        # 检查状态：对于 Civitai，使用 civitai_job_token；对于 SD-Forge，使用 job_id
-        check_job_id = civitai_token if (backend == "civitai" and civitai_token) else job_id
-        is_complete = await draw_service.get_job_status(check_job_id)
-        
-        # 如果任务已完成且 completed_at 未设置，更新它
-        if is_complete and job.completed_at is None:
-            from datetime import datetime
-            JobService.update(job_id, completed_at=datetime.now())
-        
-        return {"completed": is_complete}
-    except Exception as e:
-        logger.exception(f"检查任务状态失败: {job_id}")
-        raise HTTPException(status_code=500, detail=f"检查任务状态失败: {str(e)}") from e
+    # 只查询数据库状态，不查询 Civitai API
+    # 如果 job 标记为完成，就是完成了
+    is_complete = job.status == "completed" or job.completed_at is not None
+    
+    return {"completed": is_complete}
 
 
 @router.get("/job/image", response_class=FileResponse, summary="获取任务生成的图像")
@@ -394,26 +496,11 @@ async def get_job_image(job_id: str) -> FileResponse:
         if not job:
             raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
         
-        # 检查任务是否完成
-        if job.completed_at is None:
-            # 检查任务状态
-            draw_service = get_current_draw_service()
-            
-            # 对于 Civitai，需要从 job.data 中获取 civitai_job_token
-            civitai_token = None
-            if job.data and 'civitai_job_token' in job.data:
-                civitai_token = job.data['civitai_job_token']
-            
-            # 如果还没有 token，说明后台任务还在创建中
-            backend = app_settings.draw.backend
-            if backend == "civitai" and not civitai_token:
-                raise HTTPException(status_code=400, detail=f"任务正在创建中: {job_id}")
-            
-            # 检查状态：对于 Civitai，使用 civitai_job_token；对于 SD-Forge，使用 job_id
-            check_job_id = civitai_token if (backend == "civitai" and civitai_token) else job_id
-            is_complete = await draw_service.get_job_status(check_job_id)
-            if not is_complete:
-                raise HTTPException(status_code=400, detail=f"任务未完成: {job_id}")
+        # 只查询数据库状态，不查询 Civitai API
+        # 检查任务是否完成（根据数据库状态）
+        is_complete = job.status == "completed" or job.completed_at is not None
+        if not is_complete:
+            raise HTTPException(status_code=400, detail=f"任务未完成: {job_id}")
         
         # 从 jobs 文件夹读取图像文件
         job_image_path = jobs_home / f"{job_id}.png"
@@ -527,39 +614,5 @@ async def clear_batch_jobs() -> dict:
     # 清空所有 batch
     count = BatchJobService.clear()
     return {"count": count}
-
-
-# ==================== 任务图像访问 ====================
-
-@router.get("/{job_id}/image", response_class=FileResponse, summary="获取任务生成的图像")
-async def get_job_image(job_id: str) -> FileResponse:
-    """
-    获取绘图任务生成的图像文件。
-    
-    Args:
-        job_id: 任务ID（路径参数）
-    
-    Returns:
-        图像文件
-    
-    Raises:
-        HTTPException: 任务不存在或图像文件不存在时返回 404
-    """
-    # 检查任务是否存在
-    job = JobService.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
-    
-    # 从 jobs 文件夹读取图像文件
-    job_image_path = jobs_home / f"{job_id}.png"
-    
-    if not job_image_path.exists():
-        raise HTTPException(status_code=404, detail=f"任务图像文件不存在: {job_id}")
-    
-    return FileResponse(
-        path=str(job_image_path),
-        media_type="image/png",
-        filename=f"job_{job_id}.png"
-    )
 
 

@@ -7,7 +7,7 @@ from typing import Optional
 from loguru import logger
 from sqlmodel import select
 
-from .base import DatabaseSession
+from .base import DatabaseSession, normalize_project_id
 from api.schemas.memory import MemoryEntry, ChatSummary
 
 
@@ -63,6 +63,7 @@ class MemoryService:
         :param offset: 跳过的记录数
         :return: 记忆条目列表
         """
+        project_id = normalize_project_id(project_id)
         with DatabaseSession() as db:
             # 如果 project_id 为 None，查询 project_id 为 None 的记录
             if project_id is None:
@@ -131,6 +132,7 @@ class MemoryService:
         :param project_id: 项目ID（None 表示默认工作空间）
         :return: 删除的记录数
         """
+        project_id = normalize_project_id(project_id)
         with DatabaseSession() as db:
             # 如果 project_id 为 None，查询 project_id 为 None 的记录
             if project_id is None:
@@ -154,6 +156,7 @@ class MemoryService:
         :param project_id: 项目ID
         :return: 聊天摘要对象，如果不存在则返回 None
         """
+        project_id = normalize_project_id(project_id)
         with DatabaseSession() as db:
             summary = db.get(ChatSummary, project_id)
             if summary:
@@ -172,6 +175,7 @@ class MemoryService:
         :param summary: 聊天摘要内容
         :return: 创建或更新后的聊天摘要对象
         """
+        project_id = normalize_project_id(project_id)
         with DatabaseSession() as db:
             existing = db.get(ChatSummary, project_id)
             if existing:

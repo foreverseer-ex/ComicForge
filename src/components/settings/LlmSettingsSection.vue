@@ -221,14 +221,29 @@
 
       <!-- 系统提示词 -->
       <div>
-        <label 
-          :class="[
-            'block text-sm font-medium mb-2',
-            isDark ? 'text-gray-300' : 'text-gray-700'
-          ]"
-        >
-          系统提示词
-        </label>
+        <div class="flex items-center justify-between mb-2">
+          <label 
+            :class="[
+              'text-sm font-medium',
+              isDark ? 'text-gray-300' : 'text-gray-700'
+            ]"
+          >
+            系统提示词
+          </label>
+          <button
+            @click="handleResetSystemPrompt"
+            :disabled="resetting"
+            :class="[
+              'px-3 py-1 text-xs rounded-lg transition-colors',
+              isDark
+                ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700',
+              resetting ? 'opacity-50 cursor-not-allowed' : ''
+            ]"
+          >
+            {{ resetting ? '重置中...' : '重置为默认值' }}
+          </button>
+        </div>
         <textarea
           :value="localSystemPrompt"
           @blur="handleSystemPromptBlur"
@@ -273,6 +288,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import api from '../../api'
 
 const props = defineProps<{
   settings: any
@@ -314,6 +330,7 @@ const localTimeout = ref(String(props.settings?.timeout || 60.0))
 const localDeveloperMode = ref(props.settings?.developer_mode ?? true)
 const localSystemPrompt = ref(props.settings?.system_prompt || '')
 const localSummaryEpoch = ref(String(props.settings?.summary_epoch || 2))
+const resetting = ref(false)
 
 // 计算可用模型列表
 const availableModels = computed(() => {
@@ -447,6 +464,26 @@ const handleSummaryEpochBlur = (event: Event) => {
     emit('update', { summary_epoch: value })
   } else {
     target.value = localSummaryEpoch.value // 恢复原值
+  }
+}
+
+// 重置系统提示词
+const handleResetSystemPrompt = async () => {
+  if (!confirm('确定要重置系统提示词为默认值吗？')) {
+    return
+  }
+  
+  resetting.value = true
+  try {
+    const response = await api.post('/settings/llm/reset-system-prompt')
+    localSystemPrompt.value = response.data.system_prompt
+    emit('update', { system_prompt: response.data.system_prompt })
+    alert('系统提示词已重置为默认值')
+  } catch (error: any) {
+    console.error('重置系统提示词失败:', error)
+    alert('重置失败: ' + (error.response?.data?.detail || error.message))
+  } finally {
+    resetting.value = false
   }
 }
 </script>

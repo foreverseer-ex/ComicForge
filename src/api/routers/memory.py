@@ -18,9 +18,10 @@ from typing import List, Optional, Dict
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
-from api.schemas.memory import MemoryEntry
+from api.schemas.memory import MemoryEntry, MemoryCreateRequest, MemoryUpdateRequest
 from api.constants.memory import memory_description
 from api.services.db import MemoryService
+from api.services.db.base import normalize_project_id
 
 router = APIRouter(
     prefix="/memory",
@@ -33,10 +34,7 @@ router = APIRouter(
 
 @router.post("/create", summary="创建记忆条目")
 async def create_memory(
-    project_id: Optional[str],
-    key: str,
-    value: str,
-    description: Optional[str] = None,
+    request: MemoryCreateRequest
 ) -> dict:
     """
     创建新的记忆条目。
@@ -53,15 +51,15 @@ async def create_memory(
     - 如果 description 为空，自动从 constants.memory.memory_description 获取
     """
     # 如果没有提供描述，从预定义字典获取
-    description = description
+    description = request.description
     if description is None:
-        description = memory_description.get(key, "")
+        description = memory_description.get(request.key, "")
     
     # 创建记忆条目对象（ID 会自动生成）
     entry = MemoryEntry(
-        project_id=project_id,
-        key=key,
-        value=value,
+        project_id=request.project_id,
+        key=request.key,
+        value=request.value,
         description=description,
         created_at=datetime.now(),
         updated_at=datetime.now(),
@@ -69,12 +67,12 @@ async def create_memory(
     
     # 保存到数据库
     entry = MemoryService.create(entry)
-    logger.info(f"创建记忆条目: {key} (project: {project_id}, memory_id: {entry.memory_id})")
+    logger.info(f"创建记忆条目: {request.key} (project: {request.project_id}, memory_id: {entry.memory_id})")
     
     return {"memory_id": entry.memory_id}
 
 
-@router.get("/all", summary="列出记忆")
+@router.get("/all", response_model=List[MemoryEntry], summary="列出记忆")
 async def get_all_memories(
     project_id: Optional[str] = None,
     key: Optional[str] = None,
@@ -193,7 +191,7 @@ async def clear_memories(
 # 注意：ID参数通过路径参数传递，权限验证在服务层进行
 # 注意：这些路由必须在具体路径（如 /clear）之后定义，避免路径冲突
 
-@router.get("/{memory_id}", summary="获取记忆条目")
+@router.get("/{memory_id}", response_model=MemoryEntry, summary="获取记忆条目")
 async def get_memory(memory_id: str) -> MemoryEntry:
     """
     获取指定记忆条目。
@@ -214,13 +212,11 @@ async def get_memory(memory_id: str) -> MemoryEntry:
     return entry
 
 
-@router.put("/{memory_id}", summary="更新记忆")
+@router.put("/{memory_id}", response_model=MemoryEntry, summary="更新记忆")
 async def update_memory(
     memory_id: str,
-    key: Optional[str] = None,
-    value: Optional[str] = None,
-    description: Optional[str] = None,
-) -> dict:
+    request: MemoryUpdateRequest
+) -> MemoryEntry:
     """
     更新记忆条目。
     
@@ -241,12 +237,12 @@ async def update_memory(
     
     # 构建更新字典
     update_data = {"updated_at": datetime.now()}
-    if key is not None:
-        update_data["key"] = key
-    if value is not None:
-        update_data["value"] = value
-    if description is not None:
-        update_data["description"] = description
+    if request.key is not None:
+        update_data["key"] = request.key
+    if request.value is not None:
+        update_data["value"] = request.value
+    if request.description is not None:
+        update_data["description"] = request.description
     
     # 更新记忆
     updated_entry = MemoryService.update(memory_id, **update_data)

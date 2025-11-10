@@ -6,6 +6,7 @@ from sqlmodel import select
 
 from api.schemas import ChatMessage
 from api.services.db import DatabaseSession
+from api.services.db.base import normalize_project_id
 
 
 class HistoryService:
@@ -54,6 +55,7 @@ class HistoryService:
         :param index: 消息索引
         :return: 聊天消息对象（如果存在）
         """
+        project_id = normalize_project_id(project_id)
         with DatabaseSession() as db:
             statement = select(ChatMessage).where(ChatMessage.index == index)
             if project_id is None:
@@ -75,6 +77,7 @@ class HistoryService:
         :param end_index: 结束索引，默认值为-1（表示最后一条消息）
         :return: 聊天消息对象列表（按索引排序）
         """
+        project_id = normalize_project_id(project_id)
 
         if end_index < 0:
             end_index = cls.count(project_id) + end_index
@@ -100,6 +103,7 @@ class HistoryService:
         :param project_id: 会话唯一标识（None 表示默认工作空间）
         :return: 聊天消息ID列表
         """
+        project_id = normalize_project_id(project_id)
         with DatabaseSession() as db:
             statement = select(ChatMessage.message_id)
             if project_id is None:
@@ -134,6 +138,7 @@ class HistoryService:
         :param project_id: 会话唯一标识（None 表示默认工作空间）
         :return: 聊天消息数量
         """
+        project_id = normalize_project_id(project_id)
         with DatabaseSession() as db:
             statement = select(func.count(ChatMessage.index))
             if project_id is None:
@@ -152,6 +157,7 @@ class HistoryService:
         :param index: 消息索引
         :return: None
         """
+        project_id = normalize_project_id(project_id)
         if index < 0:
             index = cls.count(project_id) + index
         message = cls.get_by_index(project_id, index)
@@ -166,6 +172,7 @@ class HistoryService:
         :param project_id: 会话唯一标识（None 表示默认工作空间）
         :return: 删除的记录数
         """
+        project_id = normalize_project_id(project_id)
         with DatabaseSession() as db:
             statement = select(ChatMessage)
             if project_id is None:

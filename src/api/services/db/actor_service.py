@@ -8,8 +8,9 @@ from typing import Optional
 from loguru import logger
 from sqlmodel import select
 
-from .base import DatabaseSession
-from api.schemas.actor import Actor, ActorExample
+from .base import DatabaseSession, normalize_project_id
+from api.schemas.actor import Actor
+from api.schemas.draw import Example
 
 
 class ActorService:
@@ -62,6 +63,7 @@ class ActorService:
         :param offset: 跳过的记录数
         :return: Actor 列表
         """
+        project_id = normalize_project_id(project_id)
         with DatabaseSession() as db:
             # 如果 project_id 为 None，查询 project_id 为 None 的记录
             if project_id is None:
@@ -123,12 +125,12 @@ class ActorService:
             return True
     
     @classmethod
-    def add_example(cls, actor_id: str, example: ActorExample) -> Optional[Actor]:
+    def add_example(cls, actor_id: str, example: Example) -> Optional[Actor]:
         """
         为 Actor 添加示例图。
         
         :param actor_id: Actor ID
-        :param example: ActorExample 对象
+        :param example: Example 对象
         :return: 更新后的 Actor 对象，如果不存在则返回 None
         """
         with DatabaseSession() as db:
@@ -137,7 +139,7 @@ class ActorService:
                 logger.warning(f"Actor 不存在，无法添加示例: {actor_id}")
                 return None
             
-            # 将 ActorExample 转换为字典并添加到 examples 列表
+            # 将 Example 转换为字典并添加到 examples 列表
             # 注意：不使用 exclude_none=True，因为我们需要保留所有字段（包括 None 值）
             # 但需要确保 draw_args.loras 字段存在（即使是空字典）
             example_dict = example.model_dump()
@@ -241,13 +243,13 @@ class ActorService:
             return actor
     
     @classmethod
-    def update_example(cls, actor_id: str, example_index: int, example: ActorExample) -> Optional[Actor]:
+    def update_example(cls, actor_id: str, example_index: int, example: Example) -> Optional[Actor]:
         """
         更新 Actor 的指定示例图。
         
         :param actor_id: Actor ID
         :param example_index: 示例图索引
-        :param example: 新的 ActorExample 对象
+        :param example: 新的 Example 对象
         :return: 更新后的 Actor 对象，如果不存在则返回 None
         """
         with DatabaseSession() as db:

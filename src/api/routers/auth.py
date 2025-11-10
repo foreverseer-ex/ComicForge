@@ -59,7 +59,12 @@ def register(
     password: str = Body(...),
     role: Optional[str] = Body("viewer"),
     aliases: Optional[List[str]] = Body(None),
+    claims: dict = Depends(get_current_user_claims),
 ):
+    # 只有管理员可以注册新用户
+    if claims.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以创建用户")
+    
     with DatabaseSession() as db:
         exists = db.exec(select(User).where(User.username == username)).first()
         if exists is not None:
@@ -228,3 +233,112 @@ def me(claims: dict = Depends(get_current_user_claims)):
             "is_active": user.is_active,
             "created_at": user.created_at,
         }
+
+
+@router.get("/users")
+def list_users(claims: dict = Depends(get_current_user_claims)):
+    """获取所有用户列表（仅管理员）"""
+    if claims.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以查看用户列表")
+    
+    with DatabaseSession() as db:
+        users = db.exec(select(User)).all()
+        return [
+            {
+                "id": user.id,
+                "username": user.username,
+                "aliases": user.aliases,
+                "role": user.role,
+                "is_active": user.is_active,
+                "created_at": user.created_at,
+            }
+            for user in users
+        ]
+
+
+@router.put("/users/{user_id}")
+def update_user(
+    user_id: str,
+    username: Optional[str] = Body(None),
+    role: Optional[str] = Body(None),
+    is_active: Optional[bool] = Body(None),
+    aliases: Optional[List[str]] = Body(None),
+    claims: dict = Depends(get_current_user_claims),
+):
+    """更新用户信息（仅管理员）"""
+    if claims.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以更新用户")
+    
+    with DatabaseSession() as db:
+        user = db.get(User, UUID(user_id))
+        if not user:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        
+        if username is not None:
+            # 检查用户名是否已存在
+            existing = db.exec(select(User).where(User.username == username, User.id != user.id)).first()
+            if existing:
+                raise HTTPException(status_code=400, detail="用户名已存在")
+            user.username = username
+        
+        if role is not None:
+            user.role = role
+        
+        if is_active is not None:
+            user.is_active = is_active
+        
+        if aliases is not None:
+            user.aliases = aliases
+        
+        db.flush()
+        db.refresh(user)
+        return {
+            "id": user.id,
+            "username": user.username,
+            "aliases": user.aliases,
+            "role": user.role,
+            "is_active": user.is_active,
+            "created_at": user.created_at,
+        }
+
+
+@router.delete("/users/{user_id}")
+def delete_user(
+    user_id: str,
+    claims: dict = Depends(get_current_user_claims),
+):
+    """删除用户（仅管理员）"""
+    if claims.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以删除用户")
+    
+    with DatabaseSession() as db:
+        user = db.get(User, UUID(user_id))
+        if not user:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        
+        # 不能删除自己
+        if str(user.id) == claims["sub"]:
+            raise HTTPException(status_code=400, detail="不能删除自己的账户")
+        
+        db.delete(user)
+        return {"ok": True}
+
+
+@router.post("/users/{user_id}/reset-password")
+def reset_user_password(
+    user_id: str,
+    new_password: str = Body(...),
+    claims: dict = Depends(get_current_user_claims),
+):
+    """重置用户密码（仅管理员）"""
+    if claims.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以重置密码")
+    
+    with DatabaseSession() as db:
+        user = db.get(User, UUID(user_id))
+        if not user:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        
+        user.password_hash = hash_password(new_password)
+        db.flush()
+        return {"ok": True}

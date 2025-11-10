@@ -4,8 +4,6 @@
  * 处理 file:// URL 和远程 URL，统一转换为可通过 API 访问的 URL
  */
 import { imageCache } from './imageCache'
-import api from '../api'
-import { getApiBaseURL } from './apiConfig'
 
 /**
  * 获取图片 URL（支持缓存）
@@ -24,28 +22,7 @@ export async function getImageUrl(
     return null
   }
 
-  // 如果是受保护的后端 API 图片（/draw/.../image 或 /actor/.../image），使用带鉴权的请求获取 blob
-  // 并在模块级缓存中缓存 blob URL（key 使用相对路径，确保缩略图与大图共用）
-  try {
-    const base = getApiBaseURL()
-    if (imageUrl.startsWith(base) && (/\/draw\/.+\/image/.test(imageUrl) || /\/actor\/.+\/image/.test(imageUrl))) {
-      const relativeUrl = imageUrl.replace(base, '')
-      // 命中缓存直接返回
-      const cached = protectedBlobCache.get(relativeUrl)
-      if (cached) return cached
-      // 请求并缓存
-      const resp = await api.get(relativeUrl, { responseType: 'blob' })
-      const blob: Blob = (resp as any)?.data ?? resp
-      const blobUrl = URL.createObjectURL(blob)
-      protectedBlobCache.set(relativeUrl, blobUrl)
-      return blobUrl
-    }
-  } catch (e) {
-    console.error('获取受保护图片失败:', imageUrl, e)
-    // 失败则回退为原始 URL（可能仍可匿名访问，或由 <img> 自行失败）
-  }
-
-  // 如果是远程公开 URL，直接返回
+  // 如果是远程 URL，直接返回
   if (!imageUrl.startsWith('file://')) {
     return imageUrl
   }
@@ -59,6 +36,3 @@ export async function getImageUrl(
   }
 }
 
-// 模块级受保护图片缓存（相对路径 -> blob URL）
-// 说明：用于共享 /actor/.../image 与 /draw/.../image 的 blob 以避免重复请求
-const protectedBlobCache: Map<string, string> = new Map()

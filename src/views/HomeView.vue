@@ -797,7 +797,7 @@ const loadCurrentParagraph = async () => {
     
     // 获取当前段落内容
     try {
-      const content = await api.get('/context/line', {
+      const content = await api.get('/reader/line', {
         params: {
           project_id: currentProject.value.project_id,
           chapter,
@@ -840,7 +840,7 @@ const prevParagraph = async () => {
       newChapter -= 1
       // 获取上一章的所有行，取最后一行的行号
       try {
-        const response = await api.get('/context/lines', {
+        const response = await api.get('/reader/lines', {
           params: {
             project_id: currentProject.value.project_id,
             chapter: newChapter
@@ -1126,7 +1126,7 @@ const uploadFile = async (file: File) => {
     formData.append('file', file)
     
     // 上传文件到后端（FormData 会自动设置正确的 Content-Type）
-    const response = await api.post('/context/upload', formData)
+    const response = await api.post('/file/upload', formData)
     const responseData = (response as any)?.data || response
     
     // 保存文件路径到表单

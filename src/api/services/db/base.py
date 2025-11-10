@@ -4,6 +4,7 @@
 使用 SQLModel + SQLite 来管理应用数据。
 """
 
+from typing import Optional
 from loguru import logger
 from sqlmodel import SQLModel, create_engine, Session
 
@@ -68,8 +69,7 @@ class DatabaseSession:
 
     def __enter__(self) -> Session:
         """进入上下文，创建会话"""
-        # 避免提交后对象属性过期，导致响应序列化时触发懒加载报 DetachedInstanceError
-        self.session = Session(engine, expire_on_commit=False)
+        self.session = Session(engine)
         return self.session
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -85,3 +85,18 @@ class DatabaseSession:
             self.session.commit()
 
         self.session.close()
+
+
+def normalize_project_id(project_id: Optional[str]) -> Optional[str]:
+    """
+    规范化 project_id，将字符串 "null" 转换为 None。
+    
+    当 LLM 调用工具时，JSON 中的 None 会被序列化为 "null" 字符串，
+    导致数据库查询失败。此函数用于统一处理这种情况。
+    
+    :param project_id: 原始 project_id（可能是 None、"null" 或正常字符串）
+    :return: 规范化后的 project_id（None 或正常字符串）
+    """
+    if project_id == "null":
+        return None
+    return project_id

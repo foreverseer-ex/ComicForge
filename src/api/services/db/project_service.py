@@ -145,6 +145,15 @@ class ProjectService:
         :param project_id: 项目 ID
         :return: 项目对象，如果不存在则返回 None
         """
+        # 规范化 project_id（将 "null" 转换为 None）
+        from .base import normalize_project_id
+        project_id = normalize_project_id(project_id)
+        
+        # 如果 project_id 为 None，直接返回 None（避免 SQLAlchemy 警告）
+        if project_id is None:
+            logger.debug("project_id 为 None，返回 None")
+            return None
+            
         with DatabaseSession() as db:
             project = db.get(Project, project_id)
             if project:

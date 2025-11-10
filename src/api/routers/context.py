@@ -4,17 +4,17 @@
 统一管理小说内容、章节、段落、图像等资源。
 合并了原 reader.py 和 novel.py 的功能。
 """
-from typing import List, Optional
+import uuid
 from pathlib import Path
+from typing import List, Optional
+
+import aiofiles
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from loguru import logger
-from pydantic import BaseModel
-import aiofiles
-import uuid
 
+from api.schemas import ChapterSummary
 from api.schemas.novel import NovelContent
-from api.schemas.memory import ChapterSummary
 from api.services.db import NovelContentService, ProjectService
 from api.services.db.summary_service import SummaryService
 from api.utils.path import project_home, app_temp_path

@@ -7,7 +7,6 @@ import base64
 import io
 from pathlib import Path
 from typing import Optional, Dict, Any
-from api.services.model_meta import model_meta_db_service
 
 import httpx
 from PIL import Image
@@ -164,58 +163,43 @@ class SdForgeDrawService(AbstractDrawService):
 
     # ========== 实现抽象接口 ==========
 
-    def draw(self, args: DrawArgs, batch_size: int = 1, name: str | None = None, desc: str | None = None) -> str:
+    def draw(self, args: DrawArgs, name: str | None = None, desc: str | None = None) -> str:
         """
-        批量创建绘图任务并启动监控。
+        创建单个绘图任务并启动监控。
         
         注意：如果指定了model和vae，会自动检查当前选项，如果不同则设置。
         model 和 vae 参数应该是 version_name，需要通过模型元数据服务查找对应的 SD-Forge title。
         
         :param args: 绘图参数（model 和 vae 是 version_name）
-        :param batch_size: 批量大小
         :param name: 任务名称（可选）
         :param desc: 任务描述（可选）
-        :return: batch_id
+        :return: job_id
         """
-        from api.services.model_meta import model_meta_db_service
-        from api.services.db import JobService, BatchJobService
-        from api.schemas.draw import Job, BatchJob
+        from api.services.db import JobService
+        from api.schemas.draw import Job
         from datetime import datetime
-        from api.utils.path import jobs_home
         import asyncio
         
-        job_ids = []
-        
-        # 创建 batch_size 个 job
+        # 创建 Job 记录
         draw_args_dict = args.model_dump(exclude_none=True)
         if 'loras' not in draw_args_dict:
             draw_args_dict['loras'] = {}
         
-        for i in range(batch_size):
-            # 创建 Job 记录（ID 会自动生成）
-            job = Job(
-                name=name,
-                desc=desc,
-                created_at=datetime.now(),
-                status="pending",
-                draw_args=draw_args_dict,
-                data={}
-            )
-            job = JobService.create(job)
-            job_ids.append(job.job_id)
-            
-            # 启动后台任务：执行绘图并监控
-            asyncio.create_task(self._draw_and_monitor_job_async(job.job_id, args))
-        
-        # 创建 BatchJob 记录（ID 会自动生成）
-        batch_job = BatchJob(
-            job_ids=job_ids,
-            created_at=datetime.now()
+        job = Job(
+            name=name,
+            desc=desc,
+            created_at=datetime.now(),
+            status="pending",
+            draw_args=draw_args_dict,
+            data={}
         )
-        batch_job = BatchJobService.create(batch_job)
+        job = JobService.create(job)
         
-        logger.success(f"批量创建任务完成: batch_id={batch_job.batch_id}, job_count={len(job_ids)}")
-        return batch_job.batch_id
+        # 启动后台任务：执行绘图并监控
+        asyncio.create_task(self._draw_and_monitor_job_async(job.job_id, args))
+        
+        logger.success(f"创建绘图任务: job_id={job.job_id}")
+        return job.job_id
 
     async def _draw_and_monitor_job_async(self, job_id: str, args: DrawArgs) -> None:
         """
@@ -242,7 +226,7 @@ class SdForgeDrawService(AbstractDrawService):
                 
                 # 检查 model
                 if args.model:
-                    model_meta = model_meta_db_service.get_by_version_name(args.model)
+                    model_meta = local_model_meta_service.get_by_version_name(args.model)
                     if not model_meta:
                         raise RuntimeError(f"未找到模型元数据: {args.model}")
                     
@@ -265,7 +249,7 @@ class SdForgeDrawService(AbstractDrawService):
                 
                 # 检查 vae
                 if args.vae:
-                    vae_meta = model_meta_db_service.get_by_version_name(args.vae)
+                    vae_meta = local_model_meta_service.get_by_version_name(args.vae)
                     if not vae_meta:
                         raise RuntimeError(f"未找到 VAE 元数据: {args.vae}")
                     
@@ -283,7 +267,7 @@ class SdForgeDrawService(AbstractDrawService):
             loras_for_sd_forge: Dict[str, float] = {}
             if args.loras:
                 for lora_version_name, strength in args.loras.items():
-                    lora_meta = model_meta_db_service.get_by_version_name(lora_version_name)
+                    lora_meta = local_model_meta_service.get_by_version_name(lora_version_name)
                     if not lora_meta:
                         logger.warning(f"未找到 LoRA 元数据: {lora_version_name}，跳过")
                         continue

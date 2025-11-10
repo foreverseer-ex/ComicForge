@@ -12,6 +12,7 @@ from loguru import logger
 
 from api.schemas.project import Project
 from api.services.db import ProjectService
+from api.services.db.base import normalize_project_id
 from api.utils.path import project_home
 
 router = APIRouter(
@@ -68,7 +69,7 @@ async def create_project(
     return {"project_id": project.project_id}
 
 
-@router.get("/all", summary="列出所有项目")
+@router.get("/all", response_model=List[Project], summary="列出所有项目")
 async def get_all_projects(
     limit: int = 50,
     offset: int = 0,
@@ -92,7 +93,7 @@ async def get_all_projects(
     return projects
 
 
-@router.get("/{project_id}", summary="获取项目信息")
+@router.get("/{project_id}", response_model=Project, summary="获取项目信息")
 async def get_project(project_id: str) -> Project:
     """
     获取指定项目的详细信息。
@@ -113,7 +114,7 @@ async def get_project(project_id: str) -> Project:
     return project
 
 
-@router.put("/{project_id}", summary="更新项目")
+@router.put("/{project_id}", response_model=Project, summary="更新项目")
 async def update_project(
     project_id: str,
     title: Optional[str] = None,

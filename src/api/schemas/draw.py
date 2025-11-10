@@ -4,7 +4,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field as PydanticField, model_serializer
 from sqlalchemy import Column, JSON
 from sqlalchemy.ext.mutable import MutableList
 from sqlmodel import SQLModel, Field
@@ -27,6 +27,54 @@ class DrawArgs(BaseModel):
     clip_skip: int | None = 2
     vae: str | None = None  # VAE 模型名称
     loras: dict[str, float] | None = None  # LoRA 字典 {name: weight}，权重可以是负数（负数表示负面 LoRA，会被添加到负面提示词）
+
+
+class Example(BaseModel):
+    """示例图（立绘或模型示例图）。
+    
+    统一的示例图结构，用于：
+    - Actor 的立绘示例
+    - Model 的示例图
+    
+    字段说明：
+    - title: 示例标题（可选）
+    - desc: 示例说明（可选）
+    - extra: 额外数据字典，用于存储：
+        - url: 图片 URL（用于模型示例）
+        - job_id: 关联的 job ID（用于从 job 添加的立绘）
+        - batch_id: 关联的 batch ID（用于从 batch 添加的立绘）
+    - draw_args: 生成参数
+    - filename: 文件名（必需，在创建时提供）
+    
+    注意：
+    - 图片的生成状态由关联的 Job 对象的 status 字段管理（pending/completed/failed）
+    - 如果文件不存在，应通过 job_id 查询 Job 状态以确定原因
+    """
+    title: str | None = None
+    desc: str | None = None
+    extra: dict = PydanticField(default_factory=dict)
+    draw_args: DrawArgs
+    filename: str
+    
+    @property
+    def url(self) -> str | None:
+        """从 extra 中获取 URL（向后兼容）。"""
+        return self.extra.get('url')
+    
+    @model_serializer
+    def ser_model(self) -> dict:
+        """自定义序列化，将 extra['url'] 提取为顶层字段。"""
+        data = {
+            'title': self.title,
+            'desc': self.desc,
+            'extra': self.extra,
+            'draw_args': self.draw_args.model_dump() if self.draw_args else None,
+            'filename': self.filename,
+        }
+        # 将 url 提取为顶层字段（方便前端访问）
+        if 'url' in self.extra:
+            data['url'] = self.extra['url']
+        return data
 
 
 class Job(SQLModel, table=True):

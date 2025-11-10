@@ -71,9 +71,16 @@ const router = createRouter({
 })
 
 // 全局路由守卫
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const auth = useAuthStore()
+  
+  // 等待 auth store 初始化完成
+  if (!auth.isInitialized) {
+    await auth.initialize()
+  }
+  
   const isPublic = (to.meta as any)?.public === true
+  
   if (!isPublic && !auth.isAuthenticated) {
     if (to.name !== 'Login') return next({ name: 'Login', query: { redirect: to.fullPath } })
   }

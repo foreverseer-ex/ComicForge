@@ -13,13 +13,16 @@ from api.services.db.project_service import ProjectService
 from api.services.db import HistoryService
 from api.services.llm import get_current_llm_service
 from api.schemas.draw import DrawArgs
+from api.services.llm import get_llm_service
+from api.services.db.base import normalize_project_id
 from api.routers.model_meta import get_checkpoints, get_loras
 from api.routers.actor import get_all_actors
 from api.constants.llm import (
     GENERATE_DRAW_PARAMS_BASE_TEMPLATE,
     GENERATE_DRAW_PARAMS_DESC_SECTION,
     GENERATE_DRAW_PARAMS_NO_DESC,
-    GENERATE_DRAW_PARAMS_STEPS,
+    GENERATE_DRAW_PARAMS_STEPS_WITHOUT_PROJECT,
+    GENERATE_DRAW_PARAMS_STEPS_WITH_PROJECT,
     GENERATE_DRAW_PARAMS_ACTOR_CONTEXT_TEMPLATE
 )
 
@@ -272,18 +275,29 @@ async def generate_draw_params(
         resources_json = json.dumps(resources_info, ensure_ascii=False, indent=2)
         logger.info(f"已获取资源信息：{len(checkpoints)} 个 Checkpoint，{len(loras)} 个 LoRA，{len(actors)} 个角色")
 
-        # 3. 构建 LLM 提示消息（统一 steps，按需附加 actor 上下文）
+        # 3. 构建 LLM 提示消息
         desc_section = GENERATE_DRAW_PARAMS_DESC_SECTION.format(desc=desc) if desc else GENERATE_DRAW_PARAMS_NO_DESC
-        steps_section = GENERATE_DRAW_PARAMS_STEPS
-        prompt = GENERATE_DRAW_PARAMS_BASE_TEMPLATE.format(
-            name=name,
-            desc_section=desc_section,
-            steps_section=steps_section
-        )
-        # 如果存在 actor 信息（即便 project_id=None 也可），追加角色上下文说明
-        if actors and len(actors) > 0:
+        
+        # 根据是否有 project_id 选择不同的步骤说明
+        # 如果有 actor 信息，使用带项目的步骤说明（即使 project_id=None）
+        has_actors = len(actors) > 0
+        if project_id or has_actors:
+            steps_section = GENERATE_DRAW_PARAMS_STEPS_WITH_PROJECT
+            # 添加角色查询要求（支持 project_id=None）
             actual_project_id = project_id if project_id is not None else "默认工作空间"
-            prompt += GENERATE_DRAW_PARAMS_ACTOR_CONTEXT_TEMPLATE.format(project_id=actual_project_id)
+            actor_context = GENERATE_DRAW_PARAMS_ACTOR_CONTEXT_TEMPLATE.format(project_id=actual_project_id)
+            prompt = GENERATE_DRAW_PARAMS_BASE_TEMPLATE.format(
+                name=name,
+                desc_section=desc_section,
+                steps_section=steps_section
+            ) + actor_context
+        else:
+            steps_section = GENERATE_DRAW_PARAMS_STEPS_WITHOUT_PROJECT
+            prompt = GENERATE_DRAW_PARAMS_BASE_TEMPLATE.format(
+                name=name,
+                desc_section=desc_section,
+                steps_section=steps_section
+            )
         
         # 4. 将资源信息添加到系统提示词中
         resources_prompt = f"""

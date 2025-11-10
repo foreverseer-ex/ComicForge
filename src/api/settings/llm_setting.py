@@ -81,6 +81,20 @@ class LlmSettings(BaseModel):
         le=1000,
         description="LangGraph 递归限制：工具调用的最大次数（25-1000）。迭代模式可能需要更高的值"
     )
+    
+    text_suggestion_count: int = Field(
+        default=4,
+        ge=1,
+        le=10,
+        description="文字建议条数：每次对话后提供的文字操作建议数量（1-10）"
+    )
+    
+    image_suggestion_count: int = Field(
+        default=4,
+        ge=1,
+        le=16,
+        description="图片建议条数：生成立绘等图像时提供的选项数量（1-16）"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

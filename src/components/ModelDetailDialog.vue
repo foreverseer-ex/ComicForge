@@ -1,17 +1,18 @@
 <template>
-  <DialogRoot :open="!!model" @update:open="onUpdateOpen">
-    <DialogPortal>
-      <DialogOverlay class="fixed inset-0 bg-black/50 z-50" />
-      <DialogContent v-if="model"
+  <Teleport to="body">
+    <div
+      v-if="model"
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      @click.self="close"
+    >
+      <div
         :class="[
-          'fixed z-50 w-full max-w-4xl max-h-[90vh] rounded-lg shadow-xl flex flex-col top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
-          'mx-4 md:mx-0',
+          'w-full max-w-4xl max-h-[90vh] rounded-lg shadow-xl flex flex-col',
+          'mx-4 md:mx-0', // 移动端添加左右边距
           isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
         ]"
+        @click.stop
       >
-        <div class="flex flex-col h-full min-h-0">
-        <DialogTitle class="sr-only">模型详情</DialogTitle>
-        <DialogDescription class="sr-only">查看与管理模型版本信息与示例图</DialogDescription>
         <!-- 标题栏 -->
         <div 
           :class="[
@@ -22,29 +23,13 @@
         >
           <h2 
             :class="[
-              'text-lg md:text-xl font-bold',
+              'text-lg md:text-xl font-bold', // 移动端使用更小的字体
               isDark ? 'text-white' : 'text-gray-900'
             ]"
           >
             {{ versionName }}
           </h2>
           <div class="flex items-center gap-2">
-            <!-- 下载示例图按钮 -->
-            <button
-              @click.stop="handleDownloadExamples"
-              :disabled="downloadingExamples"
-              :class="[
-                'p-2 rounded-lg transition-colors',
-                downloadingExamples
-                  ? 'opacity-50 cursor-not-allowed'
-                  : isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'
-              ]"
-              title="仅下载示例图片，不改变其他元数据"
-            >
-              <ArrowDownTrayIcon v-if="!downloadingExamples" class="w-5 h-5" />
-              <div v-else class="animate-spin rounded-full h-5 w-5 border-b-2" 
-                   :class="isDark ? 'border-blue-400' : 'border-blue-600'"></div>
-            </button>
             <!-- 重置按钮 -->
             <button
               @click.stop="handleReset"
@@ -90,10 +75,10 @@
               <XMarkIcon class="w-5 h-5" />
             </button>
           </div>
-          </div>
+        </div>
 
         <!-- 内容区域 -->
-        <div class="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 md:p-6">
+        <div class="flex-1 overflow-y-auto p-4 md:p-6">
           <div class="space-y-6">
             <!-- 预览图展示区域 -->
             <div class="relative">
@@ -136,7 +121,7 @@
               
               <!-- 生成参数按钮组 -->
               <div 
-                v-if="currentExample && currentExample.args"
+                v-if="currentExample && currentExample.draw_args"
                 class="absolute top-2 right-2 z-10 flex gap-2"
               >
                 <!-- 复制生成参数按钮 -->
@@ -358,15 +343,13 @@
             </div>
           </div>
         </div>
-        </div>
-      </DialogContent>
-    </DialogPortal>
-  </DialogRoot>
-
+      </div>
+    </div>
+    
     <!-- 生成参数对话框 -->
     <ModelParamsDialog
       v-if="showParamsDialog"
-      :params="currentExample?.args || null"
+      :params="currentExample?.draw_args || null"
       @close="showParamsDialog = false"
     />
     
@@ -391,7 +374,7 @@
       @confirm="confirmDialog.onConfirm"
       @cancel="confirmDialog.show = false"
     />
-  
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -408,8 +391,7 @@ import {
   ClipboardIcon,
   EyeIcon,
   EyeSlashIcon,
-  ArrowPathIcon,
-  ArrowDownTrayIcon
+  ArrowPathIcon
 } from '@heroicons/vue/24/outline'
 import { getImageUrl } from '../utils/imageUtils'
 import { showToast } from '../utils/toast'
@@ -417,7 +399,6 @@ import api from '../api'
 import ModelParamsDialog from './ModelParamsDialog.vue'
 import ImageGalleryDialog from './ImageGalleryDialog.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
-import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription } from 'radix-vue'
 
 interface ModelMeta {
   model_id: number
@@ -609,10 +590,10 @@ const openImageGallery = () => {
 
 // 复制生成参数到剪贴板
 const copyParams = async () => {
-  if (!currentExample.value?.args) return
+  if (!currentExample.value?.draw_args) return
   
   try {
-    const params = currentExample.value.args
+    const params = currentExample.value.draw_args
     
     // 构建符合 API 端点格式的参数对象
     // 参考: POST /draw/generate
@@ -736,10 +717,6 @@ const close = () => {
   emit('close')
 }
 
-const onUpdateOpen = (v: boolean) => {
-  if (!v) close()
-}
-
 // 切换隐私模式
 const togglePrivacyMode = () => {
   emit('toggle-privacy-mode')
@@ -747,28 +724,6 @@ const togglePrivacyMode = () => {
 
 // 重置模型元数据
 const resetting = ref(false)
-const downloadingExamples = ref(false)
-const handleDownloadExamples = async () => {
-  if (!props.model || downloadingExamples.value) return
-  try {
-    downloadingExamples.value = true
-    showToast('开始下载示例图...', 'info')
-    const resp = await api.post(`/model-meta/${props.model.version_id}/download-examples`, { parallel_download: false })
-    const data = (resp as any)?.data || resp
-    if (data?.success) {
-      showToast(`下载完成（成功 ${data.total_image_count - data.failed_image_count} / ${data.total_image_count}）`, 'success')
-      emit('model-updated')
-      // 不强制关闭对话框，用户可继续浏览
-    } else {
-      showToast('下载失败', 'error')
-    }
-  } catch (e: any) {
-    const msg = e?.response?.data?.detail || e?.message || '下载失败'
-    showToast(msg, 'error')
-  } finally {
-    downloadingExamples.value = false
-  }
-}
 const handleReset = () => {
   if (!props.model || resetting.value) return
   
@@ -814,13 +769,3 @@ const handleReset = () => {
 }
 </script>
 
-<style scoped>
-/* 隐藏滚动条但保持可滚动 */
-.no-scrollbar {
-  -ms-overflow-style: none; /* IE 和旧版 Edge */
-  scrollbar-width: none;    /* Firefox */
-}
-.no-scrollbar::-webkit-scrollbar {
-  display: none;            /* Chrome/Safari/新 Edge */
-}
-</style>

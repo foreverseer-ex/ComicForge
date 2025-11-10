@@ -1,23 +1,25 @@
 <template>
-  <DialogRoot :open="show" @update:open="onUpdateOpen">
-    <DialogPortal>
-      <DialogOverlay class="fixed inset-0 bg-black/50 z-50" />
-      <DialogContent
+  <Teleport to="body">
+    <div
+      v-if="show"
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      @click.self="close"
+    >
+      <div
         :class="[
-          'fixed z-50 w-full max-w-6xl max-h-[90vh] rounded-lg shadow-xl flex flex-col top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
+          'w-full max-w-6xl max-h-[90vh] rounded-lg shadow-xl flex flex-col',
           'mx-4 md:mx-0',
           isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
         ]"
+        @click.stop
       >
-        <DialogTitle class="sr-only">生成立绘</DialogTitle>
-        <DialogDescription class="sr-only">创建或选择绘图任务以为角色生成立绘</DialogDescription>
         <!-- 新建任务模式 -->
         <CreateDrawTaskDialog
           v-if="mode === 'create'"
           :show="true"
           :title="`为 ${actorName} 生成立绘`"
           :context-info="actorName"
-          :initial-name="''"
+          :initial-name="taskName"
           :additional-info="additionalInfo"
           :project-id="projectId ?? undefined"
           submit-button-text="开始生成"
@@ -38,9 +40,9 @@
           @switch-to-create="mode = 'create'"
           @select="handleSelectJob"
         />
-      </DialogContent>
-    </DialogPortal>
-  </DialogRoot>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -51,7 +53,6 @@ import api from '../api'
 import { showToast } from '../utils/toast'
 import CreateDrawTaskDialog from './CreateDrawTaskDialog.vue'
 import JobImageSelector from './JobImageSelector.vue'
-import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription } from 'radix-vue'
 
 interface Props {
   show: boolean
@@ -75,6 +76,11 @@ const { isDark } = storeToRefs(themeStore)
 // 模式：'create' 创建新任务，'select' 选择已有任务
 const mode = ref<'create' | 'select'>('create')
 
+// 计算任务名称和描述
+const taskName = computed(() => {
+  return `角色立绘-${props.actorName}`
+})
+
 // 计算附加信息（角色描述和标签）
 const additionalInfo = computed(() => {
   const parts: string[] = []
@@ -97,13 +103,21 @@ const handleSubmit = async (data: any) => {
     showToast('正在创建绘图任务...', 'info')
     const lorasDict: Record<string, number> = data.loras || {}
     
-    // 子表单已负责合并附加信息，直接使用返回的描述
-    const finalDesc = data.desc || ''
+    // 合并附加信息到任务描述
+    // 注意：DrawTaskForm 应该已经合并了，但为了确保，我们在这里再次检查
+    let finalDesc = data.desc || ''
+    if (additionalInfo.value) {
+      if (finalDesc) {
+        finalDesc = `${finalDesc}\n\n${additionalInfo.value}`
+      } else {
+        finalDesc = additionalInfo.value
+      }
+    }
     
-    const response = await api.post('/draw', null, {
+    // 使用 /draw/batch 端点进行批量创建
+    const response = await api.post('/draw/batch', null, {
       params: {
-        // 任务名称允许为空：当为空时不传递该参数
-        name: data.name || undefined,
+        name: data.name || taskName.value,
         desc: finalDesc || undefined,
         model: data.model,
         prompt: data.prompt,
@@ -133,7 +147,7 @@ const handleSubmit = async (data: any) => {
     await api.post(`/actor/${props.actorId}/add_portrait_from_batch`, null, {
       params: {
         batch_id: batch_id,
-        title: (data.name && data.name.trim()) ? data.name : '角色立绘',
+        title: data.name || taskName.value,
         desc: finalDesc || undefined,
         project_id: props.projectId || null
       }
@@ -160,7 +174,7 @@ const handleSelectJob = async (job: any) => {
     const result = await api.post(`/actor/${props.actorId}/add_portrait_from_job`, null, {
       params: {
         job_id: job.job_id,
-        title: '角色立绘',
+        title: taskName.value,
         desc: additionalInfo.value || undefined,
         project_id: props.projectId || null
       }
@@ -185,9 +199,5 @@ const handleSelectJob = async (job: any) => {
 const close = () => {
   mode.value = 'create' // 重置模式
   emit('close')
-}
-
-const onUpdateOpen = (v: boolean) => {
-  if (!v) close()
 }
 </script>

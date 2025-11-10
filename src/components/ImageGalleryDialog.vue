@@ -1,17 +1,11 @@
 <template>
-  <DialogRoot :open="visible && images.length > 0" @update:open="onUpdateOpen">
-    <DialogPortal>
-      <DialogOverlay class="fixed inset-0 bg-black/90 z-50" />
-      <DialogContent
-        :class="[
-          'fixed inset-0 z-50 flex items-center justify-center',
-        ]"
-        @click.self="close"
-        @wheel.prevent="handleWheel"
-      >
-      <DialogTitle class="sr-only">图片预览</DialogTitle>
-      <DialogDescription class="sr-only">查看、下载、切换与缩放图片</DialogDescription>
-
+  <Teleport to="body">
+    <div
+      v-if="visible && images.length > 0"
+      class="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50"
+      @click.self="close"
+      @wheel.prevent="handleWheel"
+    >
       <!-- 关闭按钮（始终可点击，即使在 loading 时） -->
       <button
         @click.stop="close"
@@ -109,9 +103,8 @@
       >
         {{ currentIndex + 1 }} / {{ images.length }}
       </div>
-      </DialogContent>
-    </DialogPortal>
-  </DialogRoot>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -120,7 +113,6 @@ import { XMarkIcon, ChevronLeftIcon, ChevronRightIcon, ArrowDownTrayIcon, PhotoI
 import { getImageUrl } from '../utils/imageUtils'
 import { usePrivacyStore } from '../stores/privacy'
 import { storeToRefs } from 'pinia'
-import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription } from 'radix-vue'
 
 interface Props {
   images: string[]  // 图片 URL 数组
@@ -393,23 +385,25 @@ const close = () => {
   emit('close')
 }
 
-// Radix Dialog 受控：对话框关闭时同步触发 close
-const onUpdateOpen = (v: boolean) => {
-  if (!v) close()
-}
-
-// 监听对话框可见性，打开时同步初始索引
+// 监听 visible 变化
 watch(() => props.visible, async (newVisible) => {
   if (newVisible) {
     currentIndex.value = props.initialIndex
     resetTransform()
     imageLoading.value = true
     await loadImageUrls()
-    // 如果图片已在浏览器缓存，立即显示
+    // 检查图片是否已在浏览器缓存中（已加载过的图片通常会立即完成）
     await nextTick()
     if (imageElement.value?.complete && imageElement.value.naturalWidth > 0) {
+      // 图片已在浏览器缓存中，立即显示
       imageLoading.value = false
     }
+    // 如果不在缓存中，等待 @load 事件触发
+  } else {
+    // 关闭时重置状态（但保留 imageUrls 以便下次快速打开）
+    resetTransform()
+    imageLoading.value = true
+    // 不清空 imageUrls，保留缓存以便下次快速打开
   }
 })
 

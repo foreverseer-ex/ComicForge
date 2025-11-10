@@ -10,26 +10,7 @@ from sqlalchemy import Column, JSON
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlmodel import SQLModel, Field
 from typing import Optional
-from .draw import DrawArgs
-
-
-class ActorExample(BaseModel):
-    """Actor 的示例图（立绘）。
-    
-    每个示例包含：
-    - title: 示例标题/名称
-    - desc: 示例说明
-    - draw_args: 生成参数
-    - image_path: 图片相对路径（相对于项目根目录），None 表示正在生成中
-    """
-    title: str = Field(description="示例标题")
-    desc: str = Field(description="示例说明")
-    draw_args: DrawArgs = Field(description="生成参数")
-    image_path: str | None = Field(default=None, description="图片相对路径，None 表示正在生成中")
-    
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True
-    )
+from .draw import DrawArgs, Example
 
 
 class Actor(SQLModel, table=True):
@@ -61,4 +42,4 @@ class Actor(SQLModel, table=True):
                                  description="标签字典，键建议使用 constants.actor 中定义的标签")
     examples: list[dict] = Field(default_factory=list,
                                  sa_column=Column(MutableList.as_mutable(JSON())),
-                                 description="示例图列表（序列化的 ActorExample）")
+                                 description="示例图列表（序列化的 Example）")

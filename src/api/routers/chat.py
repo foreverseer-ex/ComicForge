@@ -17,6 +17,7 @@ from loguru import logger
 
 from api.schemas.chat import ChatIteration
 from api.services.llm import get_current_llm_service
+from api.services.db.base import normalize_project_id
 from api.services.db import HistoryService
 
 router = APIRouter(

@@ -9,10 +9,8 @@ from typing import Optional
 import httpx
 from loguru import logger
 
-from api.schemas import ModelMeta, Example, DrawArgs
-from api.services.model_meta.db import model_meta_db_service
-
-
+from api.schemas.model_meta import ModelMeta
+from api.schemas.draw import Example, DrawArgs
 from api.services.model_meta.base import AbstractModelMetaService
 from api.settings import app_settings
 from api.constants.civitai import CIVITAI_BASE_URL
@@ -79,25 +77,28 @@ class CivitaiModelMetaService(AbstractModelMetaService):
                 meta={}
             metadata = image_detail.get("metadata", {})
             
-            # 注意：Example.args 期望的是 dict，而不是 DrawArgs 对象
-            # 因此将 DrawArgs 转为字典以避免 pydantic 校验错误
-            args_dict = DrawArgs(
-                width=metadata.get("width", 0),
-                height=metadata.get("height", 0),
-                seed=meta.get("seed", -1),
-                model=meta.get("Model", ""),
-                steps=meta.get("steps", 0),
-                prompt=meta.get("prompt", ""),
-                sampler=meta.get("sampler", ""),
-                cfg_scale=meta.get("cfgScale", 0),
-                negative_prompt=meta.get("negativePrompt", ""),
-                clip_skip=meta.get("clipSkip"),
-            ).model_dump()
-
+            # 从 URL 中提取文件名
+            image_url = image_detail.get("url", "")
+            filename = Path(httpx.URL(image_url).path.split('/')[-1]).name if image_url else "unknown.png"
+            
             examples.append(
                 Example(
-                    url=image_detail.get("url", ""),
-                    args=args_dict,
+                    title=None,
+                    desc=None,
+                    filename=filename,
+                    extra={"url": image_url},
+                    draw_args=DrawArgs(
+                        width=metadata.get("width", 0),
+                        height=metadata.get("height", 0),
+                        seed=meta.get("seed", -1),
+                        model=meta.get("Model", ""),
+                        steps=meta.get("steps", 0),
+                        prompt=meta.get("prompt", ""),
+                        sampler=meta.get("sampler", ""),
+                        cfg_scale=meta.get("cfgScale", 0),
+                        negative_prompt=meta.get("negativePrompt", ""),
+                        clip_skip=meta.get("clipSkip"),
+                    ),
                 )
             )
         
@@ -139,8 +140,8 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         :param version_name: 模型版本名称（如 "waiIllustriousSDXL-v150"）
         :return: 模型元数据，未找到返回 None
         """
-        from api.services.model_meta import model_meta_db_service
-        return model_meta_db_service.get_by_version_name(version_name)
+        from api.services.model_meta import local_model_meta_service
+        return local_model_meta_service.get_by_version_name(version_name)
     
     def get_by_name(self, name: str) -> Optional[ModelMeta]:
         """
@@ -255,23 +256,23 @@ class CivitaiModelMetaService(AbstractModelMetaService):
             logger.exception(f"从 Civitai 获取模型元数据失败: {e}")
             return None
     
-    async def save(self, model_meta: ModelMeta, parallel_download: bool = False, download_examples: bool = True) -> tuple[ModelMeta, int, int]:
+    async def save(self, model_meta: ModelMeta, download_images: bool = True, parallel_download: bool = False) -> tuple[ModelMeta, int, int]:
         """
         保存模型元数据（委托给本地服务）。
         
-        Civitai 服务不直接保存元数据，而是委托给 LocalModelMetaService。
-        这样保持了职责分离：
-        - Civitai 负责从远程获取数据
-        - Local 负责本地存储管理
+        Args:
+            model_meta: 要保存的模型元数据
+            download_images: 是否下载示例图片（默认 True）
+            parallel_download: 是否并行下载示例图片（默认串行下载）
         
-        :param model_meta: 模型元数据（必须包含 type 字段）
-        :param parallel_download: 是否并行下载示例图片，默认 False（串行下载）
-        :return: (保存后的模型元数据, 失败的图片数量, 总图片数量)
+        Returns:
+            tuple[ModelMeta, int, int]: (保存后的元数据, 失败图片数, 总图片数)
         """
-        # 委托 DB 服务保存（下载示例图并写入数据库）
-        from api.services.model_meta import model_meta_db_service
-        logger.debug(f"Civitai 服务委托 DB 服务保存: {model_meta.name} (parallel_download={parallel_download})")
-        return await model_meta_db_service.save(model_meta, parallel_download=parallel_download, download_examples=download_examples)
+        # 从本地服务导入（local_model_meta_service 会处理数据库存储）
+        from api.services.model_meta.local import local_model_meta_service
+        
+        logger.debug(f"Civitai 服务委托本地服务保存: {model_meta.name} (download_images={download_images}, parallel_download={parallel_download})")
+        return await local_model_meta_service.save(model_meta, download_images=download_images, parallel_download=parallel_download)
     
     async def sync_from_sd_forge(self):
         """
@@ -310,11 +311,14 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         :param safetensor_file: safetensors 文件路径
         :param stats: 统计信息字典
         """
+        # 延迟导入，避免循环依赖
+        from api.services.model_meta.local import local_model_meta_service
+        
         try:
             logger.info(f"处理模型: {safetensor_file.name}")
             
-            # 检查 DB 是否已有元数据
-            existing_meta = model_meta_db_service.get_by_name(safetensor_file.stem)
+            # 检查本地是否已有元数据
+            existing_meta = local_model_meta_service.get_by_name(safetensor_file.stem)
             if existing_meta is not None:
                 logger.debug(f"跳过（已有元数据）: {safetensor_file.name}")
                 stats["skipped"] += 1
@@ -335,7 +339,7 @@ class CivitaiModelMetaService(AbstractModelMetaService):
             
             # 保存到本地
             logger.debug(f"保存元数据: {model_meta.name}")
-            await model_meta_db_service.save(model_meta)
+            await self.save(model_meta)
             
             stats["success"] += 1
             logger.success(f"同步成功: {safetensor_file.name} -> {model_meta.name}")

@@ -5,12 +5,13 @@
 """
 import asyncio
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from loguru import logger
+from pydantic import BaseModel
 import httpx
 
-from api.services.model_meta import civitai_model_meta_service, model_meta_db_service
+from api.services.model_meta import civitai_model_meta_service, local_model_meta_service
 from api.utils.civitai import AIR
 from api.settings import app_settings
 
@@ -21,14 +22,44 @@ router = APIRouter(
 )
 
 
+# ==================== 请求/响应模型 ====================
+
+class ImportModelRequest(BaseModel):
+    """导入单个模型的请求"""
+    air: str
+    download_images: bool = True  # 是否下载示例图片，默认 True
+    parallel_download: bool = False  # 是否并行下载示例图片，默认 False（串行下载）
+
+
+class ImportModelResponse(BaseModel):
+    """导入单个模型的响应"""
+    success: bool
+    air: str
+    model_name: Optional[str] = None
+    error: Optional[str] = None
+    skipped: bool = False  # 是否跳过（已存在）
+    failed_image_count: int = 0  # 下载失败的图片数量
+    total_image_count: int = 0  # 总图片数量
+
+
+class BatchImportModelRequest(BaseModel):
+    """批量导入模型的请求"""
+    airs: List[str]
+    download_images: bool = True  # 是否下载示例图片，默认 True
+
+
+class BatchImportModelResponse(BaseModel):
+    """批量导入模型的响应"""
+    total: int
+    success_count: int
+    failed_count: int
+    results: List[ImportModelResponse]
+
+
 # ==================== 导入端点 ====================
 
-@router.post("/import", summary="导入单个模型")
-async def import_model(
-    air: str = Body(...),
-    parallel_download: bool = Body(False),
-    download_examples: bool = Body(True),
-) -> Dict[str, Any]:
+@router.post("/import", response_model=ImportModelResponse, summary="导入单个模型")
+async def import_model(request: ImportModelRequest) -> ImportModelResponse:
     """
     从 Civitai 导入单个模型元数据。
     
@@ -49,65 +80,91 @@ async def import_model(
     """
     try:
         # 解析 AIR 标识符
-        air_obj = AIR.parse(air)
-        if not air_obj:
-            return {"success": False, "air": air, "error": f"无效的 AIR 标识符: {air}"}
+        air = AIR.parse(request.air)
+        if not air:
+            return ImportModelResponse(
+                success=False,
+                air=request.air,
+                error=f"无效的 AIR 标识符: {request.air}"
+            )
         
-        logger.info(f"开始导入模型: {air} (version_id={air_obj.version_id})")
+        logger.info(f"开始导入模型: {request.air} (version_id={air.version_id})")
         
         # 检查模型是否已存在（通过 version_id）
-        existing_meta = model_meta_db_service.get_by_id(air_obj.version_id)
+        existing_meta = local_model_meta_service.get_by_id(air.version_id)
         if existing_meta is not None:
-            logger.info(f"模型已存在，跳过导入: {existing_meta.name} ({air})")
-            return {"success": True, "air": air, "model_name": existing_meta.name, "skipped": True}
+            logger.info(f"模型已存在，跳过导入: {existing_meta.name} ({request.air})")
+            return ImportModelResponse(
+                success=True,
+                air=request.air,
+                model_name=existing_meta.name,
+                skipped=True
+            )
         
         # 从 Civitai 获取模型元数据
         try:
-            model_meta = await civitai_model_meta_service.get_by_id(air_obj.version_id)
+            model_meta = await civitai_model_meta_service.get_by_id(air.version_id)
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.TimeoutException, httpx.ReadTimeout) as e:
             # 网络连接错误或超时
             error_msg = f"网络连接失败或请求超时，无法连接到 Civitai API。请检查网络连接或稍后重试。"
-            logger.error(f"导入模型失败 ({air}): {error_msg} - {e}")
-            return {"success": False, "air": air, "error": error_msg}
+            logger.error(f"导入模型失败 ({request.air}): {error_msg} - {e}")
+            return ImportModelResponse(
+                success=False,
+                air=request.air,
+                error=error_msg
+            )
         
         if not model_meta:
-            return {"success": False, "air": air, "error": f"未找到版本 ID: {air_obj.version_id}"}
+            return ImportModelResponse(
+                success=False,
+                air=request.air,
+                error=f"未找到版本 ID: {air.version_id}"
+            )
         
         # 保存到本地（包括下载示例图片，支持并行或串行下载）
-        saved_meta, failed_image_count, total_image_count = await model_meta_db_service.save(
-            model_meta,
-            parallel_download=parallel_download,
-            download_examples=download_examples,
+        saved_meta, failed_image_count, total_image_count = await civitai_model_meta_service.save(
+            model_meta, 
+            download_images=request.download_images,
+            parallel_download=request.parallel_download
         )
         if not saved_meta:
-            return {"success": False, "air": air, "error": "保存模型元数据失败"}
+            return ImportModelResponse(
+                success=False,
+                air=request.air,
+                error="保存模型元数据失败"
+            )
         
-        # DB 版无需刷新内存缓存
+        # 刷新本地缓存（在线程池中执行，避免阻塞）
+        await asyncio.to_thread(local_model_meta_service.flush)
         
-        logger.success(f"导入成功: {saved_meta.name} ({air})")
+        logger.success(f"导入成功: {saved_meta.name} ({request.air})")
         
-        result: Dict[str, Any] = {
-            "success": True,
-            "air": air,
-            "model_name": saved_meta.name,
-            "failed_image_count": failed_image_count,
-            "total_image_count": total_image_count,
-        }
+        # 构建响应，如果有图片下载失败，添加警告信息
+        response = ImportModelResponse(
+            success=True,
+            air=request.air,
+            model_name=saved_meta.name,
+            failed_image_count=failed_image_count,
+            total_image_count=total_image_count
+        )
+        
+        # 如果有图片下载失败，在 error 字段中添加警告信息（但不影响 success 状态）
         if failed_image_count > 0:
-            result["error"] = f"部分图片下载失败：{failed_image_count}/{total_image_count} 张图片未能下载"
-        return result
+            response.error = f"部分图片下载失败：{failed_image_count}/{total_image_count} 张图片未能下载"
+        
+        return response
         
     except Exception as e:
-        logger.exception(f"导入模型失败 ({air}): {e}")
-        return {"success": False, "air": air, "error": str(e)}
+        logger.exception(f"导入模型失败 ({request.air}): {e}")
+        return ImportModelResponse(
+            success=False,
+            air=request.air,
+            error=str(e)
+        )
 
 
-@router.post("/batch-import", summary="批量导入模型（测试用）")
-async def batch_import_models(
-    airs: List[str] = Body(...),
-    download_examples: bool = Body(True),
-    parallel_download: bool = Body(False),
-) -> Dict[str, Any]:
+@router.post("/batch-import", response_model=BatchImportModelResponse, summary="批量导入模型（测试用）")
+async def batch_import_models(request: BatchImportModelRequest) -> BatchImportModelResponse:
     """
     批量导入多个模型元数据。
     
@@ -124,73 +181,48 @@ async def batch_import_models(
     - 使用信号量控制并发
     - 等待所有导入完成后返回
     """
-    total = len(airs)
+    total = len(request.airs)
     success_count = 0
     failed_count = 0
-    results: List[Dict[str, Any]] = []
+    results: List[ImportModelResponse] = []
     
     # 创建信号量以控制并发数
     max_concurrency = app_settings.civitai.parallel_workers
     semaphore = asyncio.Semaphore(max_concurrency)
     
-    async def import_with_semaphore(air_s: str) -> Dict[str, Any]:
+    async def import_with_semaphore(air: str) -> ImportModelResponse:
         """使用信号量控制的导入函数"""
         async with semaphore:
-            return await import_model(air=air_s, download_examples=download_examples, parallel_download=parallel_download)
+            return await import_model(ImportModelRequest(
+                air=air,
+                download_images=request.download_images
+            ))
     
     logger.info(f"开始批量导入 {total} 个模型（最大并发数: {max_concurrency}）")
     
     try:
         # 并发导入所有模型（遵循最大并发数）
-        results = await asyncio.gather(*[import_with_semaphore(air) for air in airs])
+        results = await asyncio.gather(*[import_with_semaphore(air) for air in request.airs])
         
         # 统计结果
         for result in results:
-            if bool(result.get("success")):
+            if result.success:
                 success_count += 1
             else:
                 failed_count += 1
         
         logger.success(f"批量导入完成: 成功 {success_count}, 失败 {failed_count}, 总计 {total}")
         
-        return {"total": total, "success_count": success_count, "failed_count": failed_count, "results": results}
+        return BatchImportModelResponse(
+            total=total,
+            success_count=success_count,
+            failed_count=failed_count,
+            results=results
+        )
+        
     except Exception as e:
         logger.exception(f"批量导入失败: {e}")
         raise HTTPException(status_code=500, detail=f"批量导入失败: {str(e)}")
-
-
-# 仅下载示例图（不改变其他字段）
-@router.post("/{version_id}/download-examples", summary="为指定模型下载示例图")
-async def download_examples_for_model(version_id: int, parallel_download: bool = Body(False)) -> Dict[str, Any]:
-    """
-    为指定版本 ID 的模型下载（或重新下载）示例图片，并刷新本地元数据。
-    如果之前未下载过示例图，该操作会从 Civitai 获取最新元数据的图片列表，仅下载图片并写回本地。
-    """
-    try:
-        # 从 Civitai 获取最新元数据（确保有完整的示例图 URL 列表）
-        model_meta = await civitai_model_meta_service.get_by_id(version_id)
-        if not model_meta:
-            raise HTTPException(status_code=404, detail=f"未找到版本 ID: {version_id}")
-
-        # 保存到本地：启用下载示例图
-        saved_meta, failed_image_count, total_image_count = await civitai_model_meta_service.save(
-            model_meta,
-            parallel_download=parallel_download,
-            download_examples=True,
-        )
-
-        return {
-            "success": True,
-            "version_id": version_id,
-            "model_name": saved_meta.name,
-            "failed_image_count": failed_image_count,
-            "total_image_count": total_image_count,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"下载示例图失败 (version_id={version_id}): {e}")
-        raise HTTPException(status_code=500, detail=f"下载示例图失败: {str(e)}")
 
 
 # ==================== 模型列表 API ====================
@@ -212,7 +244,7 @@ async def get_loras() -> List[Dict[str, Any]]:
     """
     try:
         # 获取本地 LoRA 元数据
-        lora_metas = model_meta_db_service.lora_list
+        lora_metas = local_model_meta_service.lora_list
         
         # 构建返回列表
         result = []
@@ -246,7 +278,7 @@ async def get_checkpoints() -> List[Dict[str, Any]]:
     """
     try:
         # 获取本地 Checkpoint 元数据
-        checkpoint_metas = model_meta_db_service.sd_list
+        checkpoint_metas = local_model_meta_service.sd_list
         
         # 构建返回列表
         result = []
@@ -303,7 +335,7 @@ async def get_model_image(
         # 优先使用 version_id + filename 方式（推荐）
         if version_id is not None and filename:
             # 从本地缓存中查找模型
-            model_meta = model_meta_db_service.get_by_id(version_id)
+            model_meta = local_model_meta_service.get_by_id(version_id)
             if not model_meta:
                 raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
             
@@ -381,17 +413,20 @@ async def delete_model(version_id: int) -> dict:
         404: 模型元数据不存在
     """
     try:
-        # 从数据库中查找模型
-        model_meta = model_meta_db_service.get_by_id(version_id)
+        # 从本地缓存中查找模型
+        model_meta = local_model_meta_service.get_by_id(version_id)
         if not model_meta:
             raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
         
         # 删除模型元数据（异步删除，不会阻塞）
-        success = await model_meta_db_service.delete(version_id)
+        success = await local_model_meta_service.delete(model_meta)
         if not success:
             raise HTTPException(status_code=500, detail="删除模型元数据失败")
         
-        logger.success(f"删除模型元数据成功: {model_meta.name} (version_id={version_id})")
+        # 刷新本地缓存
+        await asyncio.to_thread(local_model_meta_service.flush)
+        
+        logger.info(f"删除模型元数据成功: {model_meta.name} (version_id={version_id})")
         return {
             "version_id": version_id,
             "model_name": model_meta.name
@@ -424,7 +459,7 @@ async def reset_model_meta(version_id: int, parallel_download: bool = False) -> 
     """
     try:
         # 检查模型是否存在
-        existing_meta = model_meta_db_service.get_by_id(version_id)
+        existing_meta = local_model_meta_service.get_by_id(version_id)
         if not existing_meta:
             raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
         
@@ -434,7 +469,7 @@ async def reset_model_meta(version_id: int, parallel_download: bool = False) -> 
         logger.info(f"开始重置模型元数据: {existing_meta.name} (version_id={version_id})")
         
         # 删除现有模型元数据
-        success = await model_meta_db_service.delete(version_id)
+        success = await local_model_meta_service.delete(existing_meta)
         if not success:
             logger.warning(f"删除现有模型元数据失败，继续尝试重新下载 (version_id={version_id})")
         
@@ -454,13 +489,15 @@ async def reset_model_meta(version_id: int, parallel_download: bool = False) -> 
             raise HTTPException(status_code=404, detail=f"未找到版本 ID: {version_id}")
         
         # 保存到本地（包括重新下载示例图片）
-        saved_meta, failed_image_count, total_image_count = await model_meta_db_service.save(
-            model_meta,
-            parallel_download=parallel_download,
-            download_examples=True,
+        saved_meta, failed_image_count, total_image_count = await civitai_model_meta_service.save(
+            model_meta, 
+            parallel_download=parallel_download
         )
         if not saved_meta:
             raise HTTPException(status_code=500, detail="保存模型元数据失败")
+        
+        # 刷新本地缓存
+        await asyncio.to_thread(local_model_meta_service.flush)
         
         logger.success(f"重置成功: {saved_meta.name} (version_id={version_id})")
         
@@ -508,7 +545,7 @@ async def set_model_preference(version_id: int, preference: str) -> Dict[str, An
                 detail=f"无效的偏好值: {preference}，必须是 'liked', 'neutral' 或 'disliked'"
             )
         
-        meta = model_meta_db_service.set_preference(version_id, preference)
+        meta = await local_model_meta_service.set_preference(version_id, preference)
         if not meta:
             raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
         

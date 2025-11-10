@@ -3,6 +3,8 @@
 包含应用的各项配置设置类。
 """
 import json
+import secrets
+import string
 from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel
@@ -12,6 +14,30 @@ from .civitai_setting import CivitaiSettings
 from .sd_forge_setting import SdForgeSettings
 from .llm_setting import LlmSettings
 from .draw_setting import DrawSettings
+from .admin_setting import AdminSettings
+from .ratelimit_setting import RateLimitSettings
+
+
+def generate_strong_password(length: int = 32) -> str:
+    """生成强密码。
+    
+    :param length: 密码长度，默认 32 位
+    :return: 包含字母、数字、符号的随机密码
+    """
+    # 定义字符集：大小写字母、数字、符号
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    # 确保密码包含至少一个大写字母、小写字母、数字和符号
+    password = [
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.digits),
+        secrets.choice(string.punctuation),
+    ]
+    # 填充剩余长度
+    password += [secrets.choice(alphabet) for _ in range(length - 4)]
+    # 打乱顺序
+    secrets.SystemRandom().shuffle(password)
+    return ''.join(password)
 
 
 class AppSettings(BaseModel):
@@ -23,10 +49,14 @@ class AppSettings(BaseModel):
     sd_forge: SdForgeSettings = SdForgeSettings()
     llm: LlmSettings = LlmSettings()
     draw: DrawSettings = DrawSettings()
+    admin: AdminSettings = AdminSettings()
+    ratelimit: RateLimitSettings = RateLimitSettings()
     
     @classmethod
     def load(cls, config_path: Optional[Path] = None) -> "AppSettings":
         """从配置文件加载配置。
+        
+        如果配置文件不存在，会创建默认配置并生成强密码。
         
         :param config_path: 配置文件路径，默认为项目根目录下的 config.json
         :return: AppSettings 实例
@@ -44,8 +74,15 @@ class AppSettings(BaseModel):
             config_path = project_root / "config.json"
         
         if not config_path.exists():
-            logger.warning(f"配置文件不存在: {config_path}，使用默认配置")
-            return cls()
+            logger.warning(f"配置文件不存在: {config_path}，创建默认配置")
+            # 创建默认配置，生成强密码
+            settings = cls()
+            settings.admin.password = generate_strong_password(32)
+            logger.info(f"已生成管理员强密码（32位）")
+            # 保存到文件
+            settings.save(config_path, reason="初始化默认配置")
+            logger.success(f"默认配置已保存: {config_path}")
+            return settings
         
         try:
             with open(config_path, "r", encoding="utf-8") as f:
@@ -107,4 +144,7 @@ __all__ = [
     'SdForgeSettings',
     'LlmSettings',
     'DrawSettings',
+    'AdminSettings',
+    'RateLimitSettings',
+    'generate_strong_password',
 ]

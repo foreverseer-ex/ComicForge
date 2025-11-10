@@ -89,12 +89,13 @@ class ChatMessage(SQLModel, table=True):
                 "建议3",
         ]
         
-        # 例子2，图片建议：如果在任务中，调用了生成图片任务，产生了多个图片，会产生多个图片建议
-        # 选择即表示，接受该建议作为图片
+        # 例子2，协议建议：如果在任务中，产生了某些非文字内容的建议，例如图片建议，可以通过协议的方式加入suggests
+        # 协议建议的格式为[协议名称]:协议参数
+        # 例如，从job绑定角色立绘的协议为[actor_example_job]:{job_id}，那么生成的建议为
         >>> [
-            "job:{job-id1}",
-            "job:{job-id2}",
-            "job:{job-id3}",
+            "[actor_example_job]:{job-id1}",
+            "[actor_example_job]:{job-id2}",
+            "[actor_example_job]:{job-id3}",
             ...
         ]
         """,

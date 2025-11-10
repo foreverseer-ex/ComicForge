@@ -8,14 +8,16 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
 from loguru import logger
+from pydantic import BaseModel
 import asyncio
 
-from api.schemas.actor import Actor, ActorExample
+from api.schemas.actor import Actor
+from api.schemas.draw import Example
 from api.schemas.draw import DrawArgs, Job
 from api.constants.actor import character_tags_description
 from api.services.db import ActorService
+from api.services.db.base import normalize_project_id
 from api.utils.path import project_home, jobs_home
 
 router = APIRouter(
@@ -49,6 +51,7 @@ async def create_actor(
     Returns:
         创建的 Actor ID（actor_id）
     """
+    project_id = normalize_project_id(project_id)
     # 创建 Actor 对象（ID 会自动生成）
     actor = Actor(
         project_id=project_id,
@@ -66,7 +69,7 @@ async def create_actor(
     return {"actor_id": actor.actor_id}
 
 
-@router.get("/all", summary="列出所有Actor")
+@router.get("/all", response_model=List[Actor], summary="列出所有Actor")
 async def get_all_actors(
     project_id: Optional[str] = None,
     limit: int = 100,
@@ -75,19 +78,9 @@ async def get_all_actors(
     """
     列出项目的所有 Actor，支持分页。
     
-    Args:
-        project_id: 项目ID（查询参数，None 表示默认工作空间）
-        limit: 返回数量限制（默认100，最大1000）
-        offset: 偏移量（默认0）
-    
-    Returns:
-        Actor 列表
     """
-    # 获取项目的所有 Actor
-    actors = ActorService.list_by_session(project_id, limit=limit)
-    
-    # 应用偏移量（简单的内存分页）
-    return actors[offset:offset + limit]
+    project_id = normalize_project_id(project_id)
+    return ActorService.list_by_session(project_id, limit=limit, offset=offset)
 
 
 # ==================== 预定义标签查询 ====================
@@ -132,7 +125,7 @@ async def get_all_tag_descriptions() -> Dict[str, str]:
 # ==================== 基于ID的CRUD操作 ====================
 # 注意：ID参数通过路径参数传递，权限验证在服务层进行
 
-@router.get("/{actor_id}", summary="获取Actor信息")
+@router.get("/{actor_id}", response_model=Actor, summary="获取Actor信息")
 async def get_actor(actor_id: str) -> Actor:
     """
     获取 Actor 详细信息。
@@ -153,23 +146,25 @@ async def get_actor(actor_id: str) -> Actor:
     return actor
 
 
-@router.put("/{actor_id}", summary="更新Actor")
+class ActorUpdateRequest(BaseModel):
+    """Actor 更新请求"""
+    name: Optional[str] = None
+    desc: Optional[str] = None
+    color: Optional[str] = None
+    tags: Optional[Dict[str, str]] = None
+
+
+@router.put("/{actor_id}", response_model=Actor, summary="更新Actor")
 async def update_actor(
     actor_id: str,
-    name: Optional[str] = None,
-    desc: Optional[str] = None,
-    color: Optional[str] = None,
-    tags: Optional[Dict[str, str]] = None
+    request: ActorUpdateRequest
 ) -> Actor:
     """
     更新 Actor 信息。
     
     Args:
         actor_id: Actor ID（路径参数）
-        name: 名称
-        desc: 描述
-        color: 卡片颜色
-        tags: 标签字典
+        request: 更新请求体
     
     Returns:
         更新后的 Actor 对象
@@ -184,14 +179,14 @@ async def update_actor(
     
     # 构建更新字典
     update_data = {}
-    if name is not None:
-        update_data["name"] = name
-    if desc is not None:
-        update_data["desc"] = desc
-    if color is not None:
-        update_data["color"] = color
-    if tags is not None:
-        update_data["tags"] = tags
+    if request.name is not None:
+        update_data["name"] = request.name
+    if request.desc is not None:
+        update_data["desc"] = request.desc
+    if request.color is not None:
+        update_data["color"] = request.color
+    if request.tags is not None:
+        update_data["tags"] = request.tags
     
     # 更新 Actor
     updated_actor = ActorService.update(actor_id, **update_data)
@@ -223,13 +218,13 @@ async def remove_actor(actor_id: str) -> dict:
     # 在删除数据库记录前，先删除所有示例图的图片文件
     if actor.examples:
         for example in actor.examples:
-            image_path = example.get('image_path')
-            if image_path:
+            filename = example.get('filename')
+            if filename:
                 try:
-                    # 图片文件路径：projects/{project_id}/actors/{filename}
+                    # 图片文件路径：projects/{project_id}/actors/{actor_name}/{filename}
                     # 如果 project_id 为 None，使用 "default" 作为目录名
                     actual_project_id = actor.project_id if actor.project_id is not None else "default"
-                    image_file_path = project_home / actual_project_id / "actors" / image_path
+                    image_file_path = project_home / actual_project_id / "actors" / actor.name / filename
                     if image_file_path.exists():
                         image_file_path.unlink()
                         logger.info(f"已删除角色示例图文件: {image_file_path}")
@@ -250,7 +245,7 @@ async def remove_actor(actor_id: str) -> dict:
 
 # ==================== 示例图管理 ====================
 
-@router.post("/{actor_id}/example", summary="添加示例图")
+@router.post("/{actor_id}/example", response_model=Actor, summary="添加示例图")
 async def add_example(
     actor_id: str,
     project_id: str,
@@ -323,12 +318,14 @@ async def add_example(
         loras=loras
     )
     
-    # 构建 ActorExample
-    example = ActorExample(
+    # 构建 Example
+    # 文件名需要在调用时提供，这里使用 image_path 作为 filename
+    example = Example(
         title=title,
         desc=desc,
         draw_args=draw_args,
-        image_path=image_path
+        filename=image_path,
+        extra={}
     )
     
     # 添加示例
@@ -340,7 +337,7 @@ async def add_example(
     return updated
 
 
-@router.delete("/{actor_id}/example", summary="删除示例图")
+@router.delete("/{actor_id}/example", response_model=Actor, summary="删除示例图")
 async def remove_example(
     actor_id: str,
     example_index: int,
@@ -382,15 +379,15 @@ async def remove_example(
     # 在删除数据库记录前，先删除图片文件
     # 注意：必须在删除数据库记录之前获取要删除的示例信息
     example = actor.examples[example_index]
-    image_path = example.get('image_path')
+    filename = example.get('filename')
     
     # 如果存在图片文件，删除它
-    if image_path:
+    if filename:
         try:
-            # 图片文件路径：projects/{project_id}/actors/{filename}
+            # 图片文件路径：projects/{project_id}/actors/{actor_name}/{filename}
             # 如果 project_id 为 None，使用 "default" 作为目录名
             actual_project_id = actor.project_id if actor.project_id is not None else "default"
-            image_file_path = project_home / actual_project_id / "actors" / image_path
+            image_file_path = project_home / actual_project_id / "actors" / actor.name / filename
             if image_file_path.exists():
                 image_file_path.unlink()
                 logger.info(f"已删除示例图文件: {image_file_path}")
@@ -409,7 +406,7 @@ async def remove_example(
     return updated
 
 
-@router.post("/{actor_id}/example/swap", summary="交换示例图位置")
+@router.post("/{actor_id}/example/swap", response_model=Actor, summary="交换示例图位置")
 async def swap_examples(
     actor_id: str,
     index1: int,
@@ -461,7 +458,7 @@ async def swap_examples(
     return updated
 
 
-@router.delete("/{actor_id}/examples/clear", summary="清空所有示例图")
+@router.delete("/{actor_id}/examples/clear", response_model=Actor, summary="清空所有示例图")
 async def clear_examples(
     actor_id: str,
     project_id: Optional[str] = None
@@ -490,13 +487,13 @@ async def clear_examples(
     # 在清空数据库记录前，先删除所有示例图的图片文件
     if actor.examples:
         for example in actor.examples:
-            image_path = example.get('image_path')
-            if image_path:
+            filename = example.get('filename')
+            if filename:
                 try:
-                    # 图片文件路径：projects/{project_id}/actors/{filename}
+                    # 图片文件路径：projects/{project_id}/actors/{actor_name}/{filename}
                     # 如果 project_id 为 None，使用 "default" 作为目录名
                     actual_project_id = actor.project_id if actor.project_id is not None else "default"
-                    image_file_path = project_home / actual_project_id / "actors" / image_path
+                    image_file_path = project_home / actual_project_id / "actors" / actor.name / filename
                     if image_file_path.exists():
                         image_file_path.unlink()
                         logger.info(f"已删除示例图文件: {image_file_path}")
@@ -515,7 +512,7 @@ async def clear_examples(
     return updated
 
 
-@router.post("/{actor_id}/examples/batch-remove", summary="批量删除示例图")
+@router.post("/{actor_id}/examples/batch-remove", response_model=Actor, summary="批量删除示例图")
 async def batch_remove_examples(
     actor_id: str,
     example_indices: list[int],
@@ -559,13 +556,13 @@ async def batch_remove_examples(
     # 在删除数据库记录前，先删除所有要删除的示例图的图片文件
     for idx in valid_indices:
         example = actor.examples[idx]
-        image_path = example.get('image_path')
-        if image_path:
+        filename = example.get('filename')
+        if filename:
             try:
-                # 图片文件路径：projects/{project_id}/actors/{filename}
+                # 图片文件路径：projects/{project_id}/actors/{actor_name}/{filename}
                 # 如果 project_id 为 None，使用 "default" 作为目录名
                 actual_project_id = actor.project_id if actor.project_id is not None else "default"
-                image_file_path = project_home / actual_project_id / "actors" / image_path
+                image_file_path = project_home / actual_project_id / "actors" / actor.name / filename
                 if image_file_path.exists():
                     image_file_path.unlink()
                     logger.info(f"已删除示例图文件: {image_file_path}")
@@ -663,10 +660,10 @@ async def _monitor_single_job_and_update_portrait(
                         pass
                     return
                 
-                # 复制图片到 projects/{project_id}/actors/{filename}.png
+                # 复制图片到 projects/{project_id}/actors/{actor_name}/{filename}.png
                 # 如果 project_id 为 None，使用 "default" 作为目录名
                 actual_project_id = project_id if project_id is not None else "default"
-                out_dir: Path = project_home / actual_project_id / "actors"
+                out_dir: Path = project_home / actual_project_id / "actors" / actor.name
                 out_dir.mkdir(parents=True, exist_ok=True)
                 
                 # 获取 job 名称（如果不存在则使用默认值）
@@ -691,12 +688,13 @@ async def _monitor_single_job_and_update_portrait(
                 shutil.copy2(job_image_path, out_path)
                 logger.info(f"已复制任务图像: {job_image_path} -> {out_path}")
                 
-                # 更新对应的 ActorExample
-                example = ActorExample(
+                # 更新对应的 Example
+                example = Example(
                     title=title,
                     desc=desc,
                     draw_args=draw_args,
-                    image_path=filename,  # 只保存文件名
+                    filename=filename,
+                    extra={"job_id": job_id}  # 保存 job_id 到 extra
                 )
                 
                 updated = ActorService.update_example(actor_id, example_index, example)
@@ -739,8 +737,8 @@ async def add_portrait_from_batch(
     
     此函数会：
     1. 校验 Actor 归属
-    2. 立即创建 N 个 placeholder ActorExample（N = batch 中的 job 数量）
-    3. 为每个 job 启动独立的监控任务，当 job 完成时更新对应的 ActorExample
+    2. 立即创建 N 个 placeholder Example（N = batch 中的 job 数量）
+    3. 为每个 job 启动独立的监控任务，当 job 完成时更新对应的 Example
     
     Args:
         actor_id: Actor ID（路径参数）
@@ -758,8 +756,9 @@ async def add_portrait_from_batch(
     
     Note:
         图片文件名格式为：{job名称}_{时间字符串}_{job_id前8位}.png（例如：角色立绘-南云_20231201123453_abc12345.png）
-        会为 batch 中的每个 job 创建独立的监控任务，每个任务负责更新对应的 ActorExample
+        会为 batch 中的每个 job 创建独立的监控任务，每个任务负责更新对应的 Example
     """
+    project_id = normalize_project_id(project_id)
     # 校验 actor 归属
     actor = ActorService.get(actor_id)
     if not actor:
@@ -794,15 +793,18 @@ async def add_portrait_from_batch(
     job_ids = batch_job.job_ids
     job_count = len(job_ids)
     
-    # 立即创建 N 个 ActorExample（image_path 为 None，表示正在生成中）
+    # 立即创建 N 个 Example（使用临时 filename，表示正在生成中）
     # 每个 example 对应一个 job
     example_indices = []
     for i in range(job_count):
-        example = ActorExample(
+        # 使用临时 filename 占位，实际文件将在 job 完成后生成
+        temp_filename = f"generating_{job_ids[i][:8]}.png"
+        example = Example(
             title=title,
             desc=desc,
             draw_args=draw_args,
-            image_path=None  # 正在生成中
+            filename=temp_filename,
+            extra={"batch_id": batch_id, "job_id": job_ids[i]}
         )
         
         # 添加到 Actor
@@ -859,7 +861,7 @@ async def add_portrait_from_job(
     1. 校验 Actor 归属
     2. 检查 job 状态
     3. 如果 job 已完成（图片已存在），直接添加立绘
-    4. 如果 job 未完成，创建 placeholder ActorExample 并启动监控任务
+    4. 如果 job 未完成，创建 placeholder Example 并启动监控任务
     
     Args:
         actor_id: Actor ID（路径参数）
@@ -876,6 +878,7 @@ async def add_portrait_from_job(
         403: Actor 不属于该项目
         400: job 没有保存绘图参数
     """
+    project_id = normalize_project_id(project_id)
     # 校验 actor 归属
     actor = ActorService.get(actor_id)
     if not actor:
@@ -909,10 +912,10 @@ async def add_portrait_from_job(
         from datetime import datetime
         import shutil
         
-        # 复制图片到 projects/{project_id}/actors/{filename}.png
+        # 复制图片到 projects/{project_id}/actors/{actor_name}/{filename}.png
         # 如果 project_id 为 None，使用 "default" 作为目录名
         actual_project_id = project_id if project_id is not None else "default"
-        out_dir: Path = project_home / actual_project_id / "actors"
+        out_dir: Path = project_home / actual_project_id / "actors" / actor.name
         out_dir.mkdir(parents=True, exist_ok=True)
         
         # 获取 job 名称（如果不存在则使用默认值）
@@ -937,12 +940,13 @@ async def add_portrait_from_job(
         shutil.copy2(job_image_path, out_path)
         logger.info(f"已复制任务图像: {job_image_path} -> {out_path}")
         
-        # 创建 ActorExample
-        example = ActorExample(
+        # 创建 Example
+        example = Example(
             title=title,
             desc=desc,
             draw_args=draw_args,
-            image_path=filename,  # 只保存文件名
+            filename=filename,
+            extra={"job_id": job_id}
         )
         
         # 添加到 Actor
@@ -960,11 +964,13 @@ async def add_portrait_from_job(
         }
     else:
         # Job 未完成，创建 placeholder 并启动监控任务
-        example = ActorExample(
+        temp_filename = f"generating_{job_id[:8]}.png"
+        example = Example(
             title=title,
             desc=desc,
             draw_args=draw_args,
-            image_path=None  # 正在生成中
+            filename=temp_filename,
+            extra={"job_id": job_id}
         )
         
         # 添加到 Actor
@@ -998,6 +1004,44 @@ async def add_portrait_from_job(
         }
 
 
+async def add_portrait_from_job_tool(
+    actor_id: str,
+    job_id: str,
+    title: str,
+    desc: str = "",
+    project_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    从已存在的 job_id 添加立绘到 Actor（工具函数版本）。
+    
+    这是 add_portrait_from_job 的工具函数包装版本，用于 LLM 工具调用。
+    
+    此函数会：
+    1. 校验 Actor 归属
+    2. 检查 job 状态
+    3. 如果 job 已完成，直接添加立绘
+    4. 如果 job 未完成，创建 placeholder 并启动监控任务
+    
+    Args:
+        actor_id: Actor ID
+        job_id: 绘图任务 ID
+        title: 立绘标题
+        desc: 立绘说明/描述（可选，默认为空字符串）
+        project_id: 项目ID（可选，None 表示默认工作空间，用于权限校验）
+    
+    Returns:
+        包含 job_id、actor_id、title 的字典
+    """
+    # 直接调用原始函数
+    return await add_portrait_from_job(
+        actor_id=actor_id,
+        job_id=job_id,
+        title=title,
+        desc=desc,
+        project_id=project_id
+    )
+
+
 async def add_portrait_from_batch_tool(
     actor_id: str,
     batch_id: str,
@@ -1012,8 +1056,8 @@ async def add_portrait_from_batch_tool(
     
     此函数会：
     1. 校验 Actor 归属
-    2. 立即创建 N 个 placeholder ActorExample（N = batch 中的 job 数量）
-    3. 为每个 job 启动独立的监控任务，当 job 完成时更新对应的 ActorExample
+    2. 立即创建 N 个 placeholder Example（N = batch 中的 job 数量）
+    3. 为每个 job 启动独立的监控任务，当 job 完成时更新对应的 Example
     
     Args:
         actor_id: Actor ID
@@ -1025,6 +1069,7 @@ async def add_portrait_from_batch_tool(
     Returns:
         包含 batch_id、actor_id、title 的字典
     """
+    project_id = normalize_project_id(project_id)
     # 校验 actor 归属
     actor = ActorService.get(actor_id)
     if not actor:
@@ -1106,35 +1151,3 @@ async def add_portrait_from_batch_tool(
         "job_count": job_count,
         "message": f"已启动 {job_count} 个监控任务，立绘将在 job 完成后自动添加到角色 {actor.name}"
     }
-
-# ==================== 示例图文件访问 ====================
-
-@router.get("/{actor_id}/image", response_class=FileResponse, summary="获取角色示例图")
-async def get_example_image(actor_id: str, example_index: int):
-    """获取角色示例图文件。"""
-    actor = ActorService.get(actor_id)
-    if not actor:
-        raise HTTPException(status_code=404, detail=f"Actor 不存在: {actor_id}")
-    
-    if example_index < 0 or example_index >= len(actor.examples):
-        raise HTTPException(status_code=404, detail=f"示例图索引越界: {example_index}")
-    
-    example_dict = actor.examples[example_index]
-    example = ActorExample(**example_dict)
-    
-    # 如果 image_path 为 None，说明正在生成中
-    if example.image_path is None:
-        raise HTTPException(status_code=404, detail="示例图正在生成中")
-    
-    # image_path 只保存文件名，实际文件保存在 projects/{project_id}/actors/{filename}
-    actual_project_id = actor.project_id if actor.project_id is not None else "default"
-    image_path = project_home / actual_project_id / "actors" / example.image_path
-    
-    if not image_path.exists():
-        raise HTTPException(status_code=404, detail=f"示例图文件不存在: {example.image_path}")
-    
-    return FileResponse(
-        path=str(image_path),
-        media_type="image/png",
-        filename=image_path.name
-    )

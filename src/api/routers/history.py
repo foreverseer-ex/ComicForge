@@ -7,8 +7,9 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
-from api.schemas import ChatMessage
+from api.schemas.chat import ChatMessage
 from api.services.db import HistoryService
+from api.services.db.base import normalize_project_id
 
 router = APIRouter(
     prefix="/history",
@@ -44,6 +45,7 @@ def create_chat_message(
     Returns:
         创建的消息ID（message_id）
     """
+    project_id = normalize_project_id(project_id)
     if index < 0:
         index = HistoryService.count(project_id) + index + 1
     if data is None:
@@ -66,7 +68,7 @@ def create_chat_message(
 
 # ==================== 查询操作（固定路径必须放在动态路径之前） ====================
 
-@router.get("/by_index", summary="根据索引获取聊天消息")
+@router.get("/by_index", response_model=ChatMessage, summary="根据索引获取聊天消息")
 def get_chat_message_by_index(
     project_id: Optional[str] = None,
     index: int = 0
@@ -84,6 +86,7 @@ def get_chat_message_by_index(
     Raises:
         404: 消息不存在
     """
+    project_id = normalize_project_id(project_id)
     # 处理负数索引（从末尾倒数）
     if index < 0:
         count = HistoryService.count(project_id)
@@ -99,7 +102,7 @@ def get_chat_message_by_index(
     return message
 
 
-@router.get("/all", summary="列出项目的所有消息")
+@router.get("/all", response_model=List[ChatMessage], summary="列出项目的所有消息")
 def get_all_chat_messages(
     project_id: Optional[str] = None,
     limit: Optional[int] = None,
@@ -116,8 +119,9 @@ def get_all_chat_messages(
     Returns:
         聊天消息列表（按索引排序）
     """
+    project_id = normalize_project_id(project_id)
     messages = HistoryService.get_all(project_id)
-    messages_list = messages
+    messages_list = list(messages)
     
     # 应用分页
     if limit is not None:
@@ -138,6 +142,7 @@ def list_chat_message_ids(
     Returns:
         消息ID列表
     """
+    project_id = normalize_project_id(project_id)
     message_ids = HistoryService.list_ids(project_id)
     return message_ids
 
@@ -155,6 +160,7 @@ def get_chat_message_count(
     Returns:
         消息数量
     """
+    project_id = normalize_project_id(project_id)
     count = HistoryService.count(project_id)
     return count
 
@@ -162,7 +168,7 @@ def get_chat_message_count(
 # ==================== 基于ID的CRUD操作 ====================
 # 注意：ID参数通过路径参数传递，权限验证在服务层进行
 
-@router.get("/{message_id}", summary="获取聊天消息")
+@router.get("/{message_id}", response_model=ChatMessage, summary="获取聊天消息")
 def get_chat_message(message_id: str) -> ChatMessage:
     """
     根据消息ID获取聊天消息。
@@ -180,7 +186,7 @@ def get_chat_message(message_id: str) -> ChatMessage:
     if not message:
         raise HTTPException(status_code=404, detail=f"聊天消息不存在: {message_id}")
     
-    return message.model_dump()
+    return message
 
 
 # ==================== 更新和删除操作 ====================
@@ -203,6 +209,7 @@ def clear_chat_messages(
         - 此操作不可恢复
         - 会删除该项目的所有聊天消息
     """
+    project_id = normalize_project_id(project_id)
     count = HistoryService.count(project_id)
     HistoryService.clear(project_id)
     logger.info(f"清空项目的所有消息: project={project_id}, 删除了 {count} 条")
@@ -231,6 +238,7 @@ def remove_chat_message_by_index(
     Raises:
         404: 消息不存在
     """
+    project_id = normalize_project_id(project_id)
     # 处理负数索引（从末尾倒数）
     actual_index = index
     if index < 0:
@@ -256,7 +264,7 @@ def remove_chat_message_by_index(
     }
 
 
-@router.put("/{message_id}", summary="更新聊天消息")
+@router.put("/{message_id}", response_model=ChatMessage, summary="更新聊天消息")
 def update_chat_message(
     message_id: str,
     status: Optional[str] = None,
@@ -318,17 +326,26 @@ def remove_chat_message(message_id: str) -> dict:
         message_id: 消息ID（路径参数）
     
     Returns:
-        删除的消息ID
-    
-    Raises:
-        404: 消息不存在
+        删除结果
     """
     # 检查消息是否存在
     message = HistoryService.get(message_id)
     if not message:
-        raise HTTPException(status_code=404, detail=f"聊天消息不存在: {message_id}")
+        # 消息不存在，但返回成功而不是404错误
+        # 这可能是临时项目已被清理的情况
+        logger.debug(f"尝试删除不存在的聊天消息: {message_id}")
+        return {
+            "message_id": message_id,
+            "message": "消息不存在或已被删除",
+            "deleted": False
+        }
     
     # 删除消息
     HistoryService.remove(message_id)
     logger.info(f"删除聊天消息: {message_id} (project: {message.project_id})")
-    return {"message_id": message_id}
+    return {
+        "message_id": message_id,
+        "message": "消息删除成功",
+        "deleted": True,
+        "project_id": message.project_id
+    }

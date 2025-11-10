@@ -18,17 +18,50 @@ class AbstractDrawService(ABC):
     """
     
     @abstractmethod
-    def draw(self, args: DrawArgs, batch_size: int = 1, name: str | None = None, desc: str | None = None) -> str:
+    def draw(self, args: DrawArgs, name: str | None = None, desc: str | None = None) -> str:
         """
-        批量创建绘图任务并启动监控。
+        创建单个绘图任务并启动监控。
+        
+        :param args: 绘图参数
+        :param name: 任务名称（可选）
+        :param desc: 任务描述（可选）
+        :return: job_id
+        """
+        raise NotImplementedError
+    
+    def batch_from_jobs(self, job_ids: list[str]) -> str:
+        """
+        从多个 job_id 组合成一个 batch（通用方法）。
+        
+        :param job_ids: job_id 列表
+        :return: batch_id
+        """
+        from datetime import datetime
+        from api.schemas.draw import BatchJob
+        from api.services.db import BatchJobService
+        
+        batch_job = BatchJobService.create(BatchJob(
+            job_ids=job_ids,
+            created_at=datetime.now()
+        ))
+        return batch_job.batch_id
+    
+    def draw_batch(self, args: DrawArgs, batch_size: int = 1, name: str | None = None, desc: str | None = None) -> str:
+        """
+        批量创建绘图任务并组成 batch（通用方法）。
         
         :param args: 绘图参数
         :param batch_size: 批量大小
         :param name: 任务名称（可选）
         :param desc: 任务描述（可选）
-        :return: batch_id（批次 ID）
+        :return: batch_id
         """
-        raise NotImplementedError
+        job_ids = []
+        for i in range(batch_size):
+            job_id = self.draw(args, name=name, desc=desc)
+            job_ids.append(job_id)
+        
+        return self.batch_from_jobs(job_ids)
     
     @abstractmethod
     async def get_job_status(self, job_id: str) -> bool:

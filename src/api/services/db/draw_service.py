@@ -72,8 +72,12 @@ class JobService:
             jobs = db.exec(statement).all()
             for job in jobs:
                 db.expunge(job)
-            logger.debug(f"获取任务列表: {len(jobs)} 条")
-            return list(jobs)
+            # 过滤掉没有 job_id 的无效记录
+            valid_jobs = [job for job in jobs if job.job_id]
+            if len(valid_jobs) < len(jobs):
+                logger.warning(f"发现 {len(jobs) - len(valid_jobs)} 条无效job记录（缺少job_id）")
+            logger.debug(f"获取任务列表: {len(valid_jobs)} 条")
+            return valid_jobs
     
     @classmethod
     def update(cls, job_id: str, **kwargs) -> Optional[Job]:
@@ -146,21 +150,29 @@ class JobService:
             return count
     
     @classmethod
-    def clear(cls) -> int:
+    def clear(cls, incomplete_only: bool = False) -> int:
         """
-        清空所有任务。
+        清空所有任务或仅清空未完成任务。
         
+        :param incomplete_only: 是否仅清空未完成任务（status != 'completed'，包括失败和生成中）
         :return: 删除的任务数量
         """
         with DatabaseSession() as db:
             statement = select(Job)
+            if incomplete_only:
+                # 清空所有未完成的任务（不等于 'completed'）
+                statement = statement.where(Job.status != "completed")
+            
             jobs = db.exec(statement).all()
             count = len(jobs)
             
             for job in jobs:
                 db.delete(job)
             
-            logger.info(f"清空所有任务: {count} 条")
+            if incomplete_only:
+                logger.info(f"清空未完成任务: {count} 条")
+            else:
+                logger.info(f"清空所有任务: {count} 条")
             return count
 
 

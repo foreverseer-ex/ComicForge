@@ -1,7 +1,0 @@
-{
-  "enabled": true,
-  "global_per_minute": 1000000,
-  "login_per_minute": 100000,
-  "burst": 100000,
-  "note": "开发阶段默认极大值，相当于不实际限流；仅用于验证机制与配置加载。"
-}

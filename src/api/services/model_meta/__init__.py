@@ -6,6 +6,7 @@
 from .base import AbstractModelMetaService
 from .civitai import CivitaiModelMetaService, civitai_model_meta_service
 from .db import ModelMetaDbService, model_meta_db_service
+from .local import local_model_meta_service
 
 __all__ = [
     # 基类

@@ -265,14 +265,31 @@
             <p :class="['text-xs mb-2 font-bold', isDark ? 'text-gray-400' : 'text-gray-600']">
               支持多行输入，每行一个 AIR，无效行将自动忽略
             </p>
-            <p :class="['text-xs mb-2', isDark ? 'text-gray-500' : 'text-gray-500']">
+            <p :class="['text-xs mb-4', isDark ? 'text-gray-500' : 'text-gray-500']">
               格式：urn:air:{'{ecosystem}'}:{'{type}'}:civitai:{'{model_id}'}@{'{version_id}'}<br/>
               示例：urn:air:sd1:checkpoint:civitai:348620@390021
             </p>
-            <!-- 下载示例图片选项 -->
-            <label class="inline-flex items-center gap-2 mb-2 select-none">
-              <input type="checkbox" v-model="downloadExamples" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-              <span :class="['text-sm', isDark ? 'text-gray-300' : 'text-gray-700']">下载模型示例图片（可能较慢，移动网络可取消）</span>
+            
+            <!-- 下载图片选项 -->
+            <label :class="['flex items-center gap-2 mb-3 cursor-pointer', isDark ? 'text-gray-300' : 'text-gray-700']">
+              <input
+                type="checkbox"
+                v-model="downloadImages"
+                :disabled="importing"
+                :class="[
+                  'w-4 h-4 rounded border-2 transition-all',
+                  isDark
+                    ? 'border-gray-600 bg-gray-700 checked:bg-blue-600 checked:border-blue-600'
+                    : 'border-gray-300 bg-white checked:bg-blue-600 checked:border-blue-600',
+                  importing && 'opacity-50 cursor-not-allowed'
+                ]"
+              />
+              <span class="text-sm font-medium">
+                同时下载示例图片
+              </span>
+              <span :class="['text-xs', isDark ? 'text-gray-400' : 'text-gray-500']">
+                （不勾选则只导入元数据）
+              </span>
             </label>
             
             <textarea
@@ -355,15 +372,68 @@
       </div>
     </Teleport>
 
-    <!-- 清空确认对话框（radix-vue/shadcn） -->
-    <ConfirmDialog
-      :show="showClearDialog"
-      title="确认清空"
-      :message="'即将删除所有模型元数据！\n\n此操作将删除：\n- 所有 Checkpoint 元数据\n- 所有 LoRA 元数据\n- 包括下载的示例图片\n\n⚠️ 此操作不可恢复！'"
-      type="danger"
-      @confirm="clearAllMetadata"
-      @cancel="() => { showClearDialog = false }"
-    />
+    <!-- 清空确认对话框 -->
+    <Teleport to="body">
+      <div
+        v-if="showClearDialog"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        @click.self="showClearDialog = false"
+      >
+        <div
+          :class="[
+            'w-full max-w-md rounded-lg shadow-xl',
+            'mx-4 md:mx-0', // 移动端添加左右边距
+            isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border-gray-200'
+          ]"
+          @click.stop
+        >
+          <div class="p-4 md:p-6">
+            <h2 class="text-xl font-bold mb-4 text-red-600">确认清空</h2>
+            <div class="text-center mb-4">
+              <svg class="w-12 h-12 mx-auto text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <p :class="['font-bold text-center mb-4', isDark ? 'text-white' : 'text-gray-900']">
+              即将删除所有模型元数据！
+            </p>
+            <div :class="['text-sm mb-4', isDark ? 'text-gray-300' : 'text-gray-700']">
+              <p>此操作将删除：</p>
+              <ul class="list-disc list-inside mt-2">
+                <li>所有 Checkpoint 元数据</li>
+                <li>所有 LoRA 元数据</li>
+                <li>包括下载的示例图片</li>
+              </ul>
+            </div>
+            <p class="text-sm text-red-600 font-bold text-center mb-4">
+              ⚠️ 此操作不可恢复！
+            </p>
+            <div class="flex justify-end gap-3">
+              <button
+                @click="showClearDialog = false"
+                :class="[
+                  'px-4 py-2 rounded-lg font-medium transition-colors',
+                  isDark
+                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                ]"
+              >
+                取消
+              </button>
+              <button
+                @click="clearAllMetadata"
+                :class="[
+                  'px-4 py-2 rounded-lg font-medium transition-colors',
+                  'bg-red-600 hover:bg-red-700 text-white'
+                ]"
+              >
+                确认清空
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- 右键菜单 -->
     <div
@@ -415,7 +485,6 @@ import {
 } from '@heroicons/vue/24/outline'
 import ModelCard from '../components/ModelCard.vue'
 import ModelDetailDialog from '../components/ModelDetailDialog.vue'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
 import api from '../api'
 import { showToast } from '../utils/toast'
 
@@ -462,7 +531,6 @@ const importAirInput = ref('')
 const importStatus = ref('')
 const importStatusColor = ref('')
 const importing = ref(false)
-const downloadExamples = ref(true)
 
 // 右键菜单
 const contextMenu = ref({
@@ -568,6 +636,9 @@ const importErrors = ref<string[]>([])
 // 取消导入标志
 const cancelImportFlag = ref(false)
 
+// 是否下载图片（默认勾选）
+const downloadImages = ref(true)
+
 // 批量导入（前端并发控制）
 const batchImport = async () => {
   const lines = importAirInput.value.split('\n').map(l => l.trim()).filter(l => l)
@@ -611,9 +682,9 @@ const batchImport = async () => {
     
     try {
       const response = await api.post('/model-meta/import', {
+        download_images: downloadImages.value,
         air: air,
-        parallel_download: parallelDownload,
-        download_examples: downloadExamples.value
+        parallel_download: parallelDownload
       })
       
       const data = (response as any)?.data || response

@@ -1,13 +1,17 @@
 <template>
-  <DialogRoot :open="Boolean(params)" @update:open="onUpdateOpen">
-    <DialogPortal>
-      <DialogOverlay class="fixed inset-0 bg-black/50 z-50" />
-      <DialogContent
+  <Teleport to="body">
+    <div
+      v-if="params"
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      @click.self="close"
+    >
+      <div
         :class="[
-          'fixed z-50 w-full max-w-2xl max-h-[90vh] rounded-lg shadow-xl flex flex-col top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
-          'mx-4 md:mx-0',
+          'w-full max-w-2xl max-h-[90vh] rounded-lg shadow-xl flex flex-col',
+          'mx-4 md:mx-0', // 移动端添加左右边距
           isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
         ]"
+        @click.stop
       >
         <!-- 标题栏 -->
         <div
@@ -56,7 +60,7 @@
         </div>
 
         <!-- 内容区域 -->
-        <div v-if="params" class="flex-1 overflow-y-auto p-4 md:p-6">
+        <div class="flex-1 overflow-y-auto p-4 md:p-6">
           <div class="space-y-4">
             <!-- Job ID（如果提供） -->
             <div v-if="jobId">
@@ -186,9 +190,9 @@
             </div>
           </div>
         </div>
-      </DialogContent>
-    </DialogPortal>
-  </DialogRoot>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -196,7 +200,6 @@ import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { XMarkIcon, ClipboardIcon } from '@heroicons/vue/24/outline'
 import { showToast } from '../utils/toast'
-import { DialogRoot, DialogPortal, DialogOverlay, DialogContent } from 'radix-vue'
 
 export interface DrawParams {
   model?: string
@@ -301,10 +304,6 @@ const copyParams = async () => {
 
 const close = () => {
   emit('close')
-}
-
-const onUpdateOpen = (v: boolean) => {
-  if (!v) close()
 }
 </script>
 
