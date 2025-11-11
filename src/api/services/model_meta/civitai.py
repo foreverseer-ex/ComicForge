@@ -5,6 +5,8 @@ Civitai 模型元数据服务。
 """
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
+import json
 
 import httpx
 from loguru import logger
@@ -16,6 +18,7 @@ from api.settings import app_settings
 from api.constants.civitai import CIVITAI_BASE_URL
 from api.utils.hash import sha256
 from api.utils.civitai import AIR, normalize_type
+from api.utils.path import requests_home
 
 class CivitaiModelMetaService(AbstractModelMetaService):
     """
@@ -132,16 +135,16 @@ class CivitaiModelMetaService(AbstractModelMetaService):
     
     def get_by_version_name(self, version_name: str) -> Optional[ModelMeta]:
         """
-        通过模型版本名称获取模型元数据（从本地缓存）。
+        通过模型版本名称获取模型元数据（从数据库）。
         
-        注意：此方法使用本地缓存，不会发起网络请求。
+        注意：此方法使用数据库，不会发起网络请求。
         如需从 Civitai 获取最新数据，请使用 get_by_id 或 get_by_hash。
         
         :param version_name: 模型版本名称（如 "waiIllustriousSDXL-v150"）
         :return: 模型元数据，未找到返回 None
         """
-        from api.services.model_meta import local_model_meta_service
-        return local_model_meta_service.get_by_version_name(version_name)
+        from api.services.model_meta.db import model_meta_db_service
+        return model_meta_db_service.get_by_version_name(version_name)
     
     def get_by_name(self, name: str) -> Optional[ModelMeta]:
         """
@@ -199,6 +202,21 @@ class CivitaiModelMetaService(AbstractModelMetaService):
                 
                 version_data = resp.json()
             
+            # 保存原始JSON响应到文件（用于调试）
+            try:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                # 使用哈希值的前16位作为文件名的一部分（缩短文件名）
+                hash_short = file_hash[:16] if len(file_hash) >= 16 else file_hash
+                filename = f"by-hash_{hash_short}_{timestamp}.json"
+                file_path = requests_home / filename
+                
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(version_data, f, indent=2, ensure_ascii=False)
+                
+                logger.debug(f"已保存Civitai API响应到: {file_path}")
+            except Exception as e:
+                logger.warning(f"保存API响应到文件失败: {e}")
+            
             # 解析版本数据
             model_meta = self._parse_version_data(version_data)
             
@@ -235,6 +253,19 @@ class CivitaiModelMetaService(AbstractModelMetaService):
                 
                 version_data = resp.json()
             
+            # 保存原始JSON响应到文件（用于调试）
+            try:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"by-id_{version_id}_{timestamp}.json"
+                file_path = requests_home / filename
+                
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(version_data, f, indent=2, ensure_ascii=False)
+                
+                logger.debug(f"已保存Civitai API响应到: {file_path}")
+            except Exception as e:
+                logger.warning(f"保存API响应到文件失败: {e}")
+            
             # 解析版本数据
             model_meta = self._parse_version_data(version_data)
             
@@ -258,7 +289,7 @@ class CivitaiModelMetaService(AbstractModelMetaService):
     
     async def save(self, model_meta: ModelMeta, download_images: bool = True, parallel_download: bool = False) -> tuple[ModelMeta, int, int]:
         """
-        保存模型元数据（委托给本地服务）。
+        保存模型元数据（委托给数据库服务）。
         
         Args:
             model_meta: 要保存的模型元数据
@@ -268,11 +299,11 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         Returns:
             tuple[ModelMeta, int, int]: (保存后的元数据, 失败图片数, 总图片数)
         """
-        # 从本地服务导入（local_model_meta_service 会处理数据库存储）
-        from api.services.model_meta.local import local_model_meta_service
+        # 委托给数据库服务保存
+        from api.services.model_meta.db import model_meta_db_service
         
-        logger.debug(f"Civitai 服务委托本地服务保存: {model_meta.name} (download_images={download_images}, parallel_download={parallel_download})")
-        return await local_model_meta_service.save(model_meta, download_images=download_images, parallel_download=parallel_download)
+        logger.debug(f"Civitai 服务委托数据库服务保存: {model_meta.name} (download_images={download_images}, parallel_download={parallel_download})")
+        return await model_meta_db_service.save(model_meta, download_examples=download_images, parallel_download=parallel_download)
     
     async def sync_from_sd_forge(self):
         """
@@ -312,13 +343,13 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         :param stats: 统计信息字典
         """
         # 延迟导入，避免循环依赖
-        from api.services.model_meta.local import local_model_meta_service
+        from api.services.model_meta.db import model_meta_db_service
         
         try:
             logger.info(f"处理模型: {safetensor_file.name}")
             
-            # 检查本地是否已有元数据
-            existing_meta = local_model_meta_service.get_by_name(safetensor_file.stem)
+            # 检查数据库中是否已有元数据
+            existing_meta = model_meta_db_service.get_by_filename(safetensor_file.name)
             if existing_meta is not None:
                 logger.debug(f"跳过（已有元数据）: {safetensor_file.name}")
                 stats["skipped"] += 1

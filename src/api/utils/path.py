@@ -19,8 +19,12 @@ database_path = app_data_path / 'database.db'
 # 任务图像缓存目录
 jobs_home = app_temp_path / 'jobs'
 
+# 请求响应JSON保存目录（用于调试）
+requests_home = app_temp_path / 'requests'
+
 # 创建必要的目录
 checkpoint_meta_home.mkdir(parents=True, exist_ok=True)
 lora_meta_home.mkdir(parents=True, exist_ok=True)
 project_home.mkdir(parents=True, exist_ok=True)
 jobs_home.mkdir(parents=True, exist_ok=True)
+requests_home.mkdir(parents=True, exist_ok=True)

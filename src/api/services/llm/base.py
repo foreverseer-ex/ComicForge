@@ -62,6 +62,10 @@ def tool_wrapper(func):
     @functools.wraps(func)
     async def async_wrapper(*args, **kwargs):
         try:
+            if 'project_id' in kwargs:
+                project_id = kwargs['project_id']
+                if project_id in ['null', 'None']:
+                    kwargs['project_id'] = None
             result = await func(*args, **kwargs)
             result = to_jsonable_python(result)
             if not isinstance(result, (list, dict)):
@@ -124,7 +128,6 @@ class AbstractLlmService(ABC):
         self.tools: List[BaseTool] = []
         self._initialize_tools()
 
-
     def _initialize_tools(self):
         """初始化工具函数列表。"""
 
@@ -146,7 +149,7 @@ class AbstractLlmService(ABC):
             # 建议写入工具（支持负索引）
             self._add_suggestions,
             # Draw 功能
-            get_loras, get_checkpoints, 
+            get_loras, get_checkpoints,
             create_draw_job, create_batch_job, batch_from_jobs,
             get_draw_job, delete_draw_job, get_image,
         ]
@@ -184,8 +187,6 @@ class AbstractLlmService(ABC):
                     "value": memory.value,
                     "description": memory.description,
                 }
-
-
 
             # 查询项目信息（项目不存在时返回 None，不抛出异常）
             project = ProjectService.get(project_id)
@@ -247,7 +248,7 @@ class AbstractLlmService(ABC):
 
         # 3. 添加 MCP 工具使用指南（已包含工具调用提示和建议功能要求）
         messages.append(("system", MCP_TOOLS_GUIDE))
-        
+
         # 4. 添加建议条数配置
         suggestion_config = f"""
 **建议条数配置**：
@@ -489,7 +490,7 @@ class AbstractLlmService(ABC):
                 # 处理工具调用开始事件
                 elif event_type == "on_tool_start":
                     tool_name = chunk.get("name", "")
-                    
+
                     # 处理工具调用（内部函数不会被添加到列表）
                     self._process_tool_start_event(chunk, assistant_tools)
 
@@ -854,8 +855,8 @@ class AbstractLlmService(ABC):
         :param index: 消息索引，支持负数（-1 表示最后一条）
         :param suggests: 建议列表
         """
-        if project_id=='null':
-            project_id=None
+        if project_id == 'null':
+            project_id = None
         try:
             # 负索引支持：将 -1 表示最后一条转换为实际索引
             if index < 0:
@@ -870,7 +871,8 @@ class AbstractLlmService(ABC):
 
             message.suggests = suggests or []
             HistoryService.update(message)
-            logger.debug(f"已为消息添加建议: project={project_id}, index={index}, suggests_count={len(message.suggests)}")
+            logger.debug(
+                f"已为消息添加建议: project={project_id}, index={index}, suggests_count={len(message.suggests)}")
         except Exception as e:
             logger.exception(f"添加建议失败: project={project_id}, index={index}, error={e}")
 

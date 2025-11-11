@@ -115,15 +115,16 @@ import { usePrivacyStore } from '../stores/privacy'
 import { storeToRefs } from 'pinia'
 
 interface Props {
-  images: string[]  // 图片 URL 数组
+  images?: string[]  // 图片 URL 数组（可选，用于兼容旧代码）
   initialIndex?: number  // 初始显示的图片索引
   visible: boolean  // 是否显示
   jobIds?: string[]  // 每个图片对应的 job_id 数组（可选）
-  versionId?: number  // 模型版本 ID（可选，用于模型示例图片）
-  filenames?: string[]  // 每个图片对应的文件名数组（可选，用于模型示例图片）
+  versionId?: number  // 模型版本 ID（用于模型示例图片）
+  filenames?: string[]  // 每个图片对应的文件名数组（用于模型示例图片）
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  images: undefined,
   initialIndex: 0,
   visible: false,
   jobIds: undefined,
@@ -161,34 +162,49 @@ const currentImageUrl = computed(() => {
 
 // 加载所有图片 URL（使用缓存）
 const loadImageUrls = async () => {
-  if (props.images.length === 0) return
-  
-  // 检查是否已经加载过相同的图片列表
-  const currentImagesKey = props.images.join('|')
-  if (lastLoadedKey.value === currentImagesKey && imageUrls.value.length > 0) {
-    // 相同的图片列表，且已有缓存，直接使用
+  // 优先使用 versionId + filenames 方式（模型示例图片）
+  if (props.versionId && props.filenames && props.filenames.length > 0) {
+    // 检查是否已经加载过相同的图片列表
+    const currentImagesKey = `model:${props.versionId}:${props.filenames.join('|')}`
+    if (lastLoadedKey.value === currentImagesKey && imageUrls.value.length > 0) {
+      // 相同的图片列表，且已有缓存，直接使用
+      loading.value = false
+      return
+    }
+    
+    loading.value = true
+    // getImageUrl 已经处理了所有错误（包括 404），不会抛出错误，直接返回 null 表示图片不存在
+    // 并行加载所有图片 URL（使用 version_id + filename）
+    const urls = await Promise.all(
+      props.filenames.map(filename => getImageUrl(props.versionId!, filename))
+    )
+    imageUrls.value = urls.filter((url): url is string => url !== null)
+    lastLoadedKey.value = currentImagesKey
     loading.value = false
     return
   }
   
-  loading.value = true
-  try {
-    // 并行加载所有图片 URL（使用缓存）
-    const urls = await Promise.all(
-      props.images.map((url, index) => {
-        // 如果提供了 versionId 和 filenames，使用新方式获取图片
-        const filename = props.filenames && props.filenames[index] ? props.filenames[index] : undefined
-        return getImageUrl(url, props.versionId, filename)
-      })
-    )
-    imageUrls.value = urls.filter((url): url is string => url !== null)
+  // 兼容旧代码：使用 images 数组（如果有）
+  if (props.images && props.images.length > 0) {
+    // 检查是否已经加载过相同的图片列表
+    const currentImagesKey = props.images.join('|')
+    if (lastLoadedKey.value === currentImagesKey && imageUrls.value.length > 0) {
+      // 相同的图片列表，且已有缓存，直接使用
+      loading.value = false
+      return
+    }
+    
+    loading.value = true
+    // 直接使用 images 数组（用于兼容旧代码，如角色立绘）
+    imageUrls.value = props.images.filter((url): url is string => url !== null && url !== undefined)
     lastLoadedKey.value = currentImagesKey
-  } catch (error) {
-    console.error('加载图片失败:', error)
-    imageUrls.value = []
-  } finally {
     loading.value = false
+    return
   }
+  
+  // 如果没有提供任何图片源，清空
+  imageUrls.value = []
+  loading.value = false
 }
 
 // 切换到上一张
@@ -407,12 +423,19 @@ watch(() => props.visible, async (newVisible) => {
   }
 })
 
-// 监听 images 变化
+// 监听 images 变化（兼容旧代码）
 watch(() => props.images, () => {
   if (props.visible) {
     loadImageUrls()
   }
 }, { immediate: false })
+
+// 监听 versionId 和 filenames 变化（模型示例图片）
+watch(() => [props.versionId, props.filenames], () => {
+  if (props.visible) {
+    loadImageUrls()
+  }
+}, { immediate: false, deep: true })
 
 // 监听 initialIndex 变化
 watch(() => props.initialIndex, (newIndex) => {

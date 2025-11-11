@@ -75,22 +75,6 @@
 
       <!-- 第三行：操作按钮 -->
       <div class="flex items-center gap-1 flex-wrap">
-        <!-- 隐私模式 -->
-        <button
-          @click="togglePrivacyMode"
-          :class="[
-            'p-2 rounded-lg transition-colors',
-            privacyMode
-              ? isDark ? 'text-blue-400' : 'text-blue-600'
-              : isDark ? 'text-gray-400' : 'text-gray-500',
-            isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-          ]"
-          :title="privacyMode ? '隐私模式：已启用（点击关闭）' : '隐私模式：已关闭（点击启用）'"
-        >
-          <EyeSlashIcon v-if="privacyMode" class="w-5 h-5" />
-          <EyeIcon v-else class="w-5 h-5" />
-        </button>
-
         <!-- 从 Civitai 导入 -->
         <button
           @click="showImportDialog = true"
@@ -117,7 +101,7 @@
 
         <!-- 清空元数据 -->
         <button
-          @click="showClearDialog = true"
+          @click="clearAllMetadata"
           :class="[
             'p-2 rounded-lg transition-colors text-red-500',
             isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
@@ -372,68 +356,6 @@
       </div>
     </Teleport>
 
-    <!-- 清空确认对话框 -->
-    <Teleport to="body">
-      <div
-        v-if="showClearDialog"
-        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        @click.self="showClearDialog = false"
-      >
-        <div
-          :class="[
-            'w-full max-w-md rounded-lg shadow-xl',
-            'mx-4 md:mx-0', // 移动端添加左右边距
-            isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border-gray-200'
-          ]"
-          @click.stop
-        >
-          <div class="p-4 md:p-6">
-            <h2 class="text-xl font-bold mb-4 text-red-600">确认清空</h2>
-            <div class="text-center mb-4">
-              <svg class="w-12 h-12 mx-auto text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-            </div>
-            <p :class="['font-bold text-center mb-4', isDark ? 'text-white' : 'text-gray-900']">
-              即将删除所有模型元数据！
-            </p>
-            <div :class="['text-sm mb-4', isDark ? 'text-gray-300' : 'text-gray-700']">
-              <p>此操作将删除：</p>
-              <ul class="list-disc list-inside mt-2">
-                <li>所有 Checkpoint 元数据</li>
-                <li>所有 LoRA 元数据</li>
-                <li>包括下载的示例图片</li>
-              </ul>
-            </div>
-            <p class="text-sm text-red-600 font-bold text-center mb-4">
-              ⚠️ 此操作不可恢复！
-            </p>
-            <div class="flex justify-end gap-3">
-              <button
-                @click="showClearDialog = false"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  isDark
-                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                ]"
-              >
-                取消
-              </button>
-              <button
-                @click="clearAllMetadata"
-                :class="[
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
-                  'bg-red-600 hover:bg-red-700 text-white'
-                ]"
-              >
-                确认清空
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
 
     <!-- 右键菜单 -->
     <div
@@ -467,7 +389,6 @@
     :model="detailModel"
     :privacy-mode="privacyMode"
     @close="detailModel = null"
-    @toggle-privacy-mode="togglePrivacyMode"
     @model-updated="handleModelUpdated"
   />
 </template>
@@ -479,14 +400,14 @@ import { useProjectStore } from '../stores/project'
 import { usePrivacyStore } from '../stores/privacy'
 import { storeToRefs } from 'pinia'
 import { 
-  XMarkIcon, EyeIcon, EyeSlashIcon, CloudArrowDownIcon, 
+  XMarkIcon, CloudArrowDownIcon, 
   ClipboardDocumentIcon, 
   TrashIcon 
 } from '@heroicons/vue/24/outline'
 import ModelCard from '../components/ModelCard.vue'
 import ModelDetailDialog from '../components/ModelDetailDialog.vue'
 import api from '../api'
-import { showToast } from '../utils/toast'
+import { toast } from 'vue-sonner'
 
 interface ModelMeta {
   model_id: number
@@ -526,7 +447,6 @@ const baseModelFilter = ref('')
 
 // 对话框
 const showImportDialog = ref(false)
-const showClearDialog = ref(false)
 const importAirInput = ref('')
 const importStatus = ref('')
 const importStatusColor = ref('')
@@ -604,10 +524,6 @@ const clearFilters = () => {
   saveFilters()
 }
 
-// 切换隐私模式
-const togglePrivacyMode = () => {
-  privacyStore.togglePrivacyMode()
-}
 
 // 导出所有 AIR
 const exportAllAir = async () => {
@@ -616,10 +532,10 @@ const exportAllAir = async () => {
     const airText = airList.join('\n')
     
     await navigator.clipboard.writeText(airText)
-    showToast(`✅ 已复制 ${airList.length} 个模型的 AIR 到剪贴板`, 'success')
+    toast.success(`已复制 ${airList.length} 个模型的 AIR 到剪贴板`)
   } catch (error) {
     console.error('导出 AIR 失败:', error)
-    showToast('❌ 导出失败', 'error')
+    toast.error('导出失败')
   }
 }
 
@@ -900,13 +816,12 @@ const loadFromClipboard = async () => {
 // 清空所有元数据
 const clearAllMetadata = async () => {
   try {
-    // TODO: 调用清空 API
-    showClearDialog.value = false
-    alert('✅ 已清空所有模型元数据')
+    await api.delete('/model-meta/clear')
+    toast.success('已清空所有模型元数据')
     await loadModels()
-  } catch (error) {
+  } catch (error: any) {
     console.error('清空失败:', error)
-    alert('❌ 清空失败')
+    toast.error('清空失败: ' + (error?.response?.data?.detail || error?.message || '未知错误'))
   }
 }
 
@@ -921,7 +836,7 @@ const openDetailDialog = (model: ModelMeta) => {
 // 处理模型更新事件（重置后刷新列表）
 const handleModelUpdated = async () => {
   await loadModels()
-  showToast('模型列表已刷新', 'success')
+  toast.success('模型列表已刷新')
 }
 
 // 显示右键菜单
@@ -942,12 +857,12 @@ const deleteModel = async () => {
     // 调用删除 API
     await api.delete(`/model-meta/${contextMenu.value.model.version_id}`)
     contextMenu.value.show = false
-    showToast(`✅ 已删除: ${contextMenu.value.model.name}`, 'success')
+    toast.success(`已删除: ${contextMenu.value.model.name}`)
     await loadModels()
   } catch (error: any) {
     console.error('删除失败:', error)
     const errorMsg = error.response?.data?.detail || error.message || '删除失败'
-    showToast(`❌ ${errorMsg}`, 'error')
+    toast.error(errorMsg)
     contextMenu.value.show = false
   }
 }

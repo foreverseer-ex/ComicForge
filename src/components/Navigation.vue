@@ -88,6 +88,31 @@
         </button>
       </div>
       
+      <!-- 隐私模式按钮 -->
+      <div :class="isCollapsed ? 'px-2 pt-1 pb-1' : 'px-3 pt-1 pb-1'">
+        <button
+          @click="togglePrivacyMode"
+          :class="[
+            'w-full flex items-center justify-center py-2 rounded-lg transition-colors text-sm',
+            isCollapsed ? 'px-2' : 'px-3',
+            privacyMode
+              ? isDark
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+              : isDark
+                ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          ]"
+          :title="privacyMode ? '隐私模式：已启用（点击关闭）' : '隐私模式：已关闭（点击启用）'"
+        >
+          <component 
+            :is="privacyMode ? EyeSlashIcon : EyeIcon" 
+            :class="['w-4 h-4', isCollapsed ? '' : 'mr-2']" 
+          />
+          <span v-if="!isCollapsed" class="text-xs">隐私模式</span>
+        </button>
+      </div>
+      
       <!-- 已登录用户信息 -->
       <div :class="isCollapsed ? 'px-2 pt-1 pb-3' : 'px-3 pt-1 pb-3'">
         <button
@@ -123,6 +148,7 @@ import { useThemeStore } from '../stores/theme'
 import { useConnectionStore } from '../stores/connection'
 import { useNavigationStore } from '../stores/navigation'
 import { useAuthStore } from '../stores/auth'
+import { usePrivacyStore } from '../stores/privacy'
 import { storeToRefs } from 'pinia'
 import type { Component } from 'vue'
 import {
@@ -142,7 +168,9 @@ import {
 } from '@heroicons/vue/24/solid'
 import {
   ChevronLeftIcon,
-  ChevronRightIcon
+  ChevronRightIcon,
+  EyeIcon,
+  EyeSlashIcon
 } from '@heroicons/vue/24/outline'
 
 const route = useRoute()
@@ -160,6 +188,10 @@ const { toggleCollapse: toggleCollapseFn } = navigationStore
 
 const authStore = useAuthStore()
 const copied = ref(false)
+
+const privacyStore = usePrivacyStore()
+const { privacyMode } = storeToRefs(privacyStore)
+const { togglePrivacyMode } = privacyStore
 
 // 复制 token 到剪贴板（用于 FastAPI 后端调试）
 const copyToken = async () => {

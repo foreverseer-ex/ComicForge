@@ -17,14 +17,6 @@ from api.services.llm import get_llm_service
 from api.services.db.base import normalize_project_id
 from api.routers.model_meta import get_checkpoints, get_loras
 from api.routers.actor import get_all_actors
-from api.constants.llm import (
-    GENERATE_DRAW_PARAMS_BASE_TEMPLATE,
-    GENERATE_DRAW_PARAMS_DESC_SECTION,
-    GENERATE_DRAW_PARAMS_NO_DESC,
-    GENERATE_DRAW_PARAMS_STEPS_WITHOUT_PROJECT,
-    GENERATE_DRAW_PARAMS_STEPS_WITH_PROJECT,
-    GENERATE_DRAW_PARAMS_ACTOR_CONTEXT_TEMPLATE
-)
 
 router = APIRouter(
     prefix="/llm",
@@ -276,28 +268,13 @@ async def generate_draw_params(
         logger.info(f"已获取资源信息：{len(checkpoints)} 个 Checkpoint，{len(loras)} 个 LoRA，{len(actors)} 个角色")
 
         # 3. 构建 LLM 提示消息
-        desc_section = GENERATE_DRAW_PARAMS_DESC_SECTION.format(desc=desc) if desc else GENERATE_DRAW_PARAMS_NO_DESC
-        
-        # 根据是否有 project_id 选择不同的步骤说明
-        # 如果有 actor 信息，使用带项目的步骤说明（即使 project_id=None）
-        has_actors = len(actors) > 0
-        if project_id or has_actors:
-            steps_section = GENERATE_DRAW_PARAMS_STEPS_WITH_PROJECT
-            # 添加角色查询要求（支持 project_id=None）
-            actual_project_id = project_id if project_id is not None else "默认工作空间"
-            actor_context = GENERATE_DRAW_PARAMS_ACTOR_CONTEXT_TEMPLATE.format(project_id=actual_project_id)
-            prompt = GENERATE_DRAW_PARAMS_BASE_TEMPLATE.format(
-                name=name,
-                desc_section=desc_section,
-                steps_section=steps_section
-            ) + actor_context
-        else:
-            steps_section = GENERATE_DRAW_PARAMS_STEPS_WITHOUT_PROJECT
-            prompt = GENERATE_DRAW_PARAMS_BASE_TEMPLATE.format(
-                name=name,
-                desc_section=desc_section,
-                steps_section=steps_section
-            )
+        desc_line = f"任务描述：{desc}" if desc else "无任务描述"
+        prompt = f"""请根据以下信息生成文生图参数：
+
+任务名称：{name}
+{desc_line}
+
+请按照 MCP 工具使用指南中的"DrawArgs 生成流程"生成参数，并返回符合 DrawArgs 格式的 JSON 对象。"""
         
         # 4. 将资源信息添加到系统提示词中
         resources_prompt = f"""
@@ -309,11 +286,7 @@ async def generate_draw_params(
 {resources_json}
 ```
 
-**重要提示**：
-- 必须使用 `version_name` 作为模型和 LoRA 名称（不是 `name`）
-- 所有 LoRA 的 `ecosystem` 和 `base_model` 必须与 Checkpoint 完全匹配
-- 如果提供了角色信息，请参考角色的 `examples` 中的 `draw_args` 保持一致性
-- LoRA 的 `trained_words` 必须在 prompt 中包含
+⚠️ 请按照 MCP 工具使用指南中的"DrawArgs 生成流程"生成参数。
 """
 
         # 5. 调用 LLM（异步），使用结构化输出

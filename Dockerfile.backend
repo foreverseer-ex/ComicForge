@@ -44,6 +44,7 @@ EXPOSE 7864
 # 设置环境变量
 ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
+ENV PASSLIB_BCRYPT_IDENT=2b
 
 # 启动命令
 CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7864"]

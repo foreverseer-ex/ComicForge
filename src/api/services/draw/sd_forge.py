@@ -208,7 +208,7 @@ class SdForgeDrawService(AbstractDrawService):
         :param job_id: 本地 job_id（UUID）
         :param args: 绘图参数
         """
-        from api.services.model_meta import local_model_meta_service
+        from api.services.model_meta.db import model_meta_db_service
         from api.services.db import JobService
         from api.utils.path import jobs_home
         from datetime import datetime
@@ -226,7 +226,7 @@ class SdForgeDrawService(AbstractDrawService):
                 
                 # 检查 model
                 if args.model:
-                    model_meta = local_model_meta_service.get_by_version_name(args.model)
+                    model_meta = model_meta_db_service.get_by_version_name(args.model)
                     if not model_meta:
                         raise RuntimeError(f"未找到模型元数据: {args.model}")
                     
@@ -249,7 +249,7 @@ class SdForgeDrawService(AbstractDrawService):
                 
                 # 检查 vae
                 if args.vae:
-                    vae_meta = local_model_meta_service.get_by_version_name(args.vae)
+                    vae_meta = model_meta_db_service.get_by_version_name(args.vae)
                     if not vae_meta:
                         raise RuntimeError(f"未找到 VAE 元数据: {args.vae}")
                     
@@ -267,7 +267,7 @@ class SdForgeDrawService(AbstractDrawService):
             loras_for_sd_forge: Dict[str, float] = {}
             if args.loras:
                 for lora_version_name, strength in args.loras.items():
-                    lora_meta = local_model_meta_service.get_by_version_name(lora_version_name)
+                    lora_meta = model_meta_db_service.get_by_version_name(lora_version_name)
                     if not lora_meta:
                         logger.warning(f"未找到 LoRA 元数据: {lora_version_name}，跳过")
                         continue

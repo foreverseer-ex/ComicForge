@@ -1,38 +1,32 @@
 /**
  * 获取图片 URL 的工具函数
  * 
- * 处理 file:// URL 和远程 URL，统一转换为可通过 API 访问的 URL
+ * 对于模型示例图片，只通过 version_id + filename 获取本地文件
+ * URL 字段仅用于保存原始远程URL，不用于获取图片
  */
 import { imageCache } from './imageCache'
 
 /**
- * 获取图片 URL（支持缓存）
+ * 获取模型示例图片 URL（支持缓存）
  * 
- * @param imageUrl 原始图片 URL（可能是 file:// URL 或远程 URL）
- * @param versionId 模型版本 ID（可选，用于模型示例图片）
- * @param filename 示例图片文件名（可选，用于模型示例图片）
- * @returns Promise<string> 可用的图片 URL（blob URL 或原始 URL）
+ * 注意：获取模型图片的唯一途径是依靠 filename（通过 version_id + filename）
+ * URL 字段仅用于保存原始远程URL，不用于判断或获取图片
+ * 
+ * @param versionId 模型版本 ID（必需）
+ * @param filename 示例图片文件名（必需）
+ * @returns Promise<string | null> 可用的图片 URL（blob URL），如果文件不存在返回 null
  */
 export async function getImageUrl(
-  imageUrl: string | null | undefined,
-  versionId?: number,
-  filename?: string
+  versionId: number,
+  filename: string
 ): Promise<string | null> {
-  if (!imageUrl) {
+  if (!versionId || !filename) {
     return null
   }
 
-  // 如果是远程 URL，直接返回
-  if (!imageUrl.startsWith('file://')) {
-    return imageUrl
-  }
-
-  // 如果是本地 file:// URL，使用缓存获取
-  try {
-    return await imageCache.get(imageUrl, versionId, filename)
-  } catch (error) {
-    console.error('获取图片失败:', imageUrl, error)
-    return null
-  }
+  // 构建缓存 key
+  const cacheKey = `model:${versionId}:${filename}`
+  // imageCache.get 已经处理了所有错误（包括 404），不会抛出错误
+  return await imageCache.get(cacheKey, versionId, filename)
 }
 

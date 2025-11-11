@@ -22,7 +22,6 @@ def init_admin_user():
     3. 删除所有其他管理员账户（只保留配置中指定的管理员）
     """
     admin_config = app_settings.admin
-    logger.info(f"初始化管理员账户: {admin_config.username}")
     
     try:
         with DatabaseSession() as db:
@@ -39,7 +38,6 @@ def init_admin_user():
             # 删除其他管理员账户（不是配置中指定的）
             for admin in all_admins:
                 if admin.username != admin_config.username:
-                    logger.info(f"删除旧管理员账户: {admin.username}")
                     db.delete(admin)
             
             # 处理目标管理员账户
@@ -52,11 +50,9 @@ def init_admin_user():
                     is_active=True,
                 )
                 db.add(new_admin)
-                logger.success(f"管理员账户创建成功: {admin_config.username}")
                 
             elif target_user.role != "admin":
                 # 存在但不是管理员，删除并重新创建
-                logger.warning(f"用户 {admin_config.username} 不是管理员，删除并重新创建")
                 db.delete(target_user)
                 db.flush()
                 
@@ -67,13 +63,11 @@ def init_admin_user():
                     is_active=True,
                 )
                 db.add(new_admin)
-                logger.success(f"管理员账户重新创建成功: {admin_config.username}")
                 
             else:
                 # 已存在且是管理员，更新密码
                 target_user.password_hash = hash_password(admin_config.password)
                 target_user.is_active = True  # 确保账户处于启用状态
-                logger.success(f"管理员账户密码已更新: {admin_config.username}")
             
             # 提交由 DatabaseSession 上下文自动完成
             

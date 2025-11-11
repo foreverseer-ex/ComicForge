@@ -75,7 +75,7 @@
             v-if="editingMessageId !== message.message_id"
             @click.stop="startEditMessage(message.message_id, message.context)"
             :class="[
-              'w-full max-w-[90%] rounded-lg px-4 py-3 shadow-sm cursor-pointer hover:opacity-90 transition-opacity',
+              'inline-block max-w-[90%] rounded-lg px-4 py-3 shadow-sm cursor-pointer hover:opacity-90 transition-opacity',
               isDark ? 'bg-gray-800 border border-gray-700 text-gray-100' : 'bg-white border border-gray-200 text-gray-900 shadow'
             ]"
           >
@@ -88,7 +88,7 @@
             @click.stop
             class="editing-message-container"
             :class="[
-              'w-full max-w-[90%] rounded-lg px-4 py-3 shadow-sm border-2',
+              'inline-block min-w-[200px] max-w-[90%] rounded-lg px-4 py-3 shadow-sm border-2',
               isDark ? 'bg-gray-800 border-blue-500 text-gray-100' : 'bg-white border-blue-500 text-gray-900 shadow'
             ]"
           >
@@ -99,7 +99,7 @@
                 @keydown.ctrl.enter="confirmRestart"
                 @keydown.meta.enter="confirmRestart"
                 :class="[
-                  'flex-1 text-sm leading-relaxed resize-none focus:outline-none bg-transparent',
+                  'flex-1 text-sm leading-relaxed resize-none focus:outline-none bg-transparent min-w-[150px]',
                   isDark ? 'text-gray-100' : 'text-gray-900'
                 ]"
                 rows="3"
@@ -186,41 +186,66 @@
             </div>
 
             <!-- 工具调用 -->
-            <div v-if="message.tools && message.tools.length > 0" class="mb-4 space-y-1">
-              <div 
-                v-for="(tool, index) in message.tools" 
-                :key="`${message.message_id}-tool-${index}`"
-                class="transition-all"
+            <div v-if="message.tools && message.tools.length > 0" class="mb-4">
+              <!-- 整体折叠按钮：显示工具数量 -->
+              <button
+                @click="toggleToolsExpand(message.message_id)"
+                :class="[
+                  'text-left py-1 px-0 transition-opacity flex items-center gap-2 group cursor-pointer',
+                  isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-600 hover:text-gray-700'
+                ]"
               >
-                <!-- 折叠状态：显示为 list_memories > 格式 -->
-                <button
-                  @click="toggleToolExpand(message.message_id, index)"
-                  :class="[
-                    'w-full text-left py-1.5 px-0 flex items-center gap-2 hover:opacity-80 transition-opacity group',
-                    isDark ? 'text-gray-300' : 'text-gray-700'
-                  ]"
-                >
-                  <span :class="[
-                    'font-mono text-sm',
-                    getToolNameColorClasses(tool.name, isDark)
-                  ]">
-                    {{ tool.name }}
-                  </span>
-                  <span :class="[
-                    'text-xs transition-transform',
-                    isToolExpanded(message.message_id, index) ? 'rotate-90' : '',
-                    isDark ? 'text-gray-500' : 'text-gray-400'
-                  ]">
-                    >
-                  </span>
-                </button>
-                
-                <!-- 展开状态：显示完整内容 -->
+                <span :class="['text-sm', isDark ? 'text-gray-400' : 'text-gray-600']">
+                  助手调用了 {{ message.tools.length }} 个工具
+                </span>
+                <span :class="[
+                  'text-xs transition-transform',
+                  isToolsExpanded(message.message_id) ? 'rotate-90' : '',
+                  isDark ? 'text-gray-500' : 'text-gray-500'
+                ]">
+                  >
+                </span>
+              </button>
+              
+              <!-- 工具列表：默认折叠 -->
+              <div 
+                v-if="isToolsExpanded(message.message_id)"
+                class="space-y-1"
+              >
                 <div 
-                  v-if="isToolExpanded(message.message_id, index)"
-                  class="ml-4 mt-2 mb-4 pb-2 border-l-2 pl-4"
-                  :class="isDark ? 'border-gray-700' : 'border-gray-200'"
+                  v-for="(tool, index) in message.tools" 
+                  :key="`${message.message_id}-tool-${index}`"
+                  class="transition-all"
                 >
+                  <!-- 单个工具折叠按钮 -->
+                  <button
+                    @click="toggleToolExpand(message.message_id, index)"
+                    :class="[
+                      'w-full text-left py-1.5 px-0 flex items-center gap-2 hover:opacity-80 transition-opacity group',
+                      isDark ? 'text-gray-300' : 'text-gray-700'
+                    ]"
+                  >
+                    <span :class="[
+                      'font-mono text-sm',
+                      getToolNameColorClasses(tool.name, isDark)
+                    ]">
+                      {{ tool.name }}
+                    </span>
+                    <span :class="[
+                      'text-xs transition-transform',
+                      isToolExpanded(message.message_id, index) ? 'rotate-90' : '',
+                      isDark ? 'text-gray-500' : 'text-gray-400'
+                    ]">
+                      >
+                    </span>
+                  </button>
+                  
+                  <!-- 展开状态：显示完整内容 -->
+                  <div 
+                    v-if="isToolExpanded(message.message_id, index)"
+                    class="ml-4 mt-2 mb-4 pb-2 border-l-2 pl-4"
+                    :class="isDark ? 'border-gray-700' : 'border-gray-200'"
+                  >
                   <div class="mt-2 space-y-3">
                     <!-- 参数部分 -->
                     <div>
@@ -411,6 +436,7 @@
                   </div>
                 </div>
               </div>
+              </div>
             </div>
 
             <!-- Markdown 内容 -->
@@ -437,28 +463,69 @@
               </div>
               <div>
                 <!-- 图片建议 -->
-                <ImageSuggestions
-                  v-if="getImageSuggestions(message.suggests).length > 0"
-                  :images="getImageSuggestions(message.suggests)"
-                  mode="multiple"
-                  :initial-selected="Array.from(importedJobIds)"
-                  @select="handleSelectPictureSuggest"
-                  @unselect="handleUnselectPictureSuggest"
-                />
+                <div v-if="getImageSuggestions(message.suggests).length > 0">
+                  <button
+                    @click="toggleImageSuggestExpand(message.message_id)"
+                    :class="[
+                      'text-left py-1 px-0 transition-opacity flex items-center gap-2 group cursor-pointer',
+                      isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-600 hover:text-gray-700'
+                    ]"
+                  >
+                    <span :class="['text-sm', isDark ? 'text-gray-400' : 'text-gray-600']">
+                      图片建议 ({{ getImageSuggestions(message.suggests).length }})
+                    </span>
+                    <span :class="[
+                      'text-xs transition-transform',
+                      isImageSuggestExpanded(message.message_id) ? 'rotate-90' : '',
+                      isDark ? 'text-gray-500' : 'text-gray-500'
+                    ]">
+                      >
+                    </span>
+                  </button>
+                  <div v-if="isImageSuggestExpanded(message.message_id)">
+                    <ImageSuggestions
+                      :images="getImageSuggestions(message.suggests)"
+                      mode="multiple"
+                      :initial-selected="Array.from(importedJobIds)"
+                      @select="handleSelectPictureSuggest"
+                      @unselect="handleUnselectPictureSuggest"
+                    />
+                  </div>
+                </div>
                 
                 <!-- 文字建议按钮 -->
-                <div v-if="getTextSuggestions(message.suggests).length > 0" class="flex flex-wrap gap-2 mt-2">
-                  <button v-for="(suggest, index) in getTextSuggestions(message.suggests)" :key="index"
-                          @click="useSuggest(suggest)"
-                          :class="[
-                            'px-3 py-1 rounded text-sm transition-colors',
-                            isDark
-                              ? 'bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600'
-                              : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300'
-                          ]"
+                <div v-if="getTextSuggestions(message.suggests).length > 0">
+                  <button
+                    @click="toggleTextSuggestExpand(message.message_id)"
+                    :class="[
+                      'text-left py-1 px-0 transition-opacity flex items-center gap-2 group cursor-pointer',
+                      isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-600 hover:text-gray-700'
+                    ]"
                   >
-                    {{ formatSuggest(suggest) }}
+                    <span :class="['text-sm', isDark ? 'text-gray-400' : 'text-gray-600']">
+                      文字建议 ({{ getTextSuggestions(message.suggests).length }})
+                    </span>
+                    <span :class="[
+                      'text-xs transition-transform',
+                      isTextSuggestExpanded(message.message_id) ? 'rotate-90' : '',
+                      isDark ? 'text-gray-500' : 'text-gray-500'
+                    ]">
+                      >
+                    </span>
                   </button>
+                  <div v-if="isTextSuggestExpanded(message.message_id)" class="flex flex-wrap gap-2 mt-2">
+                    <button v-for="(suggest, index) in getTextSuggestions(message.suggests)" :key="index"
+                            @click="useSuggest(suggest)"
+                            :class="[
+                              'px-3 py-1 rounded text-sm transition-colors',
+                              isDark
+                                ? 'bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600'
+                                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300'
+                            ]"
+                    >
+                      {{ formatSuggest(suggest) }}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -564,10 +631,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick, computed, provide } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
 import { useNavigationStore } from '../stores/navigation'
+import { usePrivacyStore } from '../stores/privacy'
 import { storeToRefs } from 'pinia'
 import api from '../api'
 import { getApiBaseURL } from '../utils/apiConfig'
@@ -579,11 +647,45 @@ import { toast } from 'vue-sonner'
 import ImageSuggestions from '../components/ImageSuggestions.vue'
 
 // ==================== 协议建议与图片卡片（置顶，确保先于使用处声明） ====================
-// 协议建议格式：[key]:value
-// 当前仅支持：[actor_example_job]:<job_id>
+// 协议建议格式：[协议名称]:参数1=值1&参数2=值2（类似 URL 查询参数）
+// 当前支持：[actor_example_job]:actor_id={actor_id}&job_id={job_id}
 const jobStates = ref<Record<string, { completed: boolean; imageUrl: string | null }>>({})
 const jobPollTimers = new Map<string, number>()
 const importedJobIds = ref<Set<string>>(new Set())
+
+// 从角色的示例图中提取所有已导入的 job_id
+const loadImportedJobIds = async () => {
+  try {
+    // 查询当前项目下的所有角色
+    const actorsResp = await api.get('/actor/all', { 
+      params: { 
+        project_id: selectedProjectId.value || null,
+        limit: 1000
+      } 
+    })
+    const actors = ((actorsResp as any)?.data || actorsResp) || []
+    
+    // 从所有角色的示例图中提取 job_id
+    const importedSet = new Set<string>()
+    for (const actor of actors) {
+      if (actor.examples && Array.isArray(actor.examples)) {
+        for (const example of actor.examples) {
+          // 检查 example.extra 中是否有 job_id
+          const extra = example?.extra || {}
+          const jobId = extra?.job_id
+          if (jobId && typeof jobId === 'string') {
+            importedSet.add(jobId)
+          }
+        }
+      }
+    }
+    
+    // 更新 importedJobIds
+    importedJobIds.value = importedSet
+  } catch (error) {
+    console.error('加载已导入的 job_id 失败:', error)
+  }
+}
 
 const isProtocolSuggest = (s: string): boolean => /^\[[^\]]+\]:.+$/.test(s || '')
 const getProtocolKey = (s: string): string => {
@@ -594,8 +696,32 @@ const getProtocolValue = (s: string): string => {
   const i = (s || '').indexOf(']:')
   return i >= 0 ? s.slice(i + 2) : ''
 }
+// 解析协议参数（类似 URL 查询参数）
+const parseProtocolParams = (s: string): Record<string, string> => {
+  const value = getProtocolValue(s)
+  if (!value) return {}
+  
+  const params: Record<string, string> = {}
+  const pairs = value.split('&')
+  for (const pair of pairs) {
+    const [key, val] = pair.split('=')
+    if (key && val) {
+      params[key.trim()] = decodeURIComponent(val.trim())
+    }
+  }
+  return params
+}
 const isActorExampleJobSuggest = (s: string): boolean => isProtocolSuggest(s) && getProtocolKey(s) === 'actor_example_job'
-const getJobIdFromSuggest = (s: string): string => isActorExampleJobSuggest(s) ? getProtocolValue(s) : ''
+const getActorIdFromSuggest = (s: string): string => {
+  if (!isActorExampleJobSuggest(s)) return ''
+  const params = parseProtocolParams(s)
+  return params.actor_id || ''
+}
+const getJobIdFromSuggest = (s: string): string => {
+  if (!isActorExampleJobSuggest(s)) return ''
+  const params = parseProtocolParams(s)
+  return params.job_id || ''
+}
 
 const getJobState = (jobId: string): { completed: boolean; imageUrl: string | null } => {
   if (!jobId) return { completed: false, imageUrl: null }
@@ -613,14 +739,31 @@ const getImageSuggestions = (suggests: string[]) => {
   return suggests
     .filter(s => isActorExampleJobSuggest(s))
     .map(s => {
+      const actorId = getActorIdFromSuggest(s)
       const jobId = getJobIdFromSuggest(s)
       const state = getJobState(jobId)
       return {
         id: jobId,
         imageUrl: state.imageUrl || undefined,
-        metadata: { suggest: s }
+        metadata: { suggest: s, actorId, jobId }
       }
     })
+}
+
+// 检查并更新导入状态（在显示图片建议时调用）
+const updateImportedStatusForSuggestions = async (suggests: string[]) => {
+  if (!suggests || suggests.length === 0) return
+  
+  // 提取所有 job_id（用于检查导入状态）
+  const jobIds = suggests
+    .filter(s => isActorExampleJobSuggest(s))
+    .map(s => getJobIdFromSuggest(s))
+    .filter(id => id)
+  
+  if (jobIds.length === 0) return
+  
+  // 加载已导入的 job_id
+  await loadImportedJobIds()
 }
 
 // 从建议列表中提取文字建议
@@ -705,6 +848,10 @@ const {
   selectedProject
 } = storeToRefs(projectStore)
 
+// 隐私模式相关
+const privacyStore = usePrivacyStore()
+const { privacyMode } = storeToRefs(privacyStore)
+
 // 消息相关
 const messages = ref<ChatMessage[]>([])
 const loadingHistory = ref(false)
@@ -727,8 +874,14 @@ const editingMessageId = ref<string | null>(null)
 const editingText = ref('')
 const editingTextareaRef = ref<HTMLTextAreaElement | null>(null)
 
-// 工具调用展开状态：messageId -> toolIndex -> expanded
+// 工具调用整体展开状态：messageId -> expanded
+const toolsExpandState = ref<Record<string, boolean>>({})
+
+// 工具调用单个工具展开状态：messageId -> toolIndex -> expanded
 const toolExpandState = ref<Record<string, Record<number, boolean>>>({})
+
+// 建议展开状态：messageId -> { image: boolean, text: boolean }
+const suggestExpandState = ref<Record<string, { image: boolean, text: boolean }>>({})
 
 // 工具调用显示模式：messageId -> toolIndex -> { args: 'rendered'|'raw', result: 'rendered'|'raw' }
 const toolDisplayMode = ref<Record<string, Record<number, { args: 'rendered' | 'raw', result: 'rendered' | 'raw' }>>>({})
@@ -1143,43 +1296,41 @@ const useSuggest = (suggest: string) => {
 // 选择图片建议（导入）
 const handleSelectPictureSuggest = async (jobId: string, metadata?: Record<string, any>) => {
   try {
-    // 1) 查询当前项目下的所有角色
-    const actorsResp = await api.get('/actor/all', { params: { project_id: selectedProjectId.value || null } })
-    const actors = ((actorsResp as any)?.data || actorsResp) || []
+    // 从 metadata 中获取 actor_id（新协议格式）
+    const actorId = metadata?.actorId
+    
+    if (!actorId) {
+      // 如果没有 actor_id，退回为把协议建议作为用户消息发送给LLM，让其决定
+      const suggest = metadata?.suggest
+      if (suggest) {
+        inputText.value = suggest
+        await nextTick()
+        await sendMessage()
+      }
+      return
+    }
 
-    // 2) 获取 job 详情，用于 title/desc
+    // 获取 job 详情，用于 title/desc
     const jobResp = await api.get('/draw', { params: { job_id: jobId } })
     const job = (jobResp as any)?.data || jobResp
     const title = job?.name || 'portrait'
     const desc = job?.desc || ''
 
-    if (Array.isArray(actors) && actors.length === 1) {
-      // 只有一个角色，直接添加立绘
-      const actorId = actors[0]?.actor_id
-      if (actorId) {
-        const addResp = await api.post(`/actor/${actorId}/add_portrait_from_job`, null, {
-          params: {
-            job_id: jobId,
-            title: title,
-            desc: desc || undefined,
-            project_id: selectedProjectId.value || null
-          }
-        })
-        const addData = (addResp as any)?.data || addResp
-        // 标记导入并提示
-        importedJobIds.value.add(jobId)
-        toast.success(addData?.completed ? '立绘已成功添加到角色' : '任务生成中，完成后将自动添加到角色')
-        return
+    // 直接使用协议中的 actor_id 添加立绘
+    const addResp = await api.post(`/actor/${actorId}/add_portrait_from_job`, null, {
+      params: {
+        job_id: jobId,
+        title: title,
+        desc: desc || undefined,
+        project_id: selectedProjectId.value || null
       }
-    }
-
-    // 多个角色或无角色：退回为把协议建议作为用户消息发送给LLM，让其决定
-    const suggest = metadata?.suggest
-    if (suggest) {
-      inputText.value = suggest
-      await nextTick()
-      await sendMessage()
-    }
+    })
+    const addData = (addResp as any)?.data || addResp
+    // 标记导入并提示
+    importedJobIds.value.add(jobId)
+    toast.success(addData?.completed ? '立绘已成功添加到角色' : '任务生成中，完成后将自动添加到角色')
+    // 重新加载导入状态，确保与数据库同步（异步执行，不阻塞UI）
+    loadImportedJobIds()
   } catch (e: any) {
     console.error('处理图片建议失败:', e)
     toast.error('处理失败：' + (e?.response?.data?.detail || e?.message || '未知错误'))
@@ -1192,54 +1343,51 @@ const handleUnselectPictureSuggest = (jobId: string) => {
 }
 
 // 点击协议图片建议：标记导入 + 显示toast + 自动发送给LLM（已弃用，由 handleSelectPictureSuggest 替代）
-const handleClickPictureSuggest = async (suggest: string) => {
-  if (!isActorExampleJobSuggest(suggest)) return
-  const jobId = getJobIdFromSuggest(suggest)
-  if (!jobId) return
-  if (importedJobIds.value.has(jobId)) {
-    // 已导入，忽略重复点击
-    return
-  }
-  try {
-    // 1) 查询当前项目下的所有角色
-    const actorsResp = await api.get('/actor/all', { params: { project_id: selectedProjectId.value || null } })
-    const actors = ((actorsResp as any)?.data || actorsResp) || []
+// 注意：此函数已不再使用，保留仅作为参考
+// const handleClickPictureSuggest = async (suggest: string) => {
+//   if (!isActorExampleJobSuggest(suggest)) return
+//   const actorId = getActorIdFromSuggest(suggest)
+//   const jobId = getJobIdFromSuggest(suggest)
+//   if (!jobId) return
+//   if (importedJobIds.value.has(jobId)) {
+//     // 已导入，忽略重复点击
+//     return
+//   }
+//   try {
+//     if (!actorId) {
+//       // 如果没有 actor_id，退回为把协议建议作为用户消息发送给LLM，让其决定
+//       inputText.value = suggest
+//       await nextTick()
+//       await sendMessage()
+//       return
+//     }
 
-    // 2) 获取 job 详情，用于 title/desc
-    const jobResp = await api.get('/draw', { params: { job_id: jobId } })
-    const job = (jobResp as any)?.data || jobResp
-    const title = job?.name || 'portrait'
-    const desc = job?.desc || ''
+//     // 获取 job 详情，用于 title/desc
+//     const jobResp = await api.get('/draw', { params: { job_id: jobId } })
+//     const job = (jobResp as any)?.data || jobResp
+//     const title = job?.name || 'portrait'
+//     const desc = job?.desc || ''
 
-    if (Array.isArray(actors) && actors.length === 1) {
-      // 只有一个角色，直接添加立绘
-      const actorId = actors[0]?.actor_id
-      if (actorId) {
-        const addResp = await api.post(`/actor/${actorId}/add_portrait_from_job`, null, {
-          params: {
-            job_id: jobId,
-            title: title,
-            desc: desc || undefined,
-            project_id: selectedProjectId.value || null
-          }
-        })
-        const addData = (addResp as any)?.data || addResp
-        // 标记导入并提示
-        importedJobIds.value.add(jobId)
-        toast.success(addData?.completed ? '立绘已成功添加到角色' : '任务生成中，完成后将自动添加到角色')
-        return
-      }
-    }
-
-    // 多个角色或无角色：退回为把协议建议作为用户消息发送给LLM，让其决定
-    inputText.value = suggest
-    await nextTick()
-    await sendMessage()
-  } catch (e: any) {
-    console.error('处理图片建议失败:', e)
-    toast.error('处理失败：' + (e?.response?.data?.detail || e?.message || '未知错误'))
-  }
-}
+//     // 直接使用协议中的 actor_id 添加立绘
+//     const addResp = await api.post(`/actor/${actorId}/add_portrait_from_job`, null, {
+//       params: {
+//         job_id: jobId,
+//         title: title,
+//         desc: desc || undefined,
+//         project_id: selectedProjectId.value || null
+//       }
+//     })
+//     const addData = (addResp as any)?.data || addResp
+//     // 标记导入并提示
+//     importedJobIds.value.add(jobId)
+//     toast.success(addData?.completed ? '立绘已成功添加到角色' : '任务生成中，完成后将自动添加到角色')
+//     // 重新加载导入状态
+//     loadImportedJobIds()
+//   } catch (e: any) {
+//     console.error('处理图片建议失败:', e)
+//     toast.error('处理失败：' + (e?.response?.data?.detail || e?.message || '未知错误'))
+//   }
+// }
 
 // 格式化建议
 const formatSuggest = (suggest: string): string => {
@@ -1249,7 +1397,16 @@ const formatSuggest = (suggest: string): string => {
   return suggest
 }
 
-// 工具调用展开/折叠
+// 工具调用整体展开/折叠
+const toggleToolsExpand = (messageId: string) => {
+  toolsExpandState.value[messageId] = !toolsExpandState.value[messageId]
+}
+
+const isToolsExpanded = (messageId: string): boolean => {
+  return toolsExpandState.value[messageId] ?? false
+}
+
+// 工具调用单个工具展开/折叠
 const toggleToolExpand = (messageId: string, toolIndex: number) => {
   if (!toolExpandState.value[messageId]) {
     toolExpandState.value[messageId] = {}
@@ -1259,6 +1416,52 @@ const toggleToolExpand = (messageId: string, toolIndex: number) => {
 
 const isToolExpanded = (messageId: string, toolIndex: number): boolean => {
   return toolExpandState.value[messageId]?.[toolIndex] ?? false
+}
+
+// 图片建议展开/折叠
+const toggleImageSuggestExpand = async (messageId: string) => {
+  if (!suggestExpandState.value[messageId]) {
+    suggestExpandState.value[messageId] = { image: !privacyMode.value, text: true }
+  }
+  const wasExpanded = suggestExpandState.value[messageId].image
+  suggestExpandState.value[messageId].image = !suggestExpandState.value[messageId].image
+  
+  // 当展开图片建议时，更新导入状态
+  if (!wasExpanded && suggestExpandState.value[messageId].image) {
+    const message = messages.value.find(m => m.message_id === messageId)
+    if (message && message.suggests) {
+      await updateImportedStatusForSuggestions(message.suggests)
+    }
+  }
+}
+
+const isImageSuggestExpanded = (messageId: string): boolean => {
+  if (!suggestExpandState.value[messageId]) {
+    // 初始化：隐私模式时默认折叠，否则默认展开
+    suggestExpandState.value[messageId] = { image: !privacyMode.value, text: true }
+  }
+  // 如果状态已初始化，但隐私模式改变了，需要更新默认状态
+  // 但只在用户没有手动切换过的情况下才自动更新
+  const currentState = suggestExpandState.value[messageId]
+  // 如果当前状态与隐私模式期望的默认状态不一致，且用户可能没有手动切换过
+  // 这里我们保持用户的手动选择，只在初始化时根据隐私模式设置
+  return currentState.image
+}
+
+// 文字建议展开/折叠
+const toggleTextSuggestExpand = (messageId: string) => {
+  if (!suggestExpandState.value[messageId]) {
+    suggestExpandState.value[messageId] = { image: !privacyMode.value, text: true }
+  }
+  suggestExpandState.value[messageId].text = !suggestExpandState.value[messageId].text
+}
+
+const isTextSuggestExpanded = (messageId: string): boolean => {
+  if (!suggestExpandState.value[messageId]) {
+    // 初始化：文字建议默认展开
+    suggestExpandState.value[messageId] = { image: !privacyMode.value, text: true }
+  }
+  return suggestExpandState.value[messageId].text
 }
 
 // 切换工具显示模式
@@ -1730,6 +1933,8 @@ const setupCodeBlockCopy = () => {
 // 监听项目变化（使用 store）
 watch(() => selectedProjectId.value, () => {
   loadHistory()
+  // 项目切换时，重新加载导入状态
+  loadImportedJobIds()
 })
 
 // 点击外部关闭编辑模式的处理器
@@ -1756,6 +1961,9 @@ onMounted(async () => {
   
   // 加载历史记录
   loadHistory()
+  
+  // 加载已导入的 job_id 状态
+  loadImportedJobIds()
   
   // 点击外部关闭编辑模式
   document.addEventListener('click', handleClickOutside)

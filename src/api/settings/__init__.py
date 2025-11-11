@@ -74,21 +74,17 @@ class AppSettings(BaseModel):
             config_path = project_root / "config.json"
         
         if not config_path.exists():
-            logger.warning(f"配置文件不存在: {config_path}，创建默认配置")
             # 创建默认配置，生成强密码
             settings = cls()
             settings.admin.password = generate_strong_password(32)
-            logger.info(f"已生成管理员强密码（32位）")
             # 保存到文件
             settings.save(config_path, reason="初始化默认配置")
-            logger.success(f"默认配置已保存: {config_path}")
             return settings
         
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             
-            logger.success(f"配置加载成功: {config_path}")
             return cls(**data)
             
         except Exception as e:
@@ -122,10 +118,6 @@ class AppSettings(BaseModel):
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(self.model_dump(), f, indent=2, ensure_ascii=False)
             
-            if reason:
-                logger.debug(f"配置已保存: {reason}")
-            else:
-                logger.debug(f"配置已保存: {config_path}")
             return True
             
         except Exception as e:
@@ -133,8 +125,18 @@ class AppSettings(BaseModel):
             return False
 
 
-# 全局应用配置实例
-app_settings = AppSettings.load()
+# 全局应用配置实例（使用模块级别的变量缓存，确保只加载一次）
+_app_settings: Optional[AppSettings] = None
+
+def get_app_settings() -> AppSettings:
+    """获取应用配置实例（单例模式）。"""
+    global _app_settings
+    if _app_settings is None:
+        _app_settings = AppSettings.load()
+    return _app_settings
+
+# 在模块级别直接调用，确保配置在导入时加载
+app_settings = get_app_settings()
 
 
 __all__ = [

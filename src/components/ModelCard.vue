@@ -209,46 +209,30 @@ const versionName = computed(() => {
 const previewImageUrl = ref<string | null>(null)
 const imageLoading = ref(true)
 
-const rawImageUrl = computed(() => {
-  if (!props.model.examples || props.model.examples.length === 0) return null
-  const firstExample = props.model.examples[0]
-  if (!firstExample?.url) return null
-  return firstExample.url
-})
-
 // 加载图片 URL
 const loadImageUrl = async () => {
-  if (!rawImageUrl.value || props.privacyMode || !props.model.examples || props.model.examples.length === 0) {
+  if (props.privacyMode || !props.model.examples || props.model.examples.length === 0) {
     imageLoading.value = false
+    previewImageUrl.value = null
+    return
+  }
+
+  // 获取第一个示例的 filename
+  const firstExample = props.model.examples[0]
+  const filename = firstExample?.filename
+  if (!filename) {
+    imageLoading.value = false
+    previewImageUrl.value = null
     return
   }
 
   imageLoading.value = true
-  try {
-    // 使用新方式：根据 version_id 和 filename 获取图片
-    // filename 从 URL 中提取（因为后端 Example.filename 是 @property，不会序列化到 JSON）
-    const firstExample = props.model.examples[0]
-    let filename: string | undefined
-    if (firstExample?.url) {
-      try {
-        const url = new URL(firstExample.url)
-        filename = url.pathname.split('/').pop() || undefined
-      } catch {
-        // 如果不是有效的 URL，尝试直接提取文件名
-        filename = firstExample.url.split('/').pop() || undefined
-      }
-    }
-    previewImageUrl.value = await getImageUrl(
-      rawImageUrl.value,
-      props.model.version_id,
-      filename
-    )
-  } catch (error) {
-    console.error('加载图片失败:', error)
-    previewImageUrl.value = null
-  } finally {
-    imageLoading.value = false
-  }
+  // getImageUrl 已经处理了所有错误（包括 404），不会抛出错误，直接返回 null 表示图片不存在
+  previewImageUrl.value = await getImageUrl(
+    props.model.version_id,
+    filename
+  )
+  imageLoading.value = false
 }
 
 // 监听模型变化，重新加载图片

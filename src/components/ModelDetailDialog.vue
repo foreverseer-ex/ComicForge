@@ -46,21 +46,6 @@
               <div v-else class="animate-spin rounded-full h-5 w-5 border-b-2" 
                    :class="isDark ? 'border-blue-400' : 'border-blue-600'"></div>
             </button>
-            <!-- 隐私模式开关 -->
-            <button
-              @click.stop="togglePrivacyMode"
-              :class="[
-                'p-2 rounded-lg transition-colors',
-                privacyMode
-                  ? isDark ? 'text-blue-400' : 'text-blue-600'
-                  : isDark ? 'text-gray-400' : 'text-gray-500',
-                isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-              ]"
-              :title="privacyMode ? '隐私模式：已启用（点击关闭）' : '隐私模式：已关闭（点击启用）'"
-            >
-              <EyeSlashIcon v-if="privacyMode" class="w-5 h-5" />
-              <EyeIcon v-else class="w-5 h-5" />
-            </button>
             <!-- 关闭按钮 -->
             <button
               @click="close"
@@ -355,10 +340,9 @@
     
     <!-- 大图显示对话框 -->
     <ImageGalleryDialog
-      :images="allExampleUrls"
-      :version-id="model?.version_id"
+      :version-id="props.model?.version_id"
       :filenames="allExampleFilenames"
-      :initial-index="currentExampleIndex"
+      :initial-index="galleryInitialIndex"
       :visible="showImageGallery"
       @close="showImageGallery = false"
     />
@@ -389,8 +373,6 @@ import {
   ChevronRightIcon,
   InformationCircleIcon,
   ClipboardIcon,
-  EyeIcon,
-  EyeSlashIcon,
   ArrowPathIcon
 } from '@heroicons/vue/24/outline'
 import { getImageUrl } from '../utils/imageUtils'
@@ -428,7 +410,6 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'toggle-privacy-mode'): void
   (e: 'model-updated'): void  // 模型更新后触发，用于刷新列表
 }>()
 
@@ -451,6 +432,7 @@ const versionName = computed(() => {
 const currentExampleIndex = ref(0)
 const showParamsDialog = ref(false)
 const showImageGallery = ref(false)
+const galleryInitialIndex = ref(0)
 
 // 确认对话框状态
 const confirmDialog = ref({
@@ -476,72 +458,41 @@ const currentExample = computed(() => {
   return props.model.examples[currentExampleIndex.value]
 })
 
-// 所有example的URL数组（用于大图显示）
-const allExampleUrls = computed(() => {
-  if (!props.model || !props.model.examples) return []
-  return props.model.examples
-    .map(ex => ex?.url)
-    .filter(url => url) as string[]
-})
-
 // 所有example的文件名数组（用于大图显示）
 const allExampleFilenames = computed(() => {
   if (!props.model || !props.model.examples) return []
   return props.model.examples
-    .map(ex => {
-      if (!ex?.url) return undefined
-      try {
-        const url = new URL(ex.url)
-        return url.pathname.split('/').pop() || undefined
-      } catch {
-        return ex.url.split('/').pop() || undefined
-      }
-    })
-    .filter((filename): filename is string => filename !== undefined)
+    .map(ex => ex?.filename)
+    .filter((filename): filename is string => filename !== undefined && filename !== null)
 })
 
 // 图片 URL
 const previewImageUrl = ref<string | null>(null)
 const imageLoading = ref(true)
 
-const rawImageUrl = computed(() => {
-  if (!currentExample.value?.url) return null
-  return currentExample.value.url
-})
-
 // 加载图片 URL
 const loadImageUrl = async () => {
-  if (!rawImageUrl.value || !currentExample.value || !props.model) {
+  if (!currentExample.value || !props.model) {
+    imageLoading.value = false
+    previewImageUrl.value = null
+    return
+  }
+
+  // 获取当前示例的 filename
+  const filename = currentExample.value.filename
+  if (!filename) {
     imageLoading.value = false
     previewImageUrl.value = null
     return
   }
 
   imageLoading.value = true
-  try {
-    // 使用新方式：根据 version_id 和 filename 获取图片
-    // filename 从 URL 中提取（因为后端 Example.filename 是 @property，不会序列化到 JSON）
-    let filename: string | undefined
-    if (currentExample.value.url) {
-      try {
-        const url = new URL(currentExample.value.url)
-        filename = url.pathname.split('/').pop() || undefined
-      } catch {
-        // 如果不是有效的 URL，尝试直接提取文件名
-        filename = currentExample.value.url.split('/').pop() || undefined
-      }
-    }
-    previewImageUrl.value = await getImageUrl(
-      rawImageUrl.value,
-      props.model.version_id,
-      filename
-    )
-  } catch (error) {
-    console.error('加载图片失败:', error)
-    previewImageUrl.value = null
-  } finally {
-    imageLoading.value = false
-  }
+  // getImageUrl 已经处理了所有错误（包括 404），不会抛出错误，直接返回 null 表示图片不存在
+  previewImageUrl.value = await getImageUrl(
+    props.model.version_id,
+    filename
+  )
+  imageLoading.value = false
 }
 
 // 切换到上一张example
@@ -583,7 +534,9 @@ const handleImageError = () => {
 
 // 打开大图显示
 const openImageGallery = () => {
-  if (allExampleUrls.value.length > 0) {
+  if (allExampleFilenames.value.length > 0) {
+    // 设置初始索引为当前显示的example索引
+    galleryInitialIndex.value = currentExampleIndex.value
     showImageGallery.value = true
   }
 }
@@ -717,10 +670,6 @@ const close = () => {
   emit('close')
 }
 
-// 切换隐私模式
-const togglePrivacyMode = () => {
-  emit('toggle-privacy-mode')
-}
 
 // 重置模型元数据
 const resetting = ref(false)

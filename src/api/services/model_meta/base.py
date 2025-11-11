@@ -87,13 +87,13 @@ class AbstractModelMetaService(ABC):
         """
         保存模型元数据。
         
-        对于本地服务（LocalModelMetaService）：
-            - 下载远程示例图片到本地
-            - 转换 URL 为本地 file:// URL
-            - 序列化到本地 metadata.json
+        对于数据库服务（ModelMetaDbService）：
+            - 下载远程示例图片到本地（可选）
+            - 保存模型元数据到数据库
+            - 示例图片信息存储在数据库的 JSON 列中
         
         对于远程服务（CivitaiService）：
-            - 委托给 local_model_meta_service 保存
+            - 委托给数据库服务保存
         
         :param model_meta: 模型元数据（必须包含 type 字段）
         :return: 保存后的模型元数据

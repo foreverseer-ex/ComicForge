@@ -3,15 +3,15 @@
     <div
       v-for="(image, index) in images"
       :key="index"
-      class="flex flex-col gap-2"
+      class="relative w-56 rounded-md overflow-hidden border"
+      :class="[
+        isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white',
+        isSelected(image.id) ? (isDark ? 'ring-2 ring-blue-500' : 'ring-2 ring-blue-600') : ''
+      ]"
     >
-      <!-- 图片卡片 -->
+      <!-- 图片区域 -->
       <div
-        class="relative w-56 h-56 rounded-md overflow-hidden border cursor-pointer group"
-        :class="[
-          isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white',
-          isSelected(image.id) ? (isDark ? 'ring-2 ring-blue-500' : 'ring-2 ring-blue-600') : ''
-        ]"
+        class="w-full h-56 cursor-pointer"
         @click="handleImageClick(index)"
       >
         <!-- 加载中占位 -->
@@ -34,19 +34,19 @@
         />
       </div>
 
-      <!-- 选用按钮 -->
+      <!-- 选用按钮：集成在卡片底部 -->
       <button
         @click.stop="toggleImport(image.id)"
-        class="w-56 px-4 py-2 rounded-md flex items-center justify-center gap-2 transition-colors font-medium text-sm"
-        :class="
+        class="w-full px-4 py-2 flex items-center justify-center gap-2 transition-colors font-medium text-sm border-t"
+        :class="[
           isSelected(image.id)
             ? isDark
-              ? 'bg-green-600 hover:bg-green-700 text-white'
-              : 'bg-green-500 hover:bg-green-600 text-white'
+              ? 'bg-green-600 hover:bg-green-700 text-white border-green-700'
+              : 'bg-green-500 hover:bg-green-600 text-white border-green-400'
             : isDark
-            ? 'bg-blue-600 hover:bg-blue-700 text-white'
-            : 'bg-blue-500 hover:bg-blue-600 text-white'
-        "
+            ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-700'
+            : 'bg-blue-500 hover:bg-blue-600 text-white border-blue-400'
+        ]"
       >
         <span v-if="isSelected(image.id)">✓ 已选用</span>
         <span v-else>选用</span>
@@ -97,15 +97,16 @@ const imageUrls = computed(() => {
   return props.images.map(img => img.imageUrl || '')
 })
 
-// 监听 initialSelected 变化
+// 监听 initialSelected 变化（当父组件更新导入状态时，同步更新选中状态）
 watch(
   () => props.initialSelected,
   (newVal) => {
-    if (newVal) {
+    if (newVal && Array.isArray(newVal)) {
+      // 直接使用新的选中状态（因为这是从数据库加载的真实状态）
       selectedJobIds.value = new Set(newVal)
     }
   },
-  { immediate: true }
+  { immediate: true, deep: true }
 )
 
 const isSelected = (id: string): boolean => {

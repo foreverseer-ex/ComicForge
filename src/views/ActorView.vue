@@ -20,21 +20,6 @@
       </div>
       
       <div class="flex items-center gap-2">
-        <!-- 隐私模式 -->
-        <button
-          @click="togglePrivacyMode"
-          :class="[
-            'p-2 rounded-lg transition-colors',
-            privacyMode
-              ? isDark ? 'text-blue-400' : 'text-blue-600'
-              : isDark ? 'text-gray-400' : 'text-gray-500',
-            isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-          ]"
-          :title="privacyMode ? '隐私模式：已启用（点击关闭）' : '隐私模式：已关闭（点击启用）'"
-        >
-          <EyeSlashIcon v-if="privacyMode" class="w-5 h-5" />
-          <EyeIcon v-else class="w-5 h-5" />
-        </button>
         <button
           v-if="actors.length > 0"
           @click="handleClearAll"
@@ -317,7 +302,7 @@ import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
 import { usePrivacyStore } from '../stores/privacy'
 import { storeToRefs } from 'pinia'
-import { UserGroupIcon, PlusIcon, TrashIcon, EyeIcon, EyeSlashIcon } from '@heroicons/vue/24/outline'
+import { UserGroupIcon, PlusIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import ActorCard from '../components/ActorCard.vue'
 import ActorDetailDialog from '../components/ActorDetailDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -343,10 +328,6 @@ const { selectedProjectId } = storeToRefs(projectStore)
 const privacyStore = usePrivacyStore()
 const { privacyMode } = storeToRefs(privacyStore)
 
-// 切换隐私模式
-const togglePrivacyMode = () => {
-  privacyStore.togglePrivacyMode()
-}
 
 const loading = ref(false)
 const actors = ref<Actor[]>([])
@@ -440,8 +421,21 @@ const saveActor = async () => {
 }
 
 // 打开详情对话框
-const openDetailDialog = (actor: Actor) => {
-  detailActor.value = actor
+const openDetailDialog = async (actor: Actor) => {
+  // 重新加载最新的actor数据，确保数据是最新的
+  try {
+    const response = await api.get(`/actor/${actor.actor_id}`)
+    const updatedActor = (response as any)?.data || response
+    if (updatedActor) {
+      detailActor.value = updatedActor
+    } else {
+      detailActor.value = actor
+    }
+  } catch (error) {
+    console.error('加载角色详情失败:', error)
+    // 如果加载失败，使用列表中的数据
+    detailActor.value = actor
+  }
 }
 
 // 编辑角色
@@ -546,7 +540,10 @@ const handleRefresh = async () => {
 // 检查是否有正在生成的立绘
 const hasGeneratingPortrait = computed(() => {
   return actors.value.some(actor => 
-    actor.examples && actor.examples.some((ex: any) => !ex.image_path)
+    actor.examples && actor.examples.some((ex: any) => {
+      const imagePath = ex?.filename || ex?.image_path
+      return !imagePath || (typeof imagePath === 'string' && imagePath.startsWith('generating_'))
+    })
   )
 })
 

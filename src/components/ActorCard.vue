@@ -130,29 +130,34 @@ const { isDark } = storeToRefs(themeStore)
 const exampleCount = computed(() => props.actor.examples?.length || 0)
 const tagCount = computed(() => Object.keys(props.actor.tags || {}).length)
 
-// 检查是否有正在生成的立绘（image_path 为 null）
+// 检查是否有正在生成的立绘（filename 以 generating_ 开头或为 null）
 const hasGeneratingExample = computed(() => {
   if (!props.actor.examples || exampleCount.value === 0) return false
-  return props.actor.examples.some((ex: any) => !ex.image_path)
+  return props.actor.examples.some((ex: any) => {
+    const filename = ex?.filename || ex?.image_path // 兼容两种字段名
+    return !filename || filename.startsWith('generating_')
+  })
 })
 
 const firstExampleImage = computed(() => {
   if (!props.actor.examples || exampleCount.value === 0) return null
   const firstExample = props.actor.examples[0]
-  if (!firstExample?.image_path) return null  // image_path 为 None 时返回 null（不显示图片）
+  // 兼容 filename 和 image_path 两种字段名
+  const imagePath = firstExample?.filename || firstExample?.image_path
+  if (!imagePath || imagePath.startsWith('generating_')) return null  // 正在生成中，不显示图片
   
   const baseURL = getApiBaseURL()
-  // 注意：image_path 可能是相对路径，需要根据实际情况处理
+  // 注意：imagePath 可能是相对路径，需要根据实际情况处理
   // 如果是相对路径，需要通过 /file/actor-example 端点获取
-  // 这里暂时保持原样，因为 image_path 可能已经是完整路径
-  if (firstExample.image_path.startsWith('http://') || firstExample.image_path.startsWith('https://')) {
-    return firstExample.image_path
+  // 这里暂时保持原样，因为 imagePath 可能已经是完整路径
+  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+    return imagePath
   }
   // 如果是相对路径，需要通过actor-example端点
   // 但这里我们不知道example_index，所以暂时返回null
   // 实际上应该通过 /file/actor-example?actor_id=...&example_index=0 获取
-  // 使用 image_path 作为缓存破坏参数，确保不同图片使用不同的 URL
-  return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=0&path=${encodeURIComponent(firstExample.image_path)}`
+  // 使用 imagePath 作为缓存破坏参数，确保不同图片使用不同的 URL
+  return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=0&path=${encodeURIComponent(imagePath)}`
 })
 
 // 图片重试相关状态
@@ -193,17 +198,23 @@ const handleImageLoad = () => {
   imageLoadKey.value = 0
 }
 
-// 监听 actor.examples 的变化，当 image_path 从 null 变为有值时，强制刷新图片
+// 监听 actor.examples 的变化，当 filename 从 generating_ 或 null 变为有值时，强制刷新图片
 watch(
   () => props.actor.examples,
   (newExamples, oldExamples) => {
-    // 检查是否有 example 的 image_path 从 null 变为有值
+    // 检查是否有 example 的 filename 从 generating_ 或 null 变为有值
     if (newExamples && oldExamples) {
-      const hadNullImage = oldExamples.some((ex: any) => !ex.image_path)
-      const hasImageNow = newExamples.some((ex: any) => ex.image_path)
+      const hadGeneratingImage = oldExamples.some((ex: any) => {
+        const filename = ex?.filename || ex?.image_path
+        return !filename || filename.startsWith('generating_')
+      })
+      const hasImageNow = newExamples.some((ex: any) => {
+        const filename = ex?.filename || ex?.image_path
+        return filename && !filename.startsWith('generating_')
+      })
       
-      // 如果之前有 null 的 image_path，现在有了，强制刷新图片
-      if (hadNullImage && hasImageNow) {
+      // 如果之前有 generating_ 的 filename，现在有了，强制刷新图片
+      if (hadGeneratingImage && hasImageNow) {
         imageTimestamp.value = Date.now()
         imageLoadKey.value++
         imageRetryCount.value = 0

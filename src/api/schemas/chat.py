@@ -90,12 +90,12 @@ class ChatMessage(SQLModel, table=True):
         ]
         
         # 例子2，协议建议：如果在任务中，产生了某些非文字内容的建议，例如图片建议，可以通过协议的方式加入suggests
-        # 协议建议的格式为[协议名称]:协议参数
-        # 例如，从job绑定角色立绘的协议为[actor_example_job]:{job_id}，那么生成的建议为
+        # 协议建议的格式为[协议名称]:参数1=值1&参数2=值2（类似 URL 查询参数）
+        # 例如，从job绑定角色立绘的协议为[actor_example_job]:actor_id={actor_id}&job_id={job_id}，那么生成的建议为
         >>> [
-            "[actor_example_job]:{job-id1}",
-            "[actor_example_job]:{job-id2}",
-            "[actor_example_job]:{job-id3}",
+            "[actor_example_job]:actor_id={actor-id}&job_id={job-id1}",
+            "[actor_example_job]:actor_id={actor-id}&job_id={job-id2}",
+            "[actor_example_job]:actor_id={actor-id}&job_id={job-id3}",
             ...
         ]
         """,

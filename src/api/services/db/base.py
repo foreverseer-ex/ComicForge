@@ -33,8 +33,6 @@ def init_db() -> None:
 
     # 创建所有表
     SQLModel.metadata.create_all(engine)
-    
-    logger.success(f"数据库已初始化: {database_path}")
 
 
 def drop_all_tables() -> None:

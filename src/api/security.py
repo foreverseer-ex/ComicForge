@@ -3,8 +3,8 @@ from typing import Optional, Literal
 import os
 import hashlib
 from jose import jwt
-from passlib.context import CryptContext
 from loguru import logger
+import bcrypt
 
 # 配置（可通过环境变量覆盖）
 JWT_ALG = os.getenv("JWT_ALG", "HS256")
@@ -12,15 +12,19 @@ JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-me")
 ACCESS_TOKEN_EXPIRE_SECONDS = int(os.getenv("ACCESS_TOKEN_EXPIRE_SECONDS", "900"))  # 15min 默认
 REFRESH_TOKEN_EXPIRE_SECONDS = int(os.getenv("REFRESH_TOKEN_EXPIRE_SECONDS", "1209600"))  # 14d 默认
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    """使用 bcrypt 哈希密码"""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    """验证密码"""
+    try:
+        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    except Exception as e:
+        logger.warning(f"密码验证失败: {e}")
+        return False
 
 
 def create_access_token(*, sub: str, role: str) -> str:

@@ -175,7 +175,13 @@ def refresh(response: Response, request: Request):
                 RefreshToken.revoked == False
             )
         ).first()
-        if rec is None or rec.expires_at < datetime.now(timezone.utc):
+        if rec is None:
+            raise HTTPException(status_code=401, detail="刷新令牌失效")
+        # 处理时区问题：如果 expires_at 是 offset-naive，假设它是 UTC
+        expires_at = rec.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
             raise HTTPException(status_code=401, detail="刷新令牌失效")
         # 颁发新 access
         user = db.get(User, rec.user_id)
@@ -200,7 +206,13 @@ def refresh_cookie(response: Response, request: Request):
             raise HTTPException(status_code=401, detail="刷新令牌无效")
         token_h = token_hash(token)
         rec = db.exec(select(RefreshToken).where(RefreshToken.token_hash == token_h, RefreshToken.revoked == False)).first()
-        if rec is None or rec.expires_at < datetime.now(timezone.utc):
+        if rec is None:
+            raise HTTPException(status_code=401, detail="刷新令牌失效")
+        # 处理时区问题：如果 expires_at 是 offset-naive，假设它是 UTC
+        expires_at = rec.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
             raise HTTPException(status_code=401, detail="刷新令牌失效")
         # 颁发新 access
         access = create_access_token(sub=str(rec.user_id), role=db.get(User, rec.user_id).role)

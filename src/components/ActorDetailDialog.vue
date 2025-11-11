@@ -119,12 +119,12 @@
               </div>
               
               <div 
-                v-if="currentExample && currentExample.image_path"
+                v-if="currentExample && hasValidImage(currentExample)"
                 :class="[
                   'w-full h-96 rounded-lg overflow-hidden border flex flex-col cursor-pointer relative',
                   isDark ? 'border-gray-600 bg-gray-900' : 'border-gray-200 bg-gray-50'
                 ]"
-                @click="openImageGallery"
+                @click="openCurrentImageGallery"
               >
                 <div class="flex-1 flex items-center justify-center">
                   <img
@@ -152,7 +152,7 @@
                 </div>
               </div>
               <div 
-                v-else-if="currentExample && !currentExample.image_path"
+                v-else-if="currentExample && !hasValidImage(currentExample)"
                 :class="[
                   'w-full h-96 rounded-lg border flex flex-col items-center justify-center',
                   isDark ? 'border-gray-600 bg-gray-900' : 'border-gray-200 bg-gray-50'
@@ -380,7 +380,7 @@
                       @contextmenu.prevent="showExampleContextMenu($event, example, index)"
                     >
                       <!-- 有图片路径时显示图片 -->
-                      <template v-if="example.image_path">
+                      <template v-if="hasValidImage(example)">
                         <img
                           v-if="!privacyMode"
                           :src="getExampleImageUrlWithRetry(example, index)"
@@ -394,7 +394,7 @@
                           <span :class="['text-xs', isDark ? 'text-gray-500' : 'text-gray-500']">隐私模式</span>
                         </div>
                       </template>
-                      <!-- 没有图片路径时显示生成中 -->
+                      <!-- 没有图片路径或正在生成时显示生成中 -->
                       <template v-else>
                         <div 
                           :class="[
@@ -647,7 +647,7 @@
     <!-- 大图显示对话框 -->
     <ImageGalleryDialog
       :images="allExampleUrls"
-      :initial-index="currentExampleIndex"
+      :initial-index="galleryInitialIndex"
       :visible="showImageGallery"
       @close="showImageGallery = false"
     />
@@ -761,6 +761,7 @@ const exampleCount = computed(() => props.actor?.examples?.length || 0)
 const currentExampleIndex = ref(0)
 const showParamsDialog = ref(false)
 const showImageGallery = ref(false)
+const galleryInitialIndex = ref(0) // 用于ImageGalleryDialog的初始索引
 
 // 确认对话框状态
 const confirmDialog = ref({
@@ -782,28 +783,66 @@ const currentExample = computed(() => {
 })
 
 // 所有example的URL数组（用于大图显示）
+// 同时记录每个URL对应的原始example索引
 const allExampleUrls = computed(() => {
   if (!props.actor?.examples) return []
-  return props.actor.examples
-    .map((ex: any, index: number) => {
-      if (!ex?.image_path) return null
-      return getExampleImageUrl(ex, index)
-    })
-    .filter((url): url is string => url !== null && url !== '')
+  const urls: string[] = []
+  props.actor.examples.forEach((ex: any, index: number) => {
+    // 兼容 filename 和 image_path 两种字段名
+    const imagePath = ex?.filename || ex?.image_path
+    if (imagePath && !imagePath.startsWith('generating_')) {
+      const url = getExampleImageUrl(ex, index)
+      if (url) {
+        urls.push(url)
+      }
+    }
+  })
+  return urls
 })
+
+// 获取有效图片的索引映射（从原始example索引到allExampleUrls索引）
+const getValidImageIndex = (exampleIndex: number): number => {
+  if (!props.actor?.examples) return -1
+  let validIndex = 0
+  for (let i = 0; i <= exampleIndex && i < props.actor.examples.length; i++) {
+    const ex = props.actor.examples[i]
+    const imagePath = ex?.filename || ex?.image_path
+    if (imagePath && !imagePath.startsWith('generating_') && typeof imagePath === 'string') {
+      if (i === exampleIndex) {
+        return validIndex
+      }
+      validIndex++
+    }
+  }
+  return -1
+}
 
 // const firstExample = computed(() => {
 //   if (!props.actor?.examples || props.actor.examples.length === 0) return null
 //   return props.actor.examples[0]
 // })
 
+// 检查example是否有有效的图片
+const hasValidImage = (example: any): boolean => {
+  if (!example) return false
+  const imagePath = example?.filename || example?.image_path
+  if (!imagePath) return false
+  if (typeof imagePath !== 'string') return false
+  if (imagePath.trim() === '') return false
+  if (imagePath.startsWith('generating_')) return false
+  return true
+}
+
 const getExampleImageUrl = (example: any, index: number) => {
-  if (!example?.image_path || !props.actor) return ''
+  if (!props.actor) return ''
+  // 兼容 filename 和 image_path 两种字段名
+  const imagePath = example?.filename || example?.image_path
+  if (!imagePath || imagePath.startsWith('generating_')) return '' // 正在生成中，返回空字符串
   const baseURL = getApiBaseURL()
   // 通过 actor-example 端点获取图片
-  // 使用 image_path 作为缓存破坏参数，确保不同图片使用不同的 URL
-  // 这样即使两个 job 名称相同，只要 image_path 不同，URL 就不同
-  return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=${index}&path=${encodeURIComponent(example.image_path)}`
+  // 使用 imagePath 作为缓存破坏参数，确保不同图片使用不同的 URL
+  // 这样即使两个 job 名称相同，只要 imagePath 不同，URL 就不同
+  return `${baseURL}/file/actor-example?actor_id=${props.actor.actor_id}&example_index=${index}&path=${encodeURIComponent(imagePath)}`
 }
 
 // 图片重试相关状态
@@ -877,10 +916,13 @@ const handleExampleImageLoad = (_event: Event, index: number) => {
   exampleImageLoadKeys.value[index] = 0
 }
 
-// 检查是否有正在生成的立绘（image_path 为 None）
+// 检查是否有正在生成的立绘（filename 为 None 或以 generating_ 开头）
 const hasGeneratingPortrait = computed(() => {
   if (!props.actor?.examples) return false
-  return props.actor.examples.some((ex: any) => !ex.image_path)
+  return props.actor.examples.some((ex: any) => {
+    const imagePath = ex?.filename || ex?.image_path
+    return !imagePath || imagePath.startsWith('generating_')
+  })
 })
 
 // 每5秒检查一次正在生成的立绘状态（如果有正在生成的立绘）
@@ -898,7 +940,7 @@ watch(() => props.actor, (newActor) => {
   // 初始化状态快照
   if (newActor?.examples) {
     lastExamplesState.value = JSON.stringify(newActor.examples.map((ex: any) => ({
-      image_path: ex.image_path,
+      filename: ex.filename || ex.image_path,
       title: ex.title
     })))
   }
@@ -913,7 +955,7 @@ watch(() => props.actor, (newActor) => {
         if (actorData && actorData.examples) {
           // 比较当前状态和上次状态
           const currentState = JSON.stringify(actorData.examples.map((ex: any) => ({
-            image_path: ex.image_path,
+            filename: ex.filename || ex.image_path,
             title: ex.title
           })))
           
@@ -1158,10 +1200,17 @@ watch(() => props.actor, (newActor, oldActor) => {
 
 // 查看立绘（点击时）
 const viewExample = (index: number) => {
-  // 设置当前索引并打开大图
+  // 设置当前索引
   currentExampleIndex.value = index
-  if (props.actor?.examples[index]?.image_path) {
-    openImageGallery()
+  const example = props.actor?.examples[index]
+  if (example && hasValidImage(example)) {
+    // 找到该example在allExampleUrls中的索引
+    const validIndex = getValidImageIndex(index)
+    if (validIndex >= 0 && allExampleUrls.value.length > 0) {
+      // 临时保存有效索引，用于ImageGalleryDialog
+      galleryInitialIndex.value = validIndex
+      openImageGallery()
+    }
   }
 }
 
@@ -1176,9 +1225,27 @@ const viewExampleParams = (index: number) => {
   }
 }
 
-// 打开大图显示
+// 打开当前索引的大图显示
+const openCurrentImageGallery = () => {
+  if (currentExample.value && hasValidImage(currentExample.value)) {
+    const validIndex = getValidImageIndex(currentExampleIndex.value)
+    if (validIndex >= 0 && allExampleUrls.value.length > 0) {
+      galleryInitialIndex.value = validIndex
+      showImageGallery.value = true
+    }
+  }
+}
+
+// 打开大图显示（通用方法）
 const openImageGallery = () => {
   if (allExampleUrls.value.length > 0) {
+    // 如果没有设置galleryInitialIndex，使用当前example的有效索引
+    if (currentExample.value && hasValidImage(currentExample.value)) {
+      const validIndex = getValidImageIndex(currentExampleIndex.value)
+      if (validIndex >= 0) {
+        galleryInitialIndex.value = validIndex
+      }
+    }
     showImageGallery.value = true
   }
 }

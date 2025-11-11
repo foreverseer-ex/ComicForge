@@ -688,10 +688,22 @@ async def _monitor_single_job_and_update_portrait(
                 shutil.copy2(job_image_path, out_path)
                 logger.info(f"已复制任务图像: {job_image_path} -> {out_path}")
                 
-                # 更新对应的 Example
+                # 如果 title 为空或为 'portrait'，且 job.name 存在，使用 job.name
+                # 如果 desc 为空，且 job.desc 存在，使用 job.desc
+                final_title = title
+                if (not final_title or final_title.strip() == '' or final_title == 'portrait') and job.name:
+                    final_title = job.name
+                elif not final_title or final_title.strip() == '':
+                    final_title = 'portrait'
+                
+                final_desc = desc
+                if (not final_desc or final_desc.strip() == '') and job.desc:
+                    final_desc = job.desc
+                
+                # 更新对应的 Example（使用最终的 title 和 desc）
                 example = Example(
-                    title=title,
-                    desc=desc,
+                    title=final_title,
+                    desc=final_desc,
                     draw_args=draw_args,
                     filename=filename,
                     extra={"job_id": job_id}  # 保存 job_id 到 extra
@@ -699,7 +711,7 @@ async def _monitor_single_job_and_update_portrait(
                 
                 updated = ActorService.update_example(actor_id, example_index, example)
                 if updated:
-                    logger.success(f"监控任务完成: 为 Actor {actor.name} 更新立绘成功, title={title}, file={filename}, job_id={job_id}, example_index={example_index}")
+                    logger.success(f"监控任务完成: 为 Actor {actor.name} 更新立绘成功, title={final_title}, file={filename}, job_id={job_id}, example_index={example_index}")
                 else:
                     logger.error(f"监控任务失败: 更新立绘示例失败 {actor_id}, example_index={example_index}")
                 
@@ -902,6 +914,18 @@ async def add_portrait_from_job(
     # 解析 DrawArgs
     draw_args = DrawArgs(**job.draw_args)
     
+    # 如果 title 为空或为 'portrait'，且 job.name 存在，使用 job.name
+    # 如果 desc 为空，且 job.desc 存在，使用 job.desc
+    final_title = title
+    if (not final_title or final_title.strip() == '' or final_title == 'portrait') and job.name:
+        final_title = job.name
+    elif not final_title or final_title.strip() == '':
+        final_title = 'portrait'
+    
+    final_desc = desc
+    if (not final_desc or final_desc.strip() == '') and job.desc:
+        final_desc = job.desc
+    
     # 检查 job 是否已完成（图片是否存在）
     job_image_path = jobs_home / f"{job_id}.png"
     job_completed = job_image_path.exists()
@@ -940,10 +964,10 @@ async def add_portrait_from_job(
         shutil.copy2(job_image_path, out_path)
         logger.info(f"已复制任务图像: {job_image_path} -> {out_path}")
         
-        # 创建 Example
+        # 创建 Example（使用最终的 title 和 desc）
         example = Example(
-            title=title,
-            desc=desc,
+            title=final_title,
+            desc=final_desc,
             draw_args=draw_args,
             filename=filename,
             extra={"job_id": job_id}
@@ -954,11 +978,11 @@ async def add_portrait_from_job(
         if not updated:
             raise HTTPException(status_code=500, detail=f"添加示例失败: {actor_id}")
         
-        logger.success(f"已从已完成任务添加立绘: actor_id={actor_id}, title={title}, file={filename}, job_id={job_id}")
+        logger.success(f"已从已完成任务添加立绘: actor_id={actor_id}, title={final_title}, file={filename}, job_id={job_id}")
         return {
             "job_id": job_id,
             "actor_id": actor_id,
-            "title": title,
+            "title": final_title,
             "message": f"已成功添加立绘到角色 {actor.name}",
             "completed": True
         }
@@ -966,8 +990,8 @@ async def add_portrait_from_job(
         # Job 未完成，创建 placeholder 并启动监控任务
         temp_filename = f"generating_{job_id[:8]}.png"
         example = Example(
-            title=title,
-            desc=desc,
+            title=final_title,
+            desc=final_desc,
             draw_args=draw_args,
             filename=temp_filename,
             extra={"job_id": job_id}
@@ -981,24 +1005,24 @@ async def add_portrait_from_job(
         # 获取刚添加的示例的索引（最后一个）
         example_index = len(updated.examples) - 1
         
-        # 启动监控任务
+        # 启动监控任务（传递最终的 title 和 desc）
         asyncio.create_task(
             _monitor_single_job_and_update_portrait(
                 job_id=job_id,
                 actor_id=actor_id,
                 project_id=project_id,
-                title=title,
-                desc=desc,
+                title=final_title,
+                desc=final_desc,
                 draw_args=draw_args,
                 example_index=example_index
             )
         )
         
-        logger.info(f"已启动监控任务: job_id={job_id}, actor_id={actor_id}, title={title}")
+        logger.info(f"已启动监控任务: job_id={job_id}, actor_id={actor_id}, title={final_title}")
         return {
             "job_id": job_id,
             "actor_id": actor_id,
-            "title": title,
+            "title": final_title,
             "message": f"已启动监控任务，立绘将在 job 完成后自动添加到角色 {actor.name}",
             "completed": False
         }

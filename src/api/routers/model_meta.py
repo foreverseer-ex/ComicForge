@@ -11,7 +11,7 @@ from loguru import logger
 from pydantic import BaseModel
 import httpx
 
-from api.services.model_meta import civitai_model_meta_service, local_model_meta_service
+from api.services.model_meta import civitai_model_meta_service, model_meta_db_service
 from api.utils.civitai import AIR
 from api.settings import app_settings
 
@@ -91,7 +91,7 @@ async def import_model(request: ImportModelRequest) -> ImportModelResponse:
         logger.info(f"开始导入模型: {request.air} (version_id={air.version_id})")
         
         # 检查模型是否已存在（通过 version_id）
-        existing_meta = local_model_meta_service.get_by_id(air.version_id)
+        existing_meta = model_meta_db_service.get_by_id(air.version_id)
         if existing_meta is not None:
             logger.info(f"模型已存在，跳过导入: {existing_meta.name} ({request.air})")
             return ImportModelResponse(
@@ -121,7 +121,7 @@ async def import_model(request: ImportModelRequest) -> ImportModelResponse:
                 error=f"未找到版本 ID: {air.version_id}"
             )
         
-        # 保存到本地（包括下载示例图片，支持并行或串行下载）
+        # 保存到数据库（包括下载示例图片，支持并行或串行下载）
         saved_meta, failed_image_count, total_image_count = await civitai_model_meta_service.save(
             model_meta, 
             download_images=request.download_images,
@@ -133,9 +133,6 @@ async def import_model(request: ImportModelRequest) -> ImportModelResponse:
                 air=request.air,
                 error="保存模型元数据失败"
             )
-        
-        # 刷新本地缓存（在线程池中执行，避免阻塞）
-        await asyncio.to_thread(local_model_meta_service.flush)
         
         logger.success(f"导入成功: {saved_meta.name} ({request.air})")
         
@@ -230,9 +227,9 @@ async def batch_import_models(request: BatchImportModelRequest) -> BatchImportMo
 @router.get("/loras", summary="获取本地 LoRA 元数据列表")
 async def get_loras() -> List[Dict[str, Any]]:
     """
-    获取本地模型元数据中的 LoRA 列表。
+    获取数据库中的 LoRA 模型列表。
     
-    注意：此端点只返回本地缓存的模型元数据，不检查 SD-Forge 连接状态。
+    注意：此端点只返回数据库中存储的模型元数据，不检查 SD-Forge 连接状态。
     模型是否在 SD-Forge 中可用，应该在生成图片时检查。
     
     Returns:
@@ -243,8 +240,8 @@ async def get_loras() -> List[Dict[str, Any]]:
         - 其他元数据字段
     """
     try:
-        # 获取本地 LoRA 元数据
-        lora_metas = local_model_meta_service.lora_list
+        # 从数据库获取 LoRA 元数据
+        lora_metas = model_meta_db_service.lora_list
         
         # 构建返回列表
         result = []
@@ -265,9 +262,9 @@ async def get_loras() -> List[Dict[str, Any]]:
 @router.get("/checkpoint", summary="获取本地 Checkpoint 元数据列表")
 async def get_checkpoints() -> List[Dict[str, Any]]:
     """
-    获取本地模型元数据中的 Checkpoint 列表。
+    获取数据库中的 Checkpoint 模型列表。
     
-    注意：此端点只返回本地缓存的模型元数据，不检查 SD-Forge 连接状态。
+    注意：此端点只返回数据库中存储的模型元数据，不检查 SD-Forge 连接状态。
     模型是否在 SD-Forge 中可用，应该在生成图片时检查。
     
     Returns:
@@ -277,8 +274,8 @@ async def get_checkpoints() -> List[Dict[str, Any]]:
         - 其他元数据字段
     """
     try:
-        # 获取本地 Checkpoint 元数据
-        checkpoint_metas = local_model_meta_service.sd_list
+        # 从数据库获取 Checkpoint 元数据
+        checkpoint_metas = model_meta_db_service.sd_list
         
         # 构建返回列表
         result = []
@@ -334,8 +331,8 @@ async def get_model_image(
         
         # 优先使用 version_id + filename 方式（推荐）
         if version_id is not None and filename:
-            # 从本地缓存中查找模型
-            model_meta = local_model_meta_service.get_by_id(version_id)
+            # 从数据库中查找模型
+            model_meta = model_meta_db_service.get_by_id(version_id)
             if not model_meta:
                 raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
             
@@ -398,10 +395,40 @@ async def get_model_image(
 
 # ==================== 删除端点 ====================
 
+@router.delete("/clear", summary="清空所有模型元数据")
+async def clear_all_models() -> dict:
+    """
+    清空所有模型元数据。
+    
+    从数据库中删除所有模型元数据记录（不包括下载的示例图片文件）。
+    
+    Returns:
+        删除结果，包含删除的元数据数量
+    
+    Raises:
+        HTTPException: 清空失败时返回 500
+    """
+    try:
+        # 清空所有模型元数据
+        deleted_count = model_meta_db_service.clear_all()
+        
+        logger.info(f"清空所有模型元数据成功，共删除 {deleted_count} 个")
+        return {
+            "deleted_count": deleted_count,
+            "message": f"已清空所有模型元数据，共删除 {deleted_count} 个"
+        }
+        
+    except Exception as e:
+        logger.exception(f"清空所有模型元数据失败: {e}")
+        raise HTTPException(status_code=500, detail=f"清空所有模型元数据失败: {str(e)}")
+
+
 @router.delete("/{version_id}", summary="删除模型元数据")
 async def delete_model(version_id: int) -> dict:
     """
-    删除指定版本ID的模型元数据及其关联的示例图片。
+    删除指定版本ID的模型元数据。
+    
+    从数据库中删除模型元数据记录（不包括下载的示例图片文件）。
     
     Args:
         version_id: Civitai 模型版本 ID（路径参数）
@@ -413,18 +440,15 @@ async def delete_model(version_id: int) -> dict:
         404: 模型元数据不存在
     """
     try:
-        # 从本地缓存中查找模型
-        model_meta = local_model_meta_service.get_by_id(version_id)
+        # 从数据库中查找模型
+        model_meta = model_meta_db_service.get_by_id(version_id)
         if not model_meta:
             raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
         
-        # 删除模型元数据（异步删除，不会阻塞）
-        success = await local_model_meta_service.delete(model_meta)
+        # 删除模型元数据
+        success = await model_meta_db_service.delete_by_id(version_id)
         if not success:
             raise HTTPException(status_code=500, detail="删除模型元数据失败")
-        
-        # 刷新本地缓存
-        await asyncio.to_thread(local_model_meta_service.flush)
         
         logger.info(f"删除模型元数据成功: {model_meta.name} (version_id={version_id})")
         return {
@@ -459,17 +483,14 @@ async def reset_model_meta(version_id: int, parallel_download: bool = False) -> 
     """
     try:
         # 检查模型是否存在
-        existing_meta = local_model_meta_service.get_by_id(version_id)
+        existing_meta = model_meta_db_service.get_by_id(version_id)
         if not existing_meta:
             raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
-        
-        # 获取 AIR 标识符（如果存在）
-        air_str = existing_meta.air if hasattr(existing_meta, 'air') and existing_meta.air else None
         
         logger.info(f"开始重置模型元数据: {existing_meta.name} (version_id={version_id})")
         
         # 删除现有模型元数据
-        success = await local_model_meta_service.delete(existing_meta)
+        success = await model_meta_db_service.delete_by_id(version_id)
         if not success:
             logger.warning(f"删除现有模型元数据失败，继续尝试重新下载 (version_id={version_id})")
         
@@ -488,16 +509,14 @@ async def reset_model_meta(version_id: int, parallel_download: bool = False) -> 
         if not model_meta:
             raise HTTPException(status_code=404, detail=f"未找到版本 ID: {version_id}")
         
-        # 保存到本地（包括重新下载示例图片）
+        # 保存到数据库（包括重新下载示例图片）
         saved_meta, failed_image_count, total_image_count = await civitai_model_meta_service.save(
             model_meta, 
+            download_images=True,
             parallel_download=parallel_download
         )
         if not saved_meta:
             raise HTTPException(status_code=500, detail="保存模型元数据失败")
-        
-        # 刷新本地缓存
-        await asyncio.to_thread(local_model_meta_service.flush)
         
         logger.success(f"重置成功: {saved_meta.name} (version_id={version_id})")
         
@@ -545,7 +564,7 @@ async def set_model_preference(version_id: int, preference: str) -> Dict[str, An
                 detail=f"无效的偏好值: {preference}，必须是 'liked', 'neutral' 或 'disliked'"
             )
         
-        meta = await local_model_meta_service.set_preference(version_id, preference)
+        meta = model_meta_db_service.set_preference(version_id, preference)
         if not meta:
             raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
         

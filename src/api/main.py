@@ -26,7 +26,7 @@ from api.routers import (
 )
 from api.services.db.base import init_db
 from api.services.admin_init import init_admin_user
-from api.settings import AppSettings
+from api.settings import app_settings
 
 # 配置 uvicorn.access logger：过滤掉 /health 端点的访问日志
 class HealthCheckFilter(logging.Filter):
@@ -42,30 +42,20 @@ class HealthCheckFilter(logging.Filter):
 uvicorn_access_logger = logging.getLogger("uvicorn.access")
 uvicorn_access_logger.addFilter(HealthCheckFilter())
 
-# 加载配置
-app_settings = AppSettings.load()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期事件处理器"""
     # 启动时执行
-    logger.info("正在启动 ComicForge API 服务...")
-    
     # 初始化数据库
     init_db()
     
     # 初始化管理员账户
     init_admin_user()
     
-    logger.success("ComicForge API 服务启动成功！")
-    logger.info(f"API 文档地址: http://127.0.0.1:7864/docs")
-    logger.info(f"ReDoc 文档地址: http://127.0.0.1:7864/redoc")
-    
     yield
     
     # 关闭时执行
-    logger.info("正在关闭 ComicForge API 服务...")
 
 
 # 创建 FastAPI 应用实例

@@ -140,10 +140,10 @@ class CivitaiDrawService(AbstractDrawService):
         :param args: 绘图参数
         :return: 包含 model_air, prompt, negative_prompt, scheduler, steps, cfg_scale, width, height, seed, clip_skip, positive_lora_airs, vae_air 的字典
         """
-        from api.services.model_meta import local_model_meta_service
+        from api.services.model_meta.db import model_meta_db_service
 
         # 获取模型的 AIR 标识符
-        model_meta = local_model_meta_service.get_by_version_name(args.model)
+        model_meta = model_meta_db_service.get_by_version_name(args.model)
         if not model_meta:
             raise RuntimeError(f"未找到模型: {args.model}")
 
@@ -155,7 +155,7 @@ class CivitaiDrawService(AbstractDrawService):
         negative_lora_airs: Dict[str, float] = {}
         if args.loras:
             for lora_name, strength in args.loras.items():
-                lora_meta = local_model_meta_service.get_by_version_name(lora_name)
+                lora_meta = model_meta_db_service.get_by_version_name(lora_name)
                 if not lora_meta:
                     logger.warning(f"未找到 LoRA 元数据: {lora_name}，跳过")
                     continue
@@ -168,7 +168,7 @@ class CivitaiDrawService(AbstractDrawService):
         # 转换 VAE 名称为 AIR
         vae_air: Optional[str] = None
         if args.vae:
-            vae_meta = local_model_meta_service.get_by_version_name(args.vae)
+            vae_meta = model_meta_db_service.get_by_version_name(args.vae)
             if vae_meta:
                 vae_air = vae_meta.air
                 logger.debug(f"VAE AIR: {vae_air}")
