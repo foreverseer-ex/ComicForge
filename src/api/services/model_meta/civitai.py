@@ -3,6 +3,7 @@ Civitai 模型元数据服务。
 
 从 Civitai API 获取模型元数据。
 """
+import re
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -10,6 +11,7 @@ import json
 
 import httpx
 from loguru import logger
+from numpy.ma.core import negative
 
 from api.schemas.model_meta import ModelMeta
 from api.schemas.draw import Example, DrawArgs
@@ -19,6 +21,7 @@ from api.constants.civitai import CIVITAI_BASE_URL
 from api.utils.hash import sha256
 from api.utils.civitai import AIR, normalize_type
 from api.utils.path import requests_home
+
 
 class CivitaiModelMetaService(AbstractModelMetaService):
     """
@@ -41,7 +44,7 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         except Exception as e:
             logger.exception(f"测试 Civitai 连接失败: {e}")
             return False
-    
+
     def _parse_version_data(self, version_data: dict) -> ModelMeta:
         """
         解析 Civitai API 返回的版本数据为 ModelMeta。
@@ -50,40 +53,57 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         :return: 模型元数据
         """
 
-        
         # 获取模型基本信息（从 model 字段）
         model_info = version_data.get("model", {})
 
-        
         # 通过 AIR 标识符来规范化字段
         # AIR 包含 ecosystem（技术代际）信息，而不是 base_model
 
         air = AIR.parse(version_data['air'])
-        
+
         # 使用 AIR 解析出的规范化字段
         model_id = air.model_id
         version_id = air.version_id
         type_normalized = normalize_type(air.type)  # 规范化类型（lycoris -> lora）
         ecosystem_normalized = air.ecosystem
-        
+
         # 从 version_data 中提取真正的 base_model（如 Pony, Illustrious）
         # Civitai API 的 baseModel 字段可能是 "Pony", "Illustrious" 等
         # 直接使用原始值（保持大小写）
         raw_base_model = version_data.get("baseModel")
         base_model_normalized = raw_base_model.strip() if raw_base_model else None
-        
+
         # 解析示例图片
         examples: list[Example] = []
         for image_detail in version_data.get("images", []):
             meta = image_detail.get("meta", {})
             if meta is None:
-                meta={}
+                meta = {}
             metadata = image_detail.get("metadata", {})
-            
+
             # 从 URL 中提取文件名
             image_url = image_detail.get("url", "")
             filename = Path(httpx.URL(image_url).path.split('/')[-1]).name if image_url else "unknown.png"
-            
+            resources = meta.get("resources", [])
+            loras = dict()
+            # 从prompts里提取所有符合<lora:xxx:整数或小数>的项
+            prompt = meta.get("prompt", "")
+            negative_prompt = meta.get("negativePrompt", "")
+
+            for lora_name, weight in re.findall(r"<lora:([^:]+):([0-9.]+)>", prompt):
+                loras[lora_name] = float(weight)
+            for lora_name, weight in re.findall(r"<lora:([^:]+):([0-9.]+)>", negative_prompt):
+                loras[lora_name] = -float(weight)
+
+            for resource in resources:
+                if resource["type"] == "model":
+                    continue
+                elif resource["type"] == "lora":
+                    lora_name = resource["name"]
+                    if lora_name in loras:
+                        continue
+                    if 'weight' in resource:
+                        loras[resource["name"]] = resource["weight"]
             examples.append(
                 Example(
                     title=None,
@@ -96,19 +116,20 @@ class CivitaiModelMetaService(AbstractModelMetaService):
                         seed=meta.get("seed", -1),
                         model=meta.get("Model", ""),
                         steps=meta.get("steps", 0),
-                        prompt=meta.get("prompt", ""),
+                        prompt=prompt,
                         sampler=meta.get("sampler", ""),
                         cfg_scale=meta.get("cfgScale", 0),
-                        negative_prompt=meta.get("negativePrompt", ""),
+                        negative_prompt=negative_prompt,
                         clip_skip=meta.get("clipSkip"),
+                        loras=loras,
                     ),
                 )
             )
-        
+
         # 获取文件信息
         files = version_data.get("files", [])
         file_name = files[0]["name"]
-        
+
         # 构建网页链接
         web_page_url = f"https://civitai.com/models/{model_id}/{version_id}"
         # 构造 ModelMeta（使用解析后的规范化字段）
@@ -128,11 +149,11 @@ class CivitaiModelMetaService(AbstractModelMetaService):
             web_page_url=web_page_url,  # 添加网页链接
             examples=examples,
         )
-        
+
         return model_meta
-    
+
     # ==================== 实现基类接口 ====================
-    
+
     def get_by_version_name(self, version_name: str) -> Optional[ModelMeta]:
         """
         通过模型版本名称获取模型元数据（从数据库）。
@@ -145,7 +166,7 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         """
         from api.services.model_meta.db import model_meta_db_service
         return model_meta_db_service.get_by_version_name(version_name)
-    
+
     def get_by_name(self, name: str) -> Optional[ModelMeta]:
         """
         通过模型名称获取模型元数据。
@@ -159,7 +180,7 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         logger.warning(f"Civitai 不支持通过名称直接获取模型: {name}")
         logger.info("建议使用 get_by_hash, get_by_path 或 get_by_id")
         return None
-    
+
     async def get_by_path(self, path: Path) -> Optional[ModelMeta]:
         """
         通过模型文件路径获取模型元数据。
@@ -172,7 +193,7 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         if not path.exists() or path.suffix.lower() != ".safetensors":
             logger.warning(f"无效的模型文件: {path}")
             return None
-        
+
         # 计算文件哈希
         try:
             file_hash = sha256(path)
@@ -180,10 +201,10 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         except Exception as e:
             logger.exception(f"计算文件哈希失败: {e}")
             return None
-        
+
         # 通过哈希获取元数据
         return await self.get_by_hash(file_hash)
-    
+
     async def get_by_hash(self, file_hash: str) -> Optional[ModelMeta]:
         """
         通过模型文件哈希值获取模型元数据。
@@ -192,16 +213,16 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         :return: 模型元数据，未找到返回 None
         """
         url = f"{CIVITAI_BASE_URL}/api/v1/model-versions/by-hash/{file_hash}"
-        
+
         try:
             async with httpx.AsyncClient(timeout=app_settings.civitai.timeout) as client:
                 resp = await client.get(url)
                 if resp.status_code != 200:
                     logger.warning(f"未找到哈希为 {file_hash} 的模型 (status: {resp.status_code})")
                     return None
-                
+
                 version_data = resp.json()
-            
+
             # 保存原始JSON响应到文件（用于调试）
             try:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -209,27 +230,27 @@ class CivitaiModelMetaService(AbstractModelMetaService):
                 hash_short = file_hash[:16] if len(file_hash) >= 16 else file_hash
                 filename = f"by-hash_{hash_short}_{timestamp}.json"
                 file_path = requests_home / filename
-                
+
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(version_data, f, indent=2, ensure_ascii=False)
-                
+
                 logger.debug(f"已保存Civitai API响应到: {file_path}")
             except Exception as e:
                 logger.warning(f"保存API响应到文件失败: {e}")
-            
+
             # 解析版本数据
             model_meta = self._parse_version_data(version_data)
-            
+
             logger.success(f"从 Civitai 获取模型元数据成功: {model_meta.name}")
             return model_meta
-            
+
         except (KeyError, IndexError, TypeError) as e:
             logger.exception(f"解析 Civitai API 响应失败: {e}")
             return None
         except Exception as e:
             logger.exception(f"从 Civitai 获取模型元数据失败: {e}")
             return None
-    
+
     async def get_by_id(self, version_id: int) -> Optional[ModelMeta]:
         """
         通过 Civitai 模型版本 ID 获取模型元数据。
@@ -243,35 +264,35 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         :raises httpx.TimeoutException: 请求超时
         """
         url = f"{CIVITAI_BASE_URL}/api/v1/model-versions/{version_id}"
-        
+
         try:
             async with httpx.AsyncClient(timeout=app_settings.civitai.timeout) as client:
                 resp = await client.get(url)
                 if resp.status_code != 200:
                     logger.warning(f"未找到版本 ID 为 {version_id} 的模型 (status: {resp.status_code})")
                     return None
-                
+
                 version_data = resp.json()
-            
+
             # 保存原始JSON响应到文件（用于调试）
             try:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"by-id_{version_id}_{timestamp}.json"
                 file_path = requests_home / filename
-                
+
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(version_data, f, indent=2, ensure_ascii=False)
-                
+
                 logger.debug(f"已保存Civitai API响应到: {file_path}")
             except Exception as e:
                 logger.warning(f"保存API响应到文件失败: {e}")
-            
+
             # 解析版本数据
             model_meta = self._parse_version_data(version_data)
-            
+
             logger.success(f"从 Civitai 获取模型元数据成功: {model_meta.name} (Version ID: {version_id})")
             return model_meta
-            
+
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
             # 网络连接错误，需要向上抛出，让调用者知道是网络问题
             logger.error(f"连接 Civitai API 失败 (version_id={version_id}): {e}")
@@ -286,8 +307,9 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         except Exception as e:
             logger.exception(f"从 Civitai 获取模型元数据失败: {e}")
             return None
-    
-    async def save(self, model_meta: ModelMeta, download_images: bool = True, parallel_download: bool = False) -> tuple[ModelMeta, int, int]:
+
+    async def save(self, model_meta: ModelMeta, download_images: bool = True, parallel_download: bool = False) -> tuple[
+        ModelMeta, int, int]:
         """
         保存模型元数据（委托给数据库服务）。
         
@@ -301,10 +323,12 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         """
         # 委托给数据库服务保存
         from api.services.model_meta.db import model_meta_db_service
-        
-        logger.debug(f"Civitai 服务委托数据库服务保存: {model_meta.name} (download_images={download_images}, parallel_download={parallel_download})")
-        return await model_meta_db_service.save(model_meta, download_examples=download_images, parallel_download=parallel_download)
-    
+
+        logger.debug(
+            f"Civitai 服务委托数据库服务保存: {model_meta.name} (download_images={download_images}, parallel_download={parallel_download})")
+        return await model_meta_db_service.save(model_meta, download_examples=download_images,
+                                                parallel_download=parallel_download)
+
     async def sync_from_sd_forge(self):
         """
         从 SD-Forge 目录同步模型元数据。
@@ -315,26 +339,26 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         :return: 同步结果统计 {"success": int, "failed": int, "skipped": int}
         """
         logger.info("开始从 SD-Forge 同步模型元数据...")
-        
+
         stats = {"success": 0, "failed": 0, "skipped": 0}
-        
+
         # 同步 Checkpoint 模型
         logger.info(f"扫描 Checkpoint 目录: {app_settings.sd_forge.checkpoint_home}")
         if app_settings.sd_forge.checkpoint_home.exists():
             for safetensor_file in app_settings.sd_forge.checkpoint_home.glob("*.safetensors"):
                 await self._sync_single_model(safetensor_file, stats)
-        
+
         # 同步 LoRA 模型
         logger.info(f"扫描 LoRA 目录: {app_settings.sd_forge.lora_home}")
         if app_settings.sd_forge.lora_home.exists():
             for safetensor_file in app_settings.sd_forge.lora_home.glob("*.safetensors"):
                 await self._sync_single_model(safetensor_file, stats)
-        
+
         logger.success(
             f"同步完成 - 成功: {stats['success']}, 失败: {stats['failed']}, 跳过: {stats['skipped']}"
         )
         return stats
-    
+
     async def _sync_single_model(self, safetensor_file: Path, stats: dict):
         """
         同步单个模型文件（内部方法）。
@@ -344,37 +368,37 @@ class CivitaiModelMetaService(AbstractModelMetaService):
         """
         # 延迟导入，避免循环依赖
         from api.services.model_meta.db import model_meta_db_service
-        
+
         try:
             logger.info(f"处理模型: {safetensor_file.name}")
-            
+
             # 检查数据库中是否已有元数据
             existing_meta = model_meta_db_service.get_by_filename(safetensor_file.name)
             if existing_meta is not None:
                 logger.debug(f"跳过（已有元数据）: {safetensor_file.name}")
                 stats["skipped"] += 1
                 return
-            
+
             # 计算文件哈希
             logger.debug(f"计算哈希: {safetensor_file.name}")
             file_hash = sha256(safetensor_file)
-            
+
             # 从 Civitai 获取元数据
             logger.debug(f"从 Civitai 获取元数据: {file_hash}")
             model_meta = await self.get_by_hash(file_hash)
-            
+
             if model_meta is None:
                 logger.warning(f"未找到元数据: {safetensor_file.name}")
                 stats["failed"] += 1
                 return
-            
+
             # 保存到本地
             logger.debug(f"保存元数据: {model_meta.name}")
             await self.save(model_meta)
-            
+
             stats["success"] += 1
             logger.success(f"同步成功: {safetensor_file.name} -> {model_meta.name}")
-            
+
         except Exception as e:
             logger.exception(f"同步失败 ({safetensor_file.name}): {e}")
             stats["failed"] += 1

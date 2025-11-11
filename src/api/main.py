@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 import logging
+import sys
 
 from api.routers import (
     project,
@@ -42,6 +43,9 @@ class HealthCheckFilter(logging.Filter):
 uvicorn_access_logger = logging.getLogger("uvicorn.access")
 uvicorn_access_logger.addFilter(HealthCheckFilter())
 
+# 全局日志：默认级别设为 INFO（屏蔽 DEBUG）
+logger.remove()
+logger.add(sys.stderr, level="INFO")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

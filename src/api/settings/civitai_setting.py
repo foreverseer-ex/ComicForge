@@ -26,10 +26,10 @@ class CivitaiSettings(BaseModel):
     )
     
     parallel_workers: int = Field(
-        default=4,
+        default=2,
         ge=1,
         le=10,
-        description="并行下载元数据时的线程数（1-10），默认4"
+        description="并行下载元数据时的线程数（1-10），默认2"
     )
     
     draw_timeout: int = Field(

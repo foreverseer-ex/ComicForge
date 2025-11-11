@@ -615,6 +615,18 @@
         删除其他立绘
       </button>
       <button
+        v-if="exampleCount > 1"
+        @click="deleteRightExamples"
+        :class="[
+          'w-full px-4 py-2 text-left text-sm transition-colors',
+          isDark 
+            ? 'text-gray-300 hover:bg-red-600 hover:text-white' 
+            : 'text-gray-700 hover:bg-red-500 hover:text-white'
+        ]"
+      >
+        删除右侧所有立绘
+      </button>
+      <button
         @click="deleteExample"
         :class="[
           'w-full px-4 py-2 text-left text-sm transition-colors',
@@ -1461,6 +1473,49 @@ const deleteOtherExamples = () => {
       } catch (error: any) {
         console.error('删除其他立绘失败:', error)
         showToast('删除其他立绘失败: ' + (error.response?.data?.detail || error.message), 'error')
+        contextMenu.value.show = false
+      }
+    }
+  }
+}
+
+// 删除右侧所有立绘（删除索引 > 当前索引 的所有立绘）
+const deleteRightExamples = () => {
+  if (!props.actor || contextMenu.value.index === -1) return
+  
+  confirmDialog.value = {
+    show: true,
+    title: '确认删除',
+    message: '确定要删除当前立绘右侧的所有立绘吗？',
+    type: 'danger',
+    items: [],
+    warningText: '此操作不可撤销。',
+    onConfirm: async () => {
+      confirmDialog.value.show = false
+      try {
+        const currentIndex = contextMenu.value.index
+        // 刷新 actor，获取最新总数
+        const response = await api.get(`/actor/${props.actor!.actor_id}`)
+        const updatedActor = (response as any)?.data || response
+        const totalCount = updatedActor?.examples?.length || 0
+        if (totalCount === 0 || currentIndex >= totalCount - 1) {
+          showToast('右侧没有可删除的立绘', 'info')
+          contextMenu.value.show = false
+          return
+        }
+        // 要删除的索引：currentIndex+1 到 totalCount-1
+        const indicesToDelete = Array.from({ length: totalCount - (currentIndex + 1) }, (_, i) => currentIndex + 1 + i)
+        await api.post(`/actor/${props.actor!.actor_id}/examples/batch-remove`, indicesToDelete, {
+          params: {
+            project_id: props.actor!.project_id
+          }
+        })
+        showToast('已删除右侧所有立绘', 'success')
+        contextMenu.value.show = false
+        emit('refresh')
+      } catch (error: any) {
+        console.error('删除右侧立绘失败:', error)
+        showToast('删除右侧立绘失败: ' + (error.response?.data?.detail || error.message), 'error')
         contextMenu.value.show = false
       }
     }

@@ -88,7 +88,7 @@
             @click.stop
             class="editing-message-container"
             :class="[
-              'inline-block min-w-[200px] max-w-[90%] rounded-lg px-4 py-3 shadow-sm border-2',
+              'w-full rounded-lg px-4 py-3 shadow-sm border-2',
               isDark ? 'bg-gray-800 border-blue-500 text-gray-100' : 'bg-white border-blue-500 text-gray-900 shadow'
             ]"
           >
@@ -1816,6 +1816,42 @@ const scrollToBottom = () => {
   })
 }
 
+// ============ 页面可见性/焦点恢复时，刷新历史，避免离开期间漏消息 ============
+let visibilityRefreshTimer: number | null = null
+const handleVisibilityOrFocus = () => {
+  // 仅在页面可见或窗口获得焦点时触发刷新
+  if (document.visibilityState === 'visible') {
+    // 防抖，避免多事件同时触发导致重复刷新
+    if (visibilityRefreshTimer) {
+      window.clearTimeout(visibilityRefreshTimer)
+      visibilityRefreshTimer = null
+    }
+    visibilityRefreshTimer = window.setTimeout(async () => {
+      try {
+        await loadHistory(true)
+        // 重新滚动到底部，保证最新消息可见
+        await nextTick()
+        scrollToBottom()
+      } catch (e) {
+        console.error('可见性恢复后刷新历史失败:', e)
+      }
+    }, 150)
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('visibilitychange', handleVisibilityOrFocus)
+  window.addEventListener('focus', handleVisibilityOrFocus)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityOrFocus)
+  window.removeEventListener('focus', handleVisibilityOrFocus)
+  if (visibilityRefreshTimer) {
+    window.clearTimeout(visibilityRefreshTimer)
+    visibilityRefreshTimer = null
+  }
+})
 // Markdown 渲染配置（参考 HelpView）
 const renderer = new marked.Renderer()
 

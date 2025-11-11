@@ -101,7 +101,7 @@
 
         <!-- 清空元数据 -->
         <button
-          @click="clearAllMetadata"
+          @click="openClearConfirm"
           :class="[
             'p-2 rounded-lg transition-colors text-red-500',
             isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
@@ -357,6 +357,53 @@
     </Teleport>
 
 
+    <!-- 清空确认对话框（仿照 shadcn Alert Dialog 交互） -->
+    <Teleport to="body">
+      <div
+        v-if="showClearConfirm"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        @click.self="cancelClear"
+      >
+        <div
+          :class="[
+            'w-full max-w-md rounded-lg shadow-xl',
+            'mx-4 md:mx-0',
+            isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
+          ]"
+          @click.stop
+        >
+          <div class="p-4 md:p-6 border-b" :class="isDark ? 'border-gray-700' : 'border-gray-200'">
+            <h3 :class="['text-lg font-semibold', isDark ? 'text-white' : 'text-gray-900']">
+              确认清空所有模型元数据
+            </h3>
+            <p :class="['mt-2 text-sm', isDark ? 'text-gray-300' : 'text-gray-600']">
+              该操作不可恢复，将删除本地缓存的所有模型元数据信息。是否继续？
+            </p>
+          </div>
+          <div class="p-4 md:p-6 flex justify-end gap-2">
+            <button
+              @click="cancelClear"
+              :class="[
+                'px-4 py-2 rounded-lg text-sm',
+                isDark ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+              ]"
+            >
+              取消
+            </button>
+            <button
+              @click="confirmClear"
+              :class="[
+                'px-4 py-2 rounded-lg text-sm text-white',
+                'bg-red-600 hover:bg-red-700'
+              ]"
+            >
+              清空
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- 右键菜单 -->
     <div
       v-if="contextMenu.show"
@@ -382,6 +429,8 @@
         删除元数据
       </button>
     </div>
+    <!-- 页面级 Toaster：固定在右下角，避免遮挡右上角操作按钮 -->
+    <Toaster position="bottom-right" />
   </div>
 
   <!-- 模型详情对话框 -->
@@ -407,7 +456,7 @@ import {
 import ModelCard from '../components/ModelCard.vue'
 import ModelDetailDialog from '../components/ModelDetailDialog.vue'
 import api from '../api'
-import { toast } from 'vue-sonner'
+import { Toaster, toast } from 'vue-sonner'
 
 interface ModelMeta {
   model_id: number
@@ -451,6 +500,20 @@ const importAirInput = ref('')
 const importStatus = ref('')
 const importStatusColor = ref('')
 const importing = ref(false)
+
+// 清空确认弹窗
+const showClearConfirm = ref(false)
+const openClearConfirm = () => {
+  showClearConfirm.value = true
+}
+const cancelClear = () => {
+  showClearConfirm.value = false
+}
+const confirmClear = () => {
+  // 先立即关闭对话框，再异步执行清空，避免阻塞 UI
+  showClearConfirm.value = false
+  void clearAllMetadata()
+}
 
 // 右键菜单
 const contextMenu = ref({
@@ -580,12 +643,17 @@ const batchImport = async () => {
   let failedCount = 0
   let skippedCount = 0
   
-  // 获取最大并发数设置
+  // 获取最大并发数与后端超时设置
   let maxConcurrency = 4 // 默认值
+  let civitaiTimeoutMs = 60000 // 默认与后端一致（后端默认60秒）
   try {
     const response = await api.get('/settings/civitai')
     const settings = (response as any)?.data || response
     maxConcurrency = settings?.parallel_workers || 4
+    if (settings?.timeout) {
+      const t = Number(settings.timeout)
+      if (!Number.isNaN(t) && t > 0) civitaiTimeoutMs = Math.round(t * 1000)
+    }
   } catch (error) {
     console.warn('获取并发数设置失败，使用默认值:', error)
   }
@@ -597,11 +665,15 @@ const batchImport = async () => {
     }
     
     try {
-      const response = await api.post('/model-meta/import', {
-        download_images: downloadImages.value,
-        air: air,
-        parallel_download: parallelDownload
-      })
+      const response = await api.post(
+        '/model-meta/import',
+        {
+          download_images: downloadImages.value,
+          air: air,
+          parallel_download: parallelDownload
+        },
+        { timeout: civitaiTimeoutMs }
+      )
       
       const data = (response as any)?.data || response
       

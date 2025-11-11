@@ -180,6 +180,12 @@ MCP_TOOLS_GUIDE = """# MCP 工具使用指南
 - ❌ 错误：用户说"我喜欢科幻"，只执行不记录；用户说"创建角色XXX"，却记录为记忆
 - ✅ 正确：用户说"我喜欢科幻"→立即 `create_memory()` 记录；用户说"创建角色XXX"→只执行 `create_actor()`，不记录
 
+### 5. 模型/LoRA 选择优先级原则
+当选择模型或 LoRA 时，必须遵循如下优先级（越靠前的优先级越高，出现冲突时以前者为准）：
+- 用户当前输入（当前轮指令/描述的明确要求）
+- 用户对模型/画风/LoRA 的偏好（liked > neutral > disliked）
+- 其他综合因素（如示例图、已有立绘参数、trained_words、技术参数一致性等）
+
 ### 5. 模型名称使用原则
 绘图参数必须使用模型的 `version_name` 字段，不能使用 `name` 字段
 - ❌ 错误：`model="WAI-illustrious-SDXL"` (name字段)
@@ -206,7 +212,7 @@ Checkpoint 和 LoRA 的 `ecosystem`（sd1/sd2/sdxl）和 `base_model`（如 Pony
 - ✅ 正确：最多 1 个画风 LoRA + 多个特定 LoRA，总数 ≤10
 
 ### 10. LoRA 权重原则
-LoRA 的权重应参考示例图的权重，示例图给的是多少就设多少
+LoRA 的权重应参考示例图的权重，示例图给的是多少就设多少，lora的权重一般在1附近，其取值范围在0-7之间
 - ❌ 错误：示例图中 LoRA 权重是 0.8，但设置为 1.2；完全忽略示例图的权重设置
 - ✅ 正确：示例图中 LoRA 权重是 0.8，设置为 0.8；如果示例图没有提供权重，使用默认权重（通常是 1.0）
 
@@ -254,7 +260,7 @@ LoRA 的权重应参考示例图的权重，示例图给的是多少就设多少
 - `get_tag_description(tag)`: 获取预定义标签的描述
 - `get_all_tag_descriptions()`: 获取所有预定义标签和描述
 
-### Reader（小说内容读取）
+### Context（内容读取/编辑）
 - `get_line(project_id, chapter, line)`: 获取指定行内容
 - `get_chapter_lines(project_id, chapter)`: 获取章节的所有行
 - `get_lines_range(project_id, chapter, start_line, end_line)`: 获取行范围的内容
@@ -320,8 +326,7 @@ LoRA 的权重应参考示例图的权重，示例图给的是多少就设多少
 
 3. 如果是角色立绘，参考已有立绘参数保持一致性
    - **提示词**：
-     - 参考不可变内容（外貌特征和主题）：发色、眼睛颜色、身材特征、姿态等
-     - 姿态是主题的一种，必须保持一致，不能有太大差异
+     - 参考不可变内容（外貌特征和主题）：发色、眼睛颜色、身材特征等
      - 可变内容（衣服、服装款式）：仅场景相似时参考
      - 结合角色描述（desc）和标签（tags）中的特征
    - **LoRA**：
@@ -335,12 +340,16 @@ LoRA 的权重应参考示例图的权重，示例图给的是多少就设多少
 4. 根据任务选择合适的模型、LoRA、prompt、negative_prompt
    - **模型选择**：
      - 使用模型的 `version_name` 而不是 `name`
-     - 根据用户需求和记忆偏好选择模型
-     - 模型选择优先级：优先选择 `preference='liked'` 的模型，避免选择 `preference='disliked'` 的模型
+     - 根据“核心原则中的优先级”选择模型：用户当前输入 > 用户偏好 > 其他因素
+     - 模型偏好具体规则：优先选择 `preference='liked'` 的模型，禁止选择 `preference='disliked'` 的模型
+     - 当某个模型被标记为不喜欢（disliked）时，应优先尝试同类/同生态/同风格的替代模型（例如相同 ecosystem 与 base_model 的其他版本），而不是勉强使用该模型
    - **LoRA 选择**：
+     - 选择优先级遵循“核心原则中的优先级”：用户当前输入 > 用户偏好 > 其他因素
      - 优先选择有 `trained_words` 的 LoRA
      - 参考示例图的 LoRA 组合方式
      - 根据任务需求选择合适的 LoRA（画风类、角色类、服装类等）
+     - 严格限制：对用户标记为 `preference='disliked'` 的 LoRA 绝对禁止使用
+     - 对于用户标记为喜欢（liked）的 LoRA，只要与当前主题存在一定关联即可使用；若与主题完全无关则不应使用（避免不相关的风格干扰）
    - **Prompt 构建**：
      - 必须包含所有使用 LoRA 的相关 `trained_words`
      - 结合用户输入、记忆、角色特点、示例图提示词构建完整的 prompt
@@ -392,11 +401,12 @@ LoRA 的权重应参考示例图的权重，示例图给的是多少就设多少
 - 使用实际返回的 `actor_id` 和 `job_id`，不要使用占位符
 - 如果 `create_draw_job()` 失败（抛出异常），不要将该 `job_id` 添加到建议中
 - 所有 job 的 `name` 和 `desc` 必须一致
-- 所有 job 的主题必须一致（姿态也是主题的一种，不能有太大差异）
+- 所有 job 的主题必须一致
   - 例如：如果用户要求"坐姿立绘"，所有 job 都应该是坐姿，不能有些是坐姿、有些是站姿
-  - 差异仅限于未限定的元素（发色、服装颜色、服装款式等），但主题（如姿态、场景、情绪）必须保持一致
+  - 差异仅限于未限定的元素（发色、服装颜色、服装款式等），但主题（如场景、情绪）必须保持一致
 - 模型必须从查询结果中选择，不能编造
 - 如果角色已有立绘，应参考已有立绘的参数保持一致性（参考绘图参数生成流程第2步）
+- `job_id` 必须是接口实际返回的真实 ID（通常是 UUID 字符串），严禁使用占位符（如 `job1`/`job2` 等）。使用占位符将导致前端无法解析和绑定。
 
 **协议格式**：
 - `[actor_example_job]:actor_id={actor_id}&job_id={job_id}`
@@ -404,18 +414,22 @@ LoRA 的权重应参考示例图的权重，示例图给的是多少就设多少
 - 用户点击后，前端自动调用 API 将 job 绑定为指定角色的立绘
 - ⚠️ 前端已自动处理绑定，不需要调用 `add_portrait_from_job_tool()`
 
+错误/正确示例：
+- 错误（占位符，禁止）：`[actor_example_job]:actor_id=74d3b446-...&job_id=job1`
+- 正确（真实ID，允许）：`[actor_example_job]:actor_id=74d3b446-...&job_id=9c1a8c3d-2f24-4b0e-bf8a-2a1c5c0d2b0f`
+
 **示例**：
 - 用户："创建小红的坐姿立绘"
 - 步骤：
   1) `get_all_actors(project_id)` 查询角色，获取 `actor_id`
   2) `get_checkpoints()` 和 `get_loras()` 查询可用模型
   3) 创建 4 个 job，获取实际返回的 `job_id`：
-     - `job1 = create_draw_job(name="小红-坐姿", desc="小红-坐姿", ..., 蓝发)`
-     - `job2 = create_draw_job(name="小红-坐姿", desc="小红-坐姿", ..., 粉发)`
-     - `job3 = create_draw_job(name="小红-坐姿", desc="小红-坐姿", ..., 黑发)`
-     - `job4 = create_draw_job(name="小红-坐姿", desc="小红-坐姿", ..., 金发)`
-  4) 使用实际返回的 `actor_id` 和 `job_id` 添加建议：
-     - `_add_suggestions(project_id, -1, ["[actor_example_job]:actor_id=实际actor_id&job_id=job1", ...])`
+     - `job_id_1 = create_draw_job(name="小红-坐姿", desc="小红-坐姿", ..., 蓝发)`
+     - `job_id_2 = create_draw_job(name="小红-坐姿", desc="小红-坐姿", ..., 粉发)`
+     - `job_id_3 = create_draw_job(name="小红-坐姿", desc="小红-坐姿", ..., 黑发)`
+     - `job_id_4 = create_draw_job(name="小红-坐姿", desc="小红-坐姿", ..., 金发)`
+  4) 使用实际返回的 `actor_id` 和 `job_id` 添加建议（禁止使用占位符）：
+     - `_add_suggestions(project_id, -1, ["[actor_example_job]:actor_id=实际actor_id&job_id=job_id_1", ...])`
 
 ### 5. 建议流程
 

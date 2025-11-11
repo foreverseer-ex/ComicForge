@@ -10,10 +10,13 @@ from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
 import httpx
+import shutil
+from pathlib import Path
 
 from api.services.model_meta import civitai_model_meta_service, model_meta_db_service
 from api.utils.civitai import AIR
 from api.settings import app_settings
+from api.utils.path import checkpoint_meta_home, lora_meta_home
 
 router = APIRouter(
     prefix="/model-meta",
@@ -101,37 +104,55 @@ async def import_model(request: ImportModelRequest) -> ImportModelResponse:
                 skipped=True
             )
         
-        # 从 Civitai 获取模型元数据
-        try:
-            model_meta = await civitai_model_meta_service.get_by_id(air.version_id)
-        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.TimeoutException, httpx.ReadTimeout) as e:
-            # 网络连接错误或超时
-            error_msg = f"网络连接失败或请求超时，无法连接到 Civitai API。请检查网络连接或稍后重试。"
-            logger.error(f"导入模型失败 ({request.air}): {error_msg} - {e}")
+        # 按后端设置执行重试
+        max_attempts = app_settings.civitai.retry_count
+        delay_sec = app_settings.civitai.retry_delay
+
+        last_error: str | None = None
+        saved_meta = None
+        failed_image_count = 0
+        total_image_count = 0
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # 1) 从 Civitai 获取模型元数据
+                model_meta = await civitai_model_meta_service.get_by_id(air.version_id)
+                if not model_meta:
+                    last_error = f"未找到版本 ID: {air.version_id}"
+                    raise RuntimeError(last_error)
+
+                # 2) 保存到数据库（包括下载示例图片）
+                saved_meta, failed_image_count, total_image_count = await civitai_model_meta_service.save(
+                    model_meta,
+                    download_images=request.download_images,
+                    parallel_download=request.parallel_download
+                )
+                if not saved_meta:
+                    last_error = "保存模型元数据失败"
+                    raise RuntimeError(last_error)
+
+                # 成功则跳出重试
+                break
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.TimeoutException, httpx.ReadTimeout) as e:
+                last_error = f"网络连接失败或请求超时：{e}"
+                if attempt < max_attempts:
+                    logger.warning(f"导入模型重试 {attempt}/{max_attempts}，{delay_sec}s 后重试: {request.air} - {last_error}")
+                    await asyncio.sleep(delay_sec)
+                else:
+                    logger.error(f"导入模型失败（重试耗尽）: {request.air} - {last_error}")
+            except Exception as e:
+                last_error = str(e)
+                if attempt < max_attempts:
+                    logger.warning(f"导入模型重试 {attempt}/{max_attempts}，{delay_sec}s 后重试: {request.air} - {last_error}")
+                    await asyncio.sleep(delay_sec)
+                else:
+                    logger.error(f"导入模型失败（重试耗尽）: {request.air} - {last_error}")
+
+        if saved_meta is None:
             return ImportModelResponse(
                 success=False,
                 air=request.air,
-                error=error_msg
-            )
-        
-        if not model_meta:
-            return ImportModelResponse(
-                success=False,
-                air=request.air,
-                error=f"未找到版本 ID: {air.version_id}"
-            )
-        
-        # 保存到数据库（包括下载示例图片，支持并行或串行下载）
-        saved_meta, failed_image_count, total_image_count = await civitai_model_meta_service.save(
-            model_meta, 
-            download_images=request.download_images,
-            parallel_download=request.parallel_download
-        )
-        if not saved_meta:
-            return ImportModelResponse(
-                success=False,
-                air=request.air,
-                error="保存模型元数据失败"
+                error=last_error or "导入失败"
             )
         
         logger.success(f"导入成功: {saved_meta.name} ({request.air})")
@@ -445,10 +466,27 @@ async def delete_model(version_id: int) -> dict:
         if not model_meta:
             raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
         
-        # 删除模型元数据
+        # 删除模型元数据（数据库）
         success = await model_meta_db_service.delete_by_id(version_id)
         if not success:
             raise HTTPException(status_code=500, detail="删除模型元数据失败")
+        
+        # 删除对应的本地元数据目录（示例图片等），失败不影响主流程
+        try:
+            model_type = getattr(model_meta, "type", None)
+            filename = getattr(model_meta, "filename", None)
+            if model_type in ("checkpoint", "lora") and filename:
+                base_home = checkpoint_meta_home if model_type == "checkpoint" else lora_meta_home
+                meta_dir = base_home / Path(filename).stem
+                if meta_dir.exists():
+                    await asyncio.to_thread(shutil.rmtree, meta_dir)
+                    logger.info(f"已删除模型元数据目录: {meta_dir}")
+                else:
+                    logger.debug(f"模型元数据目录不存在，跳过: {meta_dir}")
+            else:
+                logger.debug(f"未识别的模型类型或文件名为空，跳过本地目录删除: type={model_type}, filename={filename}")
+        except Exception as fs_err:
+            logger.warning(f"删除本地模型元数据目录失败 (version_id={version_id}): {fs_err}")
         
         logger.info(f"删除模型元数据成功: {model_meta.name} (version_id={version_id})")
         return {

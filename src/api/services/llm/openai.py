@@ -70,12 +70,12 @@ class OpenAILlmService(AbstractLlmService):
                     logger.warning(f"创建结构化输出 LLM 失败: {e}，将使用文本提取")
                     self._structured_llm = None
             else:
-                logger.info(f"正在绑定 {len(self.tools)} 个工具到模型...")
+                logger.debug(f"正在绑定 {len(self.tools)} 个工具到模型...")
                 llm_with_tools = self.llm.bind_tools(self.tools)
                 self.agent = create_agent(llm_with_tools, self.tools)
                 self._structured_llm = None
             
-            logger.success(
+            logger.debug(
                 f"OpenAI 兼容服务初始化成功: {app_settings.llm.provider} / {app_settings.llm.model} "
                 f"({len(self.tools)} 个工具" + (f"，结构化输出: {response_format.__name__ if response_format else '无'}" if response_format else "") + ")"
             )

@@ -155,7 +155,7 @@ class AbstractLlmService(ABC):
         ]
         # 先包装，再转换为工具
         self.tools = [tool(tool_wrapper(func)) for func in all_functions]
-        logger.info(f"已初始化 {len(self.tools)} 个工具函数")
+        logger.debug(f"已初始化 {len(self.tools)} 个工具函数")
 
     @abstractmethod
     def initialize_llm(self, response_format: Optional[Any] = None) -> bool:
@@ -463,7 +463,7 @@ class AbstractLlmService(ABC):
             yield {'type': 'status', 'status': 'thinking'}
 
             # 7. 实现流式对话逻辑
-            logger.info(f"开始流式对话，使用 {len(self.tools)} 个工具")
+            logger.debug(f"开始流式对话，使用 {len(self.tools)} 个工具")
             config = {"recursion_limit": app_settings.llm.recursion_limit}
 
             async for chunk in self.agent.astream_events(
@@ -513,8 +513,28 @@ class AbstractLlmService(ABC):
                 elif event_type == "on_tool_end":
                     tool_name = chunk.get("name", "")
                     tool_output: ToolMessage = chunk.get("data", {}).get("output")
-                    logger.info(
-                        f"✅ 工具调用完成: {tool_name}, 结果长度={len(str(tool_output.content)) if tool_output.content else 0}")
+                    # 按规则打印工具结果：<=100 字符直接打印；否则打印类型和长度
+                    try:
+                        result_obj = tool_output.content
+                        if isinstance(result_obj, (str, bytes)):
+                            length = len(result_obj)
+                            if length <= 100:
+                                logger.info(f"✅ 工具调用完成: {tool_name}, 结果={result_obj}")
+                            else:
+                                logger.info(f"✅ 工具调用完成: {tool_name}, 结果类型=str, 长度={length}")
+                        elif isinstance(result_obj, (list, tuple, set)):
+                            logger.info(f"✅ 工具调用完成: {tool_name}, 结果类型={type(result_obj).__name__}, 长度={len(result_obj)}")
+                        elif isinstance(result_obj, dict):
+                            logger.info(f"✅ 工具调用完成: {tool_name}, 结果类型=dict, 长度={len(result_obj)}")
+                        else:
+                            # 其他类型先转字符串再判断长度
+                            result_str = str(result_obj)
+                            if len(result_str) <= 100:
+                                logger.info(f"✅ 工具调用完成: {tool_name}, 结果={result_str}")
+                            else:
+                                logger.info(f"✅ 工具调用完成: {tool_name}, 结果类型={type(result_obj).__name__}, 长度={len(result_str)}")
+                    except Exception as _e:
+                        logger.info(f"✅ 工具调用完成: {tool_name}, 结果类型=unknown")
 
                     # 处理工具调用结束（内部函数不会被更新到列表）
                     self._process_tool_end_event(chunk, assistant_tools)

@@ -103,7 +103,7 @@ class JobService:
             db.flush()
             db.refresh(job)
             db.expunge(job)
-            logger.info(f"更新任务: {job_id}")
+            logger.debug(f"更新任务: {job_id}")
             return job
     
     @classmethod
@@ -260,7 +260,7 @@ class BatchJobService:
             db.flush()
             db.refresh(batch_job)
             db.expunge(batch_job)
-            logger.info(f"更新批次任务: {batch_id}")
+            logger.debug(f"更新批次任务: {batch_id}")
             return batch_job
     
     @classmethod
