@@ -160,6 +160,9 @@ const currentImageUrl = computed(() => {
   return imageUrls.value[currentIndex.value] || ''
 })
 
+// 图片数组（用于模板）
+const images = computed(() => imageUrls.value)
+
 // 加载所有图片 URL（使用缓存）
 const loadImageUrls = async () => {
   // 优先使用 versionId + filenames 方式（模型示例图片）
@@ -218,7 +221,7 @@ const prevImage = () => {
 
 // 切换到下一张
 const nextImage = () => {
-  if (currentIndex.value < props.images.length - 1) {
+  if (currentIndex.value < imageUrls.value.length - 1) {
     imageLoading.value = true
     currentIndex.value++
     resetTransform()
