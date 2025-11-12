@@ -32,3 +32,5 @@ resources/
 */config.json
 storage/
 config.json
+build/
+src-tauri/
