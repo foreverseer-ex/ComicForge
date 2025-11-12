@@ -19,22 +19,21 @@ from .ratelimit_setting import RateLimitSettings
 
 
 def generate_strong_password(length: int = 32) -> str:
-    """生成强密码。
+    """生成强密码（仅包含数字和字母，避免特殊字符转义问题）。
     
     :param length: 密码长度，默认 32 位
-    :return: 包含字母、数字、符号的随机密码
+    :return: 包含大小写字母和数字的随机密码
     """
-    # 定义字符集：大小写字母、数字、符号
-    alphabet = string.ascii_letters + string.digits + string.punctuation
-    # 确保密码包含至少一个大写字母、小写字母、数字和符号
+    # 定义字符集：仅使用大小写字母和数字，避免特殊字符转义问题
+    alphabet = string.ascii_letters + string.digits
+    # 确保密码包含至少一个大写字母、小写字母和数字
     password = [
         secrets.choice(string.ascii_uppercase),
         secrets.choice(string.ascii_lowercase),
         secrets.choice(string.digits),
-        secrets.choice(string.punctuation),
     ]
-    # 填充剩余长度
-    password += [secrets.choice(alphabet) for _ in range(length - 4)]
+    # 填充剩余长度（从字母和数字中随机选择）
+    password += [secrets.choice(alphabet) for _ in range(length - 3)]
     # 打乱顺序
     secrets.SystemRandom().shuffle(password)
     return ''.join(password)
@@ -58,11 +57,11 @@ class AppSettings(BaseModel):
         
         如果配置文件不存在，会创建默认配置并生成强密码。
         
-        :param config_path: 配置文件路径，默认为项目根目录下的 config.json
+        :param config_path: 配置文件路径，默认为 storage/config.json
         :return: AppSettings 实例
         """
         if config_path is None:
-            # 默认使用项目根目录下的 config.json
+            # 默认使用 storage/config.json（可写目录）
             # 从 src/api/settings/__init__.py 向上查找项目根目录（包含 pyproject.toml 或 package.json）
             current = Path(__file__).parent.parent.parent  # src/
             # 继续向上查找，直到找到项目根目录
@@ -71,7 +70,8 @@ class AppSettings(BaseModel):
                     break
                 current = current.parent
             project_root = current
-            config_path = project_root / "config.json"
+            # 使用 storage/config.json 而不是项目根目录下的 config.json
+            config_path = project_root / "storage" / "config.json"
         
         if not config_path.exists():
             # 创建默认配置，生成强密码
@@ -94,12 +94,12 @@ class AppSettings(BaseModel):
     def save(self, config_path: Optional[Path] = None, reason: Optional[str] = None) -> bool:
         """将配置保存到文件。
         
-        :param config_path: 配置文件路径，默认为项目根目录下的 config.json
+        :param config_path: 配置文件路径，默认为 storage/config.json
         :param reason: 保存原因（用于日志记录）
         :return: 是否成功保存
         """
         if config_path is None:
-            # 默认使用项目根目录下的 config.json
+            # 默认使用 storage/config.json（可写目录）
             # 从 src/api/settings/__init__.py 向上查找项目根目录（包含 pyproject.toml 或 package.json）
             current = Path(__file__).parent.parent.parent  # src/
             # 继续向上查找，直到找到项目根目录
@@ -108,7 +108,8 @@ class AppSettings(BaseModel):
                     break
                 current = current.parent
             project_root = current
-            config_path = project_root / "config.json"
+            # 使用 storage/config.json 而不是项目根目录下的 config.json
+            config_path = project_root / "storage" / "config.json"
         
         try:
             # 确保目录存在

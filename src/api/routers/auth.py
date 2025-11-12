@@ -95,6 +95,7 @@ def login(
     username: str = Body(...),
     password: str = Body(...),
 ):
+    from loguru import logger
     with DatabaseSession() as db:
         # username 或 alias 匹配（去除空格）
         input_name = (username or "").strip()
@@ -120,10 +121,21 @@ def login(
                         user = u
                         break
         if user is None:
+            logger.warning(f"登录失败: 用户不存在 - username={repr(input_name)}")
             raise HTTPException(status_code=401, detail="用户名或密码错误")
-        if not verify_password(password, user.password_hash):
+        # 记录收到的密码信息（用于调试，不记录完整密码）
+        password_preview = password[:10] + "..." if len(password) > 10 else password
+        logger.info(f"登录尝试 - username={repr(input_name)}, password_length={len(password)}, password_preview={repr(password_preview)}")
+        
+        password_verified = verify_password(password, user.password_hash)
+        if not password_verified:
+            # 记录配置中的密码长度用于对比
+            from api.settings import app_settings
+            config_pwd_len = len(app_settings.admin.password) if input_name == app_settings.admin.username else 0
+            logger.warning(f"登录失败: 密码错误 - username={repr(input_name)}, received_password_length={len(password)}, config_password_length={config_pwd_len}, user_id={user.id}")
             raise HTTPException(status_code=401, detail="用户名或密码错误")
         if not user.is_active:
+            logger.warning(f"登录失败: 账户已禁用 - username={repr(input_name)}")
             raise HTTPException(status_code=403, detail="账户已禁用")
 
         access = create_access_token(sub=str(user.id), role=user.role)
