@@ -4,6 +4,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
+      args:
+        # 构建阶段使用代理（仅后端）
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,mirrors.aliyun.com}
     container_name: comicforge-backend
     ports:
       - "7864:7864"
@@ -11,6 +16,9 @@ services:
       # 挂载数据目录（持久化数据，包含config.json）
       # config.json 位于 storage/config.json，可以通过挂载的storage目录访问和修改
       - ./storage:/app/storage
+    extra_hosts:
+      # 让容器内访问宿主机代理（需要 Docker 20.10+）
+      - "host.docker.internal:host-gateway"
     env_file:
       # 从 .env 文件加载环境变量
       - .env
@@ -23,6 +31,13 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # Civitai API Token（从 .env 文件读取）
       - CIVITAI_API_TOKEN=${CIVITAI_API_TOKEN:-}
+      # 仅后端容器走代理；Aliyun 直连，避免经代理失败
+      - http_proxy=${HTTP_PROXY:-}
+      - https_proxy=${HTTPS_PROXY:-}
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - no_proxy=${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,mirrors.aliyun.com}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,mirrors.aliyun.com}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7864/health"]
