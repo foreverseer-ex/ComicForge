@@ -19,21 +19,33 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 uv（如果可用，否则使用 pip）
-RUN pip install --no-cache-dir uv || echo "uv not available, using pip"
+# 配置 pip 使用阿里云镜像源
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
+    pip config set global.trusted-host mirrors.aliyun.com
 
-# 复制依赖文件和源代码（安装依赖需要源代码）
-COPY pyproject.toml uv.lock* ./
+# 安装 uv（必须成功，失败则构建失败）
+# 使用 pip 安装 uv，并验证安装成功
+# 如果任何步骤失败，Docker构建会立即失败
+RUN pip install --no-cache-dir uv && \
+    uv --version && \
+    command -v uv || (echo "ERROR: uv installation failed - uv command not found" && exit 1)
+
+# 设置环境变量，确保 uv 使用阿里云镜像源
+ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
+
+# 复制依赖文件（uv sync 需要 pyproject.toml 和 uv.lock）
+COPY pyproject.toml uv.lock ./
+
+# 使用 uv sync 同步依赖（必须成功）
+# uv sync 会创建虚拟环境并安装所有依赖
+# --frozen 确保使用 uv.lock 中的精确版本
+RUN uv sync --frozen || (echo "ERROR: uv sync failed" && exit 1)
+
+# 复制源代码和配置文件
 COPY src/ ./src/
 COPY config.json* ./
-
-# 安装 Python 依赖
-# 优先使用 uv，如果失败则使用 pip
-RUN if command -v uv &> /dev/null; then \
-        uv pip install --system . || pip install --no-cache-dir .; \
-    else \
-        pip install --no-cache-dir .; \
-    fi
 
 # 创建必要的目录
 RUN mkdir -p storage/data storage/temp
@@ -47,5 +59,6 @@ ENV PYTHONUNBUFFERED=1
 ENV PASSLIB_BCRYPT_IDENT=2b
 
 # 启动命令
-CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7864"]
+# 使用 uv run 在虚拟环境中运行应用
+CMD ["uv", "run", "python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7864"]
 
