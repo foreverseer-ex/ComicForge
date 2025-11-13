@@ -153,9 +153,69 @@
           
           <!-- 消息内容 - 无卡片样式 -->
           <div class="w-full max-w-[90%] flex-1">
-            <!-- AI 思考中提示 -->
+            <!-- 迭代式对话（类似工具调用显示） -->
             <div 
-              v-if="message.status === 'thinking' && !message.context && (!message.tools || message.tools.length === 0)"
+              v-if="message.message_type === 'iteration' && message.data"
+              class="mb-4"
+            >
+              <!-- 折叠按钮：显示迭代状态 -->
+              <button
+                @click="toggleIterationExpand(message.message_id)"
+                :class="[
+                  'text-left py-1 px-0 transition-opacity flex items-center gap-2 group cursor-pointer w-full',
+                  isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-600 hover:text-gray-700'
+                ]"
+              >
+                <span :class="['text-sm', isDark ? 'text-gray-400' : 'text-gray-600']">
+                  <span :class="['font-semibold', isDark ? 'text-blue-400' : 'text-blue-600']">
+                    迭代：
+                  </span>
+                  <span v-if="message.data && 'target' in message.data" :class="[isDark ? 'text-gray-300' : 'text-gray-700']">
+                    {{ (message.data as ChatIteration).target }}
+                  </span>
+                  <span :class="['ml-2 font-mono', isDark ? 'text-gray-400' : 'text-gray-500']">
+                    {{ (message.data as ChatIteration).index || 0 }}/{{ (message.data as ChatIteration).stop }}
+                  </span>
+                  <span :class="['ml-2 font-mono text-xs', isDark ? 'text-gray-300' : 'text-gray-700']">
+                    [step:{{ (message.data as ChatIteration).step }}]
+                  </span>
+                  <span 
+                    v-if="(message.data as ChatIteration).summary"
+                    :class="['ml-2', isDark ? 'text-gray-400' : 'text-gray-600']"
+                  >
+                    {{ getIterationSummaryPreview(message) }}
+                  </span>
+                </span>
+                <span :class="[
+                  'text-xs transition-transform flex-shrink-0',
+                  isIterationExpanded(message.message_id) ? 'rotate-90' : '',
+                  isDark ? 'text-gray-500' : 'text-gray-500'
+                ]">
+                  >
+                </span>
+              </button>
+              
+              <!-- 展开状态：只显示 summary 文字（markdown引用块样式） -->
+              <div 
+                v-if="isIterationExpanded(message.message_id) && message.data"
+                class="ml-4 mt-2 mb-4"
+              >
+                <div 
+                  v-if="(message.data as ChatIteration).summary"
+                  class="pl-4 border-l-4 text-sm whitespace-pre-wrap"
+                  :class="isDark ? 'border-gray-600 text-gray-400' : 'border-gray-300 text-gray-600'"
+                >
+                  {{ (message.data as ChatIteration).summary }}
+                </div>
+                <div v-else :class="['text-xs italic', isDark ? 'text-gray-500' : 'text-gray-500']">
+                  （暂无）
+                </div>
+              </div>
+            </div>
+
+            <!-- AI 思考中提示（非迭代式对话） -->
+            <div 
+              v-if="message.status === 'thinking' && !message.context && (!message.tools || message.tools.length === 0) && message.message_type !== 'iteration'"
               class="flex items-center gap-2 mb-2"
             >
               <div class="flex items-center gap-1.5">
@@ -439,9 +499,9 @@
               </div>
             </div>
 
-            <!-- Markdown 内容 -->
+            <!-- Markdown 内容（非迭代式对话或最终操作） -->
             <div 
-              v-if="message.context"
+              v-if="message.context && (message.message_type !== 'iteration' || message.status === 'ready')"
               class="prose prose-sm max-w-none markdown-content mt-2"
               :class="[
                 isDark ? 'prose-invert prose-headings:text-gray-100 prose-p:text-gray-300 prose-strong:text-gray-100' : 'prose-headings:text-gray-900 prose-p:text-gray-700',
@@ -649,9 +709,16 @@ import ImageSuggestions from '../components/ImageSuggestions.vue'
 // ==================== 协议建议与图片卡片（置顶，确保先于使用处声明） ====================
 // 协议建议格式：[协议名称]:参数1=值1&参数2=值2（类似 URL 查询参数）
 // 当前支持：[actor_example_job]:actor_id={actor_id}&job_id={job_id}
-const jobStates = ref<Record<string, { completed: boolean; imageUrl: string | null }>>({})
+const jobStates = ref<Record<string, JobState>>({})
 const jobPollTimers = new Map<string, number>()
 const importedJobIds = ref<Set<string>>(new Set())
+
+// 角色信息状态（actorId -> { name, ... }）
+interface ActorState {
+  name?: string
+}
+
+const actorStates = ref<Record<string, ActorState>>({})
 
 // 从角色的示例图中提取所有已导入的 job_id
 const loadImportedJobIds = async () => {
@@ -723,14 +790,87 @@ const getJobIdFromSuggest = (s: string): string => {
   return params.job_id || ''
 }
 
-const getJobState = (jobId: string): { completed: boolean; imageUrl: string | null } => {
+interface JobState {
+  completed: boolean
+  imageUrl: string | null
+  name?: string
+  desc?: string
+}
+
+const getJobState = (jobId: string): JobState => {
   if (!jobId) return { completed: false, imageUrl: null }
   if (!jobStates.value[jobId]) {
     jobStates.value[jobId] = { completed: false, imageUrl: null }
     // 启动轮询
     startJobPolling(jobId)
+    // 异步获取 job 信息
+    loadJobInfo(jobId)
   }
   return jobStates.value[jobId]
+}
+
+// 加载 job 信息（name, desc）
+const loadJobInfo = async (jobId: string) => {
+  if (!jobId) return
+  try {
+    const resp = await api.get('/draw', { params: { job_id: jobId } })
+    const job = (resp as any)?.data || resp
+    if (job) {
+      // 确保 jobStates.value[jobId] 存在
+      if (!jobStates.value[jobId]) {
+        jobStates.value[jobId] = { completed: false, imageUrl: null }
+      }
+      // 更新 job 信息（使用 Vue 的响应式更新，确保触发重新渲染）
+      const oldState = jobStates.value[jobId]
+      jobStates.value[jobId] = {
+        ...oldState,
+        name: job.name || '',
+        desc: job.desc || ''
+      }
+      // 强制触发响应式更新（通过修改对象引用）
+      jobStates.value = { ...jobStates.value }
+    }
+  } catch (e) {
+    // 静默失败
+    console.error('加载 job 信息失败:', e)
+  }
+}
+
+// 获取角色状态
+const getActorState = (actorId: string): ActorState => {
+  if (!actorId) return {}
+  if (!actorStates.value[actorId]) {
+    actorStates.value[actorId] = {}
+    // 异步加载角色信息
+    loadActorInfo(actorId)
+  }
+  return actorStates.value[actorId]
+}
+
+// 加载角色信息（name）
+const loadActorInfo = async (actorId: string) => {
+  if (!actorId) return
+  try {
+    const resp = await api.get(`/actor/${actorId}`)
+    const actor = (resp as any)?.data || resp
+    if (actor) {
+      // 确保 actorStates.value[actorId] 存在
+      if (!actorStates.value[actorId]) {
+        actorStates.value[actorId] = {}
+      }
+      // 更新角色信息（使用 Vue 的响应式更新，确保触发重新渲染）
+      const oldState = actorStates.value[actorId]
+      actorStates.value[actorId] = {
+        ...oldState,
+        name: actor.name || ''
+      }
+      // 强制触发响应式更新（通过修改对象引用）
+      actorStates.value = { ...actorStates.value }
+    }
+  } catch (e) {
+    // 静默失败
+    console.error('加载角色信息失败:', e)
+  }
 }
 
 // 从建议列表中提取图片建议
@@ -741,11 +881,19 @@ const getImageSuggestions = (suggests: string[]) => {
     .map(s => {
       const actorId = getActorIdFromSuggest(s)
       const jobId = getJobIdFromSuggest(s)
-      const state = getJobState(jobId)
+      const jobState = getJobState(jobId)
+      const actorState = getActorState(actorId)
+      
+      // 标题默认使用 job 名称
+      const actorName = actorState.name || ''
+      const jobTitle = jobState.name || jobState.desc || '立绘'
+      const title = jobTitle
+      
       return {
         id: jobId,
-        imageUrl: state.imageUrl || undefined,
-        metadata: { suggest: s, actorId, jobId }
+        imageUrl: jobState.imageUrl || undefined,
+        title: title,
+        metadata: { suggest: s, actorId, actorName, jobId }
       }
     })
 }
@@ -814,6 +962,14 @@ const startJobPolling = (jobId: string) => {
 }
 
 // 类型定义
+interface ChatIteration {
+  target: string
+  index: number
+  stop: number
+  step: number
+  summary: string
+}
+
 interface ChatMessage {
   message_id: string
   project_id: string | null
@@ -823,6 +979,7 @@ interface ChatMessage {
   message_type: string
   tools: ToolCall[]
   suggests: string[]
+  data?: ChatIteration | Record<string, any>  // 额外数据（用于存储 ChatIteration）
   created_at: string
   _internalKey?: string  // 内部稳定 key，用于 Vue 的 :key 绑定
 }
@@ -894,6 +1051,7 @@ const areMessagesEqual = (msg1: ChatMessage, msg2: ChatMessage): boolean => {
     msg1.status === msg2.status &&
     JSON.stringify(msg1.tools) === JSON.stringify(msg2.tools) &&
     JSON.stringify(msg1.suggests) === JSON.stringify(msg2.suggests) &&
+    JSON.stringify(msg1.data) === JSON.stringify(msg2.data) &&
     msg1.role === msg2.role &&
     msg1.message_type === msg2.message_type
   )
@@ -982,31 +1140,43 @@ const loadHistory = async (forceReload: boolean = false) => {
       
       // 有变化，更新消息列表
       messages.value = mergedMessages
-      // 初始化已有历史消息中的 job 建议追踪
+      // 初始化已有历史消息中的 job 建议和角色信息追踪
       for (const m of messages.value) {
         const suggests = (m as any)?.suggests as string[] | undefined
         if (Array.isArray(suggests)) {
           for (const s of suggests) {
             if (typeof s === 'string' && isActorExampleJobSuggest(s)) {
               const jid = getJobIdFromSuggest(s)
+              const aid = getActorIdFromSuggest(s)
               if (jid) getJobState(jid)
+              if (aid) getActorState(aid)
             }
           }
+        }
+        // 如果消息是迭代式对话且状态是 thinking 且已展开，开始轮询
+        if (m.message_type === 'iteration' && m.status === 'thinking' && m.message_id && isIterationExpanded(m.message_id)) {
+          startIterationPolling(m.message_id)
         }
       }
     } else {
       // 强制重新加载或首次加载，直接替换
       messages.value = newMessages
-      // 初始化已有历史消息中的 job 建议追踪（首次/强制刷新）
+      // 初始化已有历史消息中的 job 建议和角色信息追踪（首次/强制刷新）
       for (const m of messages.value) {
         const suggests = (m as any)?.suggests as string[] | undefined
         if (Array.isArray(suggests)) {
           for (const s of suggests) {
             if (typeof s === 'string' && isActorExampleJobSuggest(s)) {
               const jid = getJobIdFromSuggest(s)
+              const aid = getActorIdFromSuggest(s)
               if (jid) getJobState(jid)
+              if (aid) getActorState(aid)
             }
           }
+        }
+        // 如果消息是迭代式对话且状态是 thinking 且已展开，开始轮询
+        if (m.message_type === 'iteration' && m.status === 'thinking' && m.message_id && isIterationExpanded(m.message_id)) {
+          startIterationPolling(m.message_id)
         }
       }
     }
@@ -1180,8 +1350,14 @@ const handleStreamEvent = (data: any) => {
       }
     }
   } else if (eventType === 'content') {
-    // 流式更新内容
+    // 流式更新内容（迭代式对话的最终操作阶段或普通消息）
     if (currentAssistantMessage) {
+      // 如果消息类型是迭代且状态不是 ready，说明还在迭代中，不显示内容
+      if (currentAssistantMessage.message_type === 'iteration' && currentAssistantMessage.status !== 'ready') {
+        // 迭代中的内容不显示，只累积到 summary
+        return
+      }
+      
       currentAssistantMessage.context = (currentAssistantMessage.context || '') + (data.content || '')
       // 找到对应的消息并实时更新
       const index = messages.value.findIndex(m => 
@@ -1196,11 +1372,13 @@ const handleStreamEvent = (data: any) => {
         }
         if (currentAssistantMessage.suggests) {
           messages.value[index].suggests = [...(currentAssistantMessage.suggests || [])]
-          // 初始化 job 建议的追踪
+          // 初始化 job 建议和角色信息的追踪
           for (const s of currentAssistantMessage.suggests) {
             if (typeof s === 'string' && isActorExampleJobSuggest(s)) {
               const jid = getJobIdFromSuggest(s)
+              const aid = getActorIdFromSuggest(s)
               if (jid) getJobState(jid)
+              if (aid) getActorState(aid)
             }
           }
         }
@@ -1264,11 +1442,97 @@ const handleStreamEvent = (data: any) => {
     if (index !== -1) {
       messages.value[index] = { ...currentAssistantMessage } as ChatMessage
     }
+  } else if (eventType === 'iteration_start') {
+    // 迭代开始
+    if (currentAssistantMessage && data.iteration) {
+      currentAssistantMessage.message_type = 'iteration'
+      currentAssistantMessage.data = data.iteration
+      currentAssistantMessage.status = 'thinking'
+      currentAssistantMessage.context = ''  // 初始消息的正文为空
+      // 更新消息
+      const index = messages.value.findIndex(m => m.message_id === currentAssistantMessage?.message_id)
+      if (index !== -1) {
+        messages.value[index] = { ...currentAssistantMessage } as ChatMessage
+      }
+      // 如果已展开，开始轮询迭代进度
+      if (isIterationExpanded(currentAssistantMessage.message_id)) {
+        startIterationPolling(currentAssistantMessage.message_id)
+      }
+    }
+  } else if (eventType === 'iteration_update') {
+    // 迭代更新
+    if (currentAssistantMessage && data.iteration) {
+      currentAssistantMessage.data = data.iteration
+      currentAssistantMessage.status = 'thinking'
+      // 更新消息
+      const index = messages.value.findIndex(m => m.message_id === currentAssistantMessage?.message_id)
+      if (index !== -1) {
+        messages.value[index] = { ...currentAssistantMessage } as ChatMessage
+      }
+      // 如果有进度信息，在控制台输出（用于调试和查看迭代进度）
+      if (data.progress_info) {
+        const progress = data.progress_info
+        console.log(
+          `🔄 迭代进度: ${progress.target}, 进度: ${progress.current_index}/${progress.stop} (${progress.progress_percent}%), 范围: ${progress.current_index}-${progress.next_index}, 步长: ${progress.step}`
+        )
+      }
+      // 如果进度条已展开，自动滚动到底部
+      if (isIterationExpanded(currentAssistantMessage.message_id)) {
+        scrollToBottom()
+      }
+    }
+  } else if (eventType === 'iteration_final_start') {
+    // 最终操作开始
+    if (currentAssistantMessage && data.iteration) {
+      currentAssistantMessage.data = data.iteration
+      currentAssistantMessage.status = 'thinking'
+      // 停止轮询迭代进度
+      stopIterationPolling(currentAssistantMessage.message_id)
+      // 更新消息
+      const index = messages.value.findIndex(m => m.message_id === currentAssistantMessage?.message_id)
+      if (index !== -1) {
+        messages.value[index] = { ...currentAssistantMessage } as ChatMessage
+      }
+    }
+  } else if (eventType === 'iteration_complete') {
+    // 迭代完成
+    if (currentAssistantMessage) {
+      currentAssistantMessage.status = 'ready'
+      if (data.iteration) {
+        currentAssistantMessage.data = data.iteration
+      }
+      if (data.context) {
+        currentAssistantMessage.context = data.context
+      }
+      if (data.tools) {
+        currentAssistantMessage.tools = data.tools
+      }
+      // 停止轮询迭代进度
+      stopIterationPolling(currentAssistantMessage.message_id)
+      // 更新消息
+      const index = messages.value.findIndex(m => m.message_id === currentAssistantMessage?.message_id)
+      if (index !== -1) {
+        messages.value[index] = { ...currentAssistantMessage } as ChatMessage
+      }
+      scrollToBottom()
+      setupCodeBlockCopy()
+    }
   } else if (eventType === 'error') {
     currentAssistantMessage.status = 'error'
     currentAssistantMessage.context = (currentAssistantMessage.context || '') + `\n\n错误: ${data.error || '未知错误'}`
+    // 停止轮询迭代进度
+    if (currentAssistantMessage.message_id) {
+      stopIterationPolling(currentAssistantMessage.message_id)
+    }
   } else if (eventType === 'done') {
     // 流式传输完成
+    // 如果是迭代式对话，继续轮询进度
+    if (currentAssistantMessage && currentAssistantMessage.message_type === 'iteration' && currentAssistantMessage.status === 'thinking') {
+      // 迭代中，继续轮询
+    } else if (currentAssistantMessage && currentAssistantMessage.message_id) {
+      // 非迭代式对话或迭代完成，停止轮询
+      stopIterationPolling(currentAssistantMessage.message_id)
+    }
   }
 }
 
@@ -1404,6 +1668,95 @@ const toggleToolsExpand = (messageId: string) => {
 
 const isToolsExpanded = (messageId: string): boolean => {
   return toolsExpandState.value[messageId] ?? false
+}
+
+// 迭代式对话展开/折叠
+const iterationExpandState = ref<Record<string, boolean>>({})
+const toggleIterationExpand = (messageId: string) => {
+  const wasExpanded = iterationExpandState.value[messageId] ?? false
+  iterationExpandState.value[messageId] = !wasExpanded
+  
+  // 如果展开，开始轮询；如果折叠，停止轮询
+  if (!wasExpanded) {
+    // 展开时，开始轮询
+    const message = messages.value.find(m => m.message_id === messageId)
+    if (message && message.message_type === 'iteration' && message.status === 'thinking') {
+      startIterationPolling(messageId)
+    }
+  } else {
+    // 折叠时，停止轮询
+    stopIterationPolling(messageId)
+  }
+}
+
+const isIterationExpanded = (messageId: string): boolean => {
+  return iterationExpandState.value[messageId] ?? false
+}
+
+// 获取迭代进度
+const getIterationProgress = (message: ChatMessage): number => {
+  if (message.message_type !== 'iteration' || !message.data || !('index' in message.data) || !('stop' in message.data)) {
+    return 0
+  }
+  const iteration = message.data as ChatIteration
+  if (iteration.stop === 0) return 100
+  return Math.min(100, Math.floor((iteration.index / iteration.stop) * 100))
+}
+
+const getIterationSummaryPreview = (message: ChatMessage): string => {
+  if (!message.data || !('summary' in message.data)) return ''
+  const iteration = message.data as ChatIteration
+  if (!iteration.summary) return ''
+  // 截取前20个字符，多的显示为...
+  const maxLength = 20
+  if (iteration.summary.length > maxLength) {
+    return iteration.summary.substring(0, maxLength) + '...'
+  }
+  return iteration.summary
+}
+
+// 迭代进度轮询（只在展开时轮询）
+const iterationPollTimers = new Map<string, number>()
+const startIterationPolling = (messageId: string) => {
+  if (!messageId || iterationPollTimers.has(messageId)) return
+  const poll = async () => {
+    // 只在展开时轮询
+    if (!isIterationExpanded(messageId)) {
+      return
+    }
+    try {
+      const resp = await api.get(`/chat/status/${messageId}`, {
+        params: { project_id: selectedProjectId.value || null }
+      })
+      const data = (resp as any)?.data || resp
+      if (data && data.data) {
+        // 更新迭代数据（只更新当前消息，不刷新所有历史记录）
+        const index = messages.value.findIndex(m => m.message_id === messageId)
+        if (index !== -1 && messages.value[index]) {
+          messages.value[index].data = data.data
+          messages.value[index].status = data.status || 'thinking'
+          // 如果迭代完成，停止轮询
+          if (data.status === 'ready') {
+            stopIterationPolling(messageId)
+          }
+        }
+      }
+    } catch (e) {
+      // 静默失败，继续轮询
+    }
+  }
+  // 立即触发一次查询，再间隔轮询
+  poll()
+  const timer = window.setInterval(poll, 1000)  // 每秒轮询一次
+  iterationPollTimers.set(messageId, timer)
+}
+
+const stopIterationPolling = (messageId: string) => {
+  const timer = iterationPollTimers.get(messageId)
+  if (timer) {
+    clearInterval(timer)
+    iterationPollTimers.delete(messageId)
+  }
 }
 
 // 工具调用单个工具展开/折叠

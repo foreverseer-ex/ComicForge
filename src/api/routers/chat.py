@@ -191,6 +191,22 @@ async def chat_stream(request: ChatRequest):
                 elif event_type == 'status':
                     # 状态更新
                     yield f"data: {json.dumps({'type': 'status', 'status': event.get('status', 'ready')}, ensure_ascii=False)}\n\n"
+                
+                elif event_type == 'iteration_start':
+                    # 迭代开始
+                    yield f"data: {json.dumps({'type': 'iteration_start', 'iteration': event.get('iteration', {})}, ensure_ascii=False)}\n\n"
+                
+                elif event_type == 'iteration_update':
+                    # 迭代更新
+                    yield f"data: {json.dumps({'type': 'iteration_update', 'iteration': event.get('iteration', {})}, ensure_ascii=False)}\n\n"
+                
+                elif event_type == 'iteration_final_start':
+                    # 最终操作开始
+                    yield f"data: {json.dumps({'type': 'iteration_final_start', 'iteration': event.get('iteration', {})}, ensure_ascii=False)}\n\n"
+                
+                elif event_type == 'iteration_complete':
+                    # 迭代完成
+                    yield f"data: {json.dumps({'type': 'iteration_complete', 'iteration': event.get('iteration', {}), 'context': event.get('context', ''), 'tools': event.get('tools', [])}, ensure_ascii=False)}\n\n"
             
             # 发送完成标志
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"

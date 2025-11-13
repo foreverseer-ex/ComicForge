@@ -3,8 +3,11 @@
 
 专注于绘图功能：创建绘图任务、接受结果、管理绘图任务。
 """
-from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, HTTPException, Query
+from __future__ import annotations
+
+import json
+from typing import Optional, Dict, Any, List, Annotated
+from fastapi import APIRouter, HTTPException, Query, Body, Depends, Request
 from fastapi.responses import FileResponse
 import httpx
 from loguru import logger
@@ -22,6 +25,67 @@ router = APIRouter(
     tags=["绘图管理"],
     responses={404: {"description": "资源不存在"}},
 )
+
+
+async def _parse_loras_param(
+    request: Request,
+    raw_loras: Optional[str] = Query(
+        None,
+        alias="loras",
+        description="LoRA 配置，可以是 JSON 字符串，或使用 loras[名称]=权重 形式的查询参数，也支持在请求体中提供 dict",
+    ),
+) -> Optional[Dict[str, float]]:
+    """
+    兼容多种 LoRA 参数传递方式：
+    1. 查询参数 JSON 字符串：loras=%7B%22foo%22:0.5%7D
+    2. 查询参数字典：loras[foo]=0.5&loras[bar]=0.8
+    3. 请求体 JSON：{"loras": {"foo": 0.5}}
+    """
+    if raw_loras:
+        try:
+            parsed = json.loads(raw_loras)
+            if isinstance(parsed, dict):
+                return {str(k): float(v) for k, v in parsed.items()}
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            logger.warning(f"LoRA 参数解析失败（JSON 字符串）: {raw_loras}, 错误: {exc}")
+
+    # 兼容查询参数中的 loras[foo]=0.5 形式
+    loras_from_query: Dict[str, float] = {}
+    for key, value in request.query_params.multi_items():
+        if key.startswith("loras[") and key.endswith("]"):
+            name = key[6:-1]
+            try:
+                loras_from_query[name] = float(value)
+            except (ValueError, TypeError) as exc:
+                logger.warning(f"LoRA 参数解析失败（查询参数）: {key}={value}, 错误: {exc}")
+    if loras_from_query:
+        return loras_from_query
+
+    # 兼容请求体 JSON 中的 loras 字段
+    if request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            body = await request.json()
+        except Exception:  # pylint: disable=broad-except
+            body = None
+        if isinstance(body, dict) and "loras" in body:
+            loras_value = body["loras"]
+            if isinstance(loras_value, dict):
+                try:
+                    return {str(k): float(v) for k, v in loras_value.items()}
+                except (ValueError, TypeError) as exc:
+                    logger.warning(f"LoRA 参数解析失败（请求体 dict）: {loras_value}, 错误: {exc}")
+            elif isinstance(loras_value, str):
+                try:
+                    parsed = json.loads(loras_value)
+                    if isinstance(parsed, dict):
+                        return {str(k): float(v) for k, v in parsed.items()}
+                except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                    logger.warning(f"LoRA 参数解析失败（请求体字符串）: {loras_value}, 错误: {exc}")
+
+    return None
+
+
+LorasParam = Annotated[Optional[Dict[str, float]], Depends(_parse_loras_param)]
 
 
 # ==================== SD-Forge 可用模型查询 ====================
@@ -79,20 +143,20 @@ async def get_loras() -> List[Dict[str, Any]]:
 
 @router.post("", summary="创建单个绘图任务（文生图）")
 async def create_draw_job(
-    model: str,
-    prompt: str,
-    negative_prompt: str = "",
-    loras: Optional[Dict[str, float] | str] = None,
-    seed: int = -1,
-    sampler_name: str = "DPM++ 2M Karras",
-    steps: int = 30,
-    cfg_scale: float = 7.0,
-    width: int = 1024,
-    height: int = 1024,
-    clip_skip: Optional[int] = None,
-    vae: Optional[str] = None,
-    name: Optional[str] = None,
-    desc: Optional[str] = None,
+    model: str = Query(..., description="SD模型名称"),
+    prompt: str = Query(..., description="正向提示词"),
+    negative_prompt: str = Query("", description="负向提示词"),
+    loras: LorasParam = None,
+    seed: int = Query(-1, description="随机种子（-1 表示随机）"),
+    sampler_name: str = Query("DPM++ 2M Karras", description="采样器名称"),
+    steps: int = Query(30, description="采样步数"),
+    cfg_scale: float = Query(7.0, description="CFG Scale"),
+    width: int = Query(1024, description="图像宽度"),
+    height: int = Query(1024, description="图像高度"),
+    clip_skip: Optional[int] = Query(None, description="CLIP skip"),
+    vae: Optional[str] = Query(None, description="VAE 模型名称"),
+    name: Optional[str] = Query(None, description="任务名称"),
+    desc: Optional[str] = Query(None, description="任务描述"),
 ) -> str:
     """
     创建单个绘图任务（文生图），返回 job_id。
@@ -118,20 +182,6 @@ async def create_draw_job(
         job_id（任务 ID）
     """
     try:
-        import json
-        
-        # 解析 loras
-        loras_dict: Optional[Dict[str, float]] = None
-        if loras:
-            if isinstance(loras, str):
-                try:
-                    loras_dict = json.loads(loras)
-                except json.JSONDecodeError:
-                    logger.warning(f"LoRA 参数格式错误: {loras}")
-                    loras_dict = None
-            elif isinstance(loras, dict):
-                loras_dict = loras
-        
         args = DrawArgs(
             model=model,
             prompt=prompt,
@@ -144,7 +194,7 @@ async def create_draw_job(
             height=height,
             clip_skip=clip_skip,
             vae=vae,
-            loras=loras_dict or {},
+            loras=loras or {},
         )
         
         # 如果是 Civitai 后端，检查并调整宽高限制（最大 1024）
@@ -190,21 +240,21 @@ async def create_draw_job(
 
 @router.post("/batch", summary="批量创建绘图任务（文生图）")
 async def create_batch_job(
-    model: str,
-    prompt: str,
-    negative_prompt: str = "",
-    loras: Optional[Dict[str, float] | str] = None,
-    seed: int = -1,
-    sampler_name: str = "DPM++ 2M Karras",
-    steps: int = 30,
-    cfg_scale: float = 7.0,
-    width: int = 1024,
-    height: int = 1024,
-    clip_skip: Optional[int] = None,
-    vae: Optional[str] = None,
-    name: Optional[str] = None,
-    desc: Optional[str] = None,
-    batch_size: int = 1,
+    model: str = Query(..., description="SD模型名称"),
+    prompt: str = Query(..., description="正向提示词"),
+    negative_prompt: str = Query("", description="负向提示词"),
+    loras: LorasParam = None,
+    seed: int = Query(-1, description="随机种子（-1 表示随机）"),
+    sampler_name: str = Query("DPM++ 2M Karras", description="采样器名称"),
+    steps: int = Query(30, description="采样步数"),
+    cfg_scale: float = Query(7.0, description="CFG Scale"),
+    width: int = Query(1024, description="图像宽度"),
+    height: int = Query(1024, description="图像高度"),
+    clip_skip: Optional[int] = Query(None, description="CLIP skip"),
+    vae: Optional[str] = Query(None, description="VAE 模型名称"),
+    name: Optional[str] = Query(None, description="任务名称"),
+    desc: Optional[str] = Query(None, description="任务描述"),
+    batch_size: int = Query(1, description="批量大小（1-16）"),
 ) -> str:
     """
     批量创建绘图任务（文生图），返回 batch_id。
@@ -230,24 +280,10 @@ async def create_batch_job(
         batch_id（批次 ID）
     """
     try:
-        import json
-        
         # 验证 batch_size
         if batch_size < 1 or batch_size > 16:
             raise HTTPException(status_code=400, detail="batch_size 必须在 1-16 之间")
-        
-        # 解析 loras
-        loras_dict: Optional[Dict[str, float]] = None
-        if loras:
-            if isinstance(loras, str):
-                try:
-                    loras_dict = json.loads(loras)
-                except json.JSONDecodeError:
-                    logger.warning(f"LoRA 参数格式错误: {loras}")
-                    loras_dict = None
-            elif isinstance(loras, dict):
-                loras_dict = loras
-        
+
         args = DrawArgs(
             model=model,
             prompt=prompt,
@@ -260,7 +296,7 @@ async def create_batch_job(
             height=height,
             clip_skip=clip_skip,
             vae=vae,
-            loras=loras_dict or {},
+            loras=loras or {},
         )
         
         # 如果是 Civitai 后端，检查并调整宽高限制（最大 1024）

@@ -37,7 +37,7 @@ async def create_actor(
     desc: str = "",
     color: str = "#808080",
     tags: Optional[Dict[str, str]] = None
-) -> dict:
+) -> str:
     """
     创建新 Actor。
     
@@ -49,7 +49,7 @@ async def create_actor(
         tags: 标签字典（可选，建议使用 constants.actor.character_tags_description 中定义的键）
     
     Returns:
-        创建的 Actor ID（actor_id）
+        创建的 Actor ID（actor_id）字符串
     """
     project_id = normalize_project_id(project_id)
     # 创建 Actor 对象（ID 会自动生成）
@@ -66,7 +66,7 @@ async def create_actor(
     actor = ActorService.create(actor)
     logger.info(f"创建 Actor: {name} (project: {project_id}, actor_id: {actor.actor_id})")
     
-    return {"actor_id": actor.actor_id}
+    return actor.actor_id
 
 
 @router.get("/all", response_model=List[Actor], summary="列出所有Actor")

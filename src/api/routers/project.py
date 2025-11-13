@@ -28,7 +28,7 @@ router = APIRouter(
 async def create_project(
     title: str,
     novel_path: Optional[str] = None
-) -> dict:
+) -> str:
     """
     创建新的小说转漫画项目。
     
@@ -37,7 +37,7 @@ async def create_project(
         novel_path: 小说文件路径（可选）
     
     Returns:
-        创建的项目ID（project_id）
+        创建的项目ID（project_id）字符串
     
     实现要点：
     - 生成唯一 project_id（UUID）
@@ -66,7 +66,7 @@ async def create_project(
     
     logger.info(f"创建项目: {project.project_id}, 标题: {title}")
     
-    return {"project_id": project.project_id}
+    return project.project_id
 
 
 @router.get("/all", response_model=List[Project], summary="列出所有项目")

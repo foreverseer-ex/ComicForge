@@ -8,13 +8,15 @@ from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Body
 from loguru import logger
 from pydantic import BaseModel
+import asyncio
+import ollama
 
 from api.settings import app_settings, AppSettings
 from api.settings.llm_setting import LlmSettings
 from api.settings.draw_setting import DrawSettings
 from api.settings.civitai_setting import CivitaiSettings
 from api.settings.sd_forge_setting import SdForgeSettings
-from api.constants.llm import DEFAULT_SYSTEM_PROMPT
+from api.constants.llm import DEFAULT_SYSTEM_PROMPT, LlmBaseUrl
 
 router = APIRouter(
     prefix="/settings",
@@ -310,4 +312,72 @@ async def reset_system_prompt() -> Dict[str, str]:
     except Exception as e:
         logger.exception(f"重置系统提示词失败: {e}")
         raise HTTPException(status_code=500, detail=f"重置系统提示词失败: {str(e)}")
+
+
+@router.get("/llm/ollama-models", summary="获取 Ollama 可用模型列表")
+async def get_ollama_models(base_url: str | None = None) -> Dict[str, Any]:
+    """
+    获取 Ollama 本地可用的模型列表。
+    
+    Args:
+        base_url: Ollama 服务的基础 URL（可选，默认使用配置中的 base_url）
+    
+    Returns:
+        包含模型列表的字典，格式为：
+        {
+            "models": ["llama3.1", "qwen2.5", ...],
+            "base_url": "http://127.0.0.1:11434"
+        }
+    
+    Raises:
+        HTTPException: 如果无法连接到 Ollama 服务
+    """
+
+    # 确定 base_url
+    if base_url is None:
+        # 如果当前配置的 provider 是 ollama，使用配置中的 base_url
+        if app_settings.llm.provider == "ollama":
+            base_url = app_settings.llm.base_url
+        else:
+            # 否则使用默认的 Ollama base_url
+            base_url = LlmBaseUrl.OLLAMA
+    
+    logger.info(f"正在通过 Ollama SDK 获取模型列表（base_url: {base_url}）...")
+    
+    try:
+        # 如果需要自定义 base_url，使用 Client；否则直接使用 ollama.list()
+        if base_url != LlmBaseUrl.OLLAMA:
+            # 使用 Client 指定 host
+            client = ollama.Client(host=base_url)
+            data = await asyncio.to_thread(client.list)
+        else:
+            # 使用默认的 ollama.list()
+            data = await asyncio.to_thread(ollama.list)
+        
+        # 提取模型名称列表：使用 m.model 获取模型名称
+        models = [m.model for m in data.models]
+        
+        logger.info(f"成功获取 {len(models)} 个 Ollama 模型: {models}")
+        
+        return {
+            "models": models,
+            "base_url": base_url,
+            "count": len(models)
+        }
+    except Exception as e:
+        # 处理所有错误
+        error_msg = str(e)
+        logger.exception(f"获取 Ollama 模型列表失败: {e}")
+        
+        # 检查是否是连接错误
+        if "503" in error_msg or "connection" in error_msg.lower() or "refused" in error_msg.lower():
+            raise HTTPException(
+                status_code=503,
+                detail=f"无法连接到 Ollama 服务。请确保 Ollama 服务正在运行，并且可以通过 {base_url} 访问。"
+            )
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"获取 Ollama 模型列表失败: {error_msg}"
+            )
 

@@ -434,7 +434,7 @@ const openDetailDialog = async (actor: Actor) => {
   } catch (error) {
     console.error('加载角色详情失败:', error)
     // 如果加载失败，使用列表中的数据
-    detailActor.value = actor
+  detailActor.value = actor
   }
 }
 

@@ -29,7 +29,7 @@ def create_chat_message(
         data: dict | None = None,
         index: int = -1,
         project_id: str | None = None,
-) -> dict:
+) -> str:
     """
     创建聊天消息。
 
@@ -43,7 +43,7 @@ def create_chat_message(
         project_id: 项目唯一标识（None 表示默认工作空间）
     
     Returns:
-        创建的消息ID（message_id）
+        创建的消息ID（message_id）字符串
     """
     project_id = normalize_project_id(project_id)
     if index < 0:
@@ -63,7 +63,7 @@ def create_chat_message(
     )
     message = HistoryService.create(message)
     logger.info(f"创建聊天消息: {message.message_id} (project: {project_id}, index: {index})")
-    return {"message_id": message.message_id}
+    return message.message_id
 
 
 # ==================== 查询操作（固定路径必须放在动态路径之前） ====================

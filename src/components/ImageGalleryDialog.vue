@@ -189,15 +189,15 @@ const loadImageUrls = async () => {
   
   // 兼容旧代码：使用 images 数组（如果有）
   if (props.images && props.images.length > 0) {
-    // 检查是否已经加载过相同的图片列表
-    const currentImagesKey = props.images.join('|')
-    if (lastLoadedKey.value === currentImagesKey && imageUrls.value.length > 0) {
-      // 相同的图片列表，且已有缓存，直接使用
-      loading.value = false
-      return
-    }
-    
-    loading.value = true
+  // 检查是否已经加载过相同的图片列表
+  const currentImagesKey = props.images.join('|')
+  if (lastLoadedKey.value === currentImagesKey && imageUrls.value.length > 0) {
+    // 相同的图片列表，且已有缓存，直接使用
+    loading.value = false
+    return
+  }
+  
+  loading.value = true
     // 直接使用 images 数组（用于兼容旧代码，如角色立绘）
     imageUrls.value = props.images.filter((url): url is string => url !== null && url !== undefined)
     lastLoadedKey.value = currentImagesKey

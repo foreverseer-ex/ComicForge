@@ -615,18 +615,24 @@ const saveDesc = async () => {
   if (!props.model) return
   
   try {
-    // TODO: 调用 API 更新模型说明
-    // await api.put(`/model-meta/${props.model.version_id}`, { desc: editingDesc.value })
-    console.log('保存说明:', editingDesc.value)
+    // 调用 API 更新模型说明
+    // 注意：api 拦截器已经返回了 response.data，所以 response 直接是数据对象
+    const response = await api.patch(`/model-meta/${props.model.version_id}/desc`, { desc: editingDesc.value || null })
+    
     // 更新本地数据
     if (props.model) {
-      props.model.desc = editingDesc.value
+      props.model.desc = response.desc
     }
+    
+    // 显示成功提示
+    showToast('说明已保存', 'success')
+    
     editingDesc.value = ''
     isEditingDesc.value = false
-  } catch (error) {
+  } catch (error: any) {
     console.error('保存失败:', error)
-    alert('保存失败')
+    const errorMsg = error.response?.data?.detail || error.message || '保存失败'
+    showToast(`保存失败: ${errorMsg}`, 'error')
   }
 }
 

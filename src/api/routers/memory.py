@@ -35,7 +35,7 @@ router = APIRouter(
 @router.post("/create", summary="创建记忆条目")
 async def create_memory(
     request: MemoryCreateRequest
-) -> dict:
+) -> str:
     """
     创建新的记忆条目。
     
@@ -43,7 +43,7 @@ async def create_memory(
         request: 创建记忆的请求体，包含 project_id, key, value, description
     
     Returns:
-        创建的记忆条目ID（memory_id）
+        创建的记忆条目ID（memory_id）字符串
     
     实现要点：
     - 生成唯一 memory_id
@@ -69,7 +69,7 @@ async def create_memory(
     entry = MemoryService.create(entry)
     logger.info(f"创建记忆条目: {request.key} (project: {request.project_id}, memory_id: {entry.memory_id})")
     
-    return {"memory_id": entry.memory_id}
+    return entry.memory_id
 
 
 @router.get("/all", response_model=List[MemoryEntry], summary="列出记忆")

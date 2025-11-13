@@ -124,7 +124,7 @@ async def create_line(
     chapter: int,
     line: int,
     content: str
-) -> dict:
+) -> str:
     """
     创建新的内容行。
     
@@ -135,7 +135,7 @@ async def create_line(
         content: 行内容
     
     Returns:
-        创建的内容ID
+        创建的内容ID字符串
     """
     novel_content = NovelContent(
         project_id=project_id,
@@ -145,7 +145,7 @@ async def create_line(
     )
     created = NovelContentService.create(novel_content)
     logger.info(f"创建内容行: project={project_id}, chapter={chapter}, line={line}")
-    return {"id": created.id}
+    return str(created.id)
 
 
 @router.get("/line", summary="获取指定行内容")

@@ -717,8 +717,16 @@ const showErrorDialog = (job: Job) => {
 // 提交任务
 const handleTaskSubmit = async (data: any) => {
   try {
+    console.log('[TaskView] Received submit data:', data)
+    console.log('[TaskView] data.loras:', data.loras)
+    console.log('[TaskView] data.loras type:', typeof data.loras)
+    console.log('[TaskView] data.loras is object:', typeof data.loras === 'object')
+    
     // 构建 LoRA 字典
     const lorasDict: Record<string, number> = data.loras || {}
+    console.log('[TaskView] lorasDict:', lorasDict)
+    console.log('[TaskView] lorasDict keys:', Object.keys(lorasDict))
+    console.log('[TaskView] lorasDict keys length:', Object.keys(lorasDict).length)
     
     const batchSize = data.batch_size || 1
     
@@ -727,24 +735,35 @@ const handleTaskSubmit = async (data: any) => {
     // batch_size = 1 时，调用 /draw（创建单个job）
     const endpoint = batchSize > 1 ? '/draw/batch' : '/draw'
     
+    // 构建查询参数：后端期望使用查询参数（Query parameters）
+    const requestParams: Record<string, any> = {
+      model: data.model,
+      prompt: data.prompt,
+      negative_prompt: data.negative_prompt || "",
+      sampler_name: data.sampler_name,
+      steps: data.steps,
+      cfg_scale: data.cfg_scale,
+      width: data.width,
+      height: data.height,
+      seed: data.seed,
+      ...(data.name ? { name: data.name } : {}),
+      ...(data.desc ? { desc: data.desc } : {}),
+      ...(data.clip_skip ? { clip_skip: data.clip_skip } : {}),
+      ...(data.vae ? { vae: data.vae } : {}),
+      ...(batchSize > 1 ? { batch_size: batchSize } : {})
+    }
+    
+    // 只有当 lorasDict 不为空时才添加 loras 参数（作为 JSON 字符串传递）
+    if (Object.keys(lorasDict).length > 0) {
+      requestParams.loras = JSON.stringify(lorasDict)
+    }
+    
+    console.log('[TaskView] Request params:', requestParams)
+    console.log('[TaskView] Request params.loras:', requestParams.loras)
+    console.log('[TaskView] Request params.loras type:', typeof requestParams.loras)
+    
     const response = await api.post(endpoint, null, {
-      params: {
-        name: data.name || undefined,
-        desc: data.desc || undefined,
-        model: data.model,
-        prompt: data.prompt,
-        negative_prompt: data.negative_prompt,
-        sampler_name: data.sampler_name,
-        steps: data.steps,
-        cfg_scale: data.cfg_scale,
-        width: data.width,
-        height: data.height,
-        seed: data.seed,
-        clip_skip: data.clip_skip || undefined,
-        vae: data.vae || undefined,
-        loras: Object.keys(lorasDict).length > 0 ? JSON.stringify(lorasDict) : undefined,
-        ...(batchSize > 1 ? { batch_size: batchSize } : {})
-      }
+      params: requestParams
     })
     
     // 后端返回 job_id（单个）或 batch_id（批量）

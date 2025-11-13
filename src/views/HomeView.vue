@@ -797,7 +797,7 @@ const loadCurrentParagraph = async () => {
     
     // 获取当前段落内容
     try {
-      const content = await api.get('/reader/line', {
+      const content = await api.get('/context/line', {
         params: {
           project_id: currentProject.value.project_id,
           chapter,
@@ -840,7 +840,7 @@ const prevParagraph = async () => {
       newChapter -= 1
       // 获取上一章的所有行，取最后一行的行号
       try {
-        const response = await api.get('/reader/lines', {
+        const response = await api.get('/context/lines', {
           params: {
             project_id: currentProject.value.project_id,
             chapter: newChapter
@@ -885,7 +885,7 @@ const nextParagraph = async () => {
 
     // 检查是否超出当前章节
     try {
-      const response = await api.get('/reader/lines', {
+      const response = await api.get('/context/lines', {
         params: {
           project_id: currentProject.value.project_id,
           chapter: newChapter
@@ -1198,8 +1198,16 @@ const saveProject = async () => {
       }
 
       const response = await api.post('/project/create', null, { params })
-      const responseData = (response as any)?.data || response
-      selectedProjectId.value = responseData?.project_id
+      // 后端直接返回 project_id 字符串，不是字典
+      const projectId = (response as any)?.data || response
+      if (typeof projectId === 'string') {
+        selectedProjectId.value = projectId
+      } else if (projectId?.project_id) {
+        // 兼容旧格式（字典）
+        selectedProjectId.value = projectId.project_id
+      } else {
+        throw new Error('创建项目失败：未返回 project_id')
+      }
     }
     
     // 重置表单

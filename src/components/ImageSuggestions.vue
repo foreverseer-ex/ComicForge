@@ -34,7 +34,7 @@
         />
       </div>
 
-      <!-- 选用按钮：集成在卡片底部 -->
+      <!-- 标题和导入按钮：集成在卡片底部 -->
       <button
         @click.stop="toggleImport(image.id)"
         class="w-full px-4 py-2 flex items-center justify-center gap-2 transition-colors font-medium text-sm border-t"
@@ -48,8 +48,7 @@
             : 'bg-blue-500 hover:bg-blue-600 text-white border-blue-400'
         ]"
       >
-        <span v-if="isSelected(image.id)">✓ 已选用</span>
-        <span v-else>选用</span>
+        <span class="truncate">{{ image.title || '立绘' }}</span>
       </button>
     </div>
   </div>
@@ -72,6 +71,7 @@ const isDark = inject('isDark', ref(false))
 interface ImageItem {
   id: string // 唯一标识符
   imageUrl?: string // 图片URL，undefined表示加载中
+  title?: string // 标题（job的name或desc）
   metadata?: Record<string, any> // 额外元数据（如 actorId, jobId 等）
 }
 

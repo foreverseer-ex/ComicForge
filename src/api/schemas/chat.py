@@ -29,7 +29,7 @@ class ChatIteration(BaseModel):
 
     summary: str = Field(
         default="",
-        description="迭代摘要。每次迭代时模型返回的信息会累积到这里"
+        description="迭代摘要。每次迭代时模型返回的信息会累积到这里，初始时留空即可"
     )
 
 

@@ -208,19 +208,19 @@ class SdForgeDrawService(AbstractDrawService):
         :param job_id: 本地 job_id（UUID）
         :param args: 绘图参数
         """
+        import asyncio
         from api.services.model_meta.db import model_meta_db_service
         from api.services.db import JobService
         from api.utils.path import jobs_home
         from datetime import datetime
         
         try:
-            # SD-Forge 是同步的，直接执行
-            # 注意：这里需要调用旧的同步 draw 方法，但我们需要重构它
-            # 暂时先使用旧的逻辑
+            # SD-Forge 的同步操作需要在线程池中执行，避免阻塞事件循环
             
             # 如果指定了 model 或 vae，先检查当前选项，如果不同则设置
             if args.model or args.vae:
-                current_options = self._get_options()
+                # 在线程池中执行同步操作
+                current_options = await asyncio.to_thread(self._get_options)
                 need_update = False
                 update_kwargs = {}
                 
@@ -230,7 +230,8 @@ class SdForgeDrawService(AbstractDrawService):
                     if not model_meta:
                         raise RuntimeError(f"未找到模型元数据: {args.model}")
                     
-                    sd_models = self._get_sd_models()
+                    # 在线程池中执行同步操作
+                    sd_models = await asyncio.to_thread(self._get_sd_models)
                     sd_model_title = None
                     for sd_model in sd_models:
                         from pathlib import Path
@@ -261,7 +262,8 @@ class SdForgeDrawService(AbstractDrawService):
                         need_update = True
                 
                 if need_update:
-                    self._set_options(**update_kwargs)
+                    # 在线程池中执行同步操作
+                    await asyncio.to_thread(self._set_options, **update_kwargs)
             
             # 转换 LoRAs
             loras_for_sd_forge: Dict[str, float] = {}
@@ -275,8 +277,9 @@ class SdForgeDrawService(AbstractDrawService):
                     lora_filename_stem = Path(lora_meta.filename).stem
                     loras_for_sd_forge[lora_filename_stem] = strength
             
-            # 调用 SD-Forge API
-            result = self._create_text2image(
+            # 调用 SD-Forge API（在线程池中执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                self._create_text2image,
                 prompt=args.prompt,
                 negative_prompt=args.negative_prompt,
                 loras=loras_for_sd_forge,

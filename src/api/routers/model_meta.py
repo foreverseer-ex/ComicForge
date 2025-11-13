@@ -5,7 +5,7 @@
 """
 import asyncio
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
@@ -616,3 +616,37 @@ async def set_model_preference(version_id: int, preference: str) -> Dict[str, An
     except Exception as e:
         logger.exception(f"设置模型偏好状态失败 (version_id={version_id}): {e}")
         raise HTTPException(status_code=500, detail=f"设置模型偏好状态失败: {str(e)}")
+
+
+@router.patch("/{version_id}/desc", summary="更新模型说明")
+async def update_model_desc(version_id: int, desc: Optional[str] = Body(None, embed=True)) -> Dict[str, Any]:
+    """
+    更新模型的说明（描述）。
+    
+    Args:
+        version_id: Civitai 模型版本 ID（路径参数）
+        desc: 模型说明（请求体，可选，如果为 null 则清空说明）
+    
+    Returns:
+        包含 version_id、model_name 和 desc 的字典
+    
+    Raises:
+        HTTPException: 模型不存在时返回 404
+    """
+    try:
+        # 更新模型说明
+        meta = model_meta_db_service.update_fields(version_id, desc=desc)
+        if not meta:
+            raise HTTPException(status_code=404, detail=f"未找到版本 ID 为 {version_id} 的模型")
+        
+        logger.info(f"更新模型说明: {meta.name} (version_id={version_id})")
+        return {
+            "version_id": version_id,
+            "model_name": meta.name,
+            "desc": meta.desc
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"更新模型说明失败 (version_id={version_id}): {e}")
+        raise HTTPException(status_code=500, detail=f"更新模型说明失败: {str(e)}")

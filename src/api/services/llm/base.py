@@ -5,6 +5,7 @@ LLM 服务基础抽象类。
 """
 import functools
 import json
+import re
 from abc import ABC, abstractmethod
 from typing import Optional, List, AsyncGenerator, Any
 
@@ -148,6 +149,8 @@ class AbstractLlmService(ABC):
             get_project_content,
             # 建议写入工具（支持负索引）
             self._add_suggestions,
+            # 迭代式对话工具
+            self._start_iteration,
             # Draw 功能
             get_loras, get_checkpoints,
             create_draw_job, create_batch_job, batch_from_jobs,
@@ -466,11 +469,18 @@ class AbstractLlmService(ABC):
             logger.debug(f"开始流式对话，使用 {len(self.tools)} 个工具")
             config = {"recursion_limit": app_settings.llm.recursion_limit}
 
+            # 标志：是否已进入迭代模式（进入迭代模式后，忽略后续的工具调用和内容生成）
+            is_iteration_mode = False
+
             async for chunk in self.agent.astream_events(
                     {"messages": messages},
                     version="v2",
                     config=config
             ):
+                # 如果已进入迭代模式，忽略后续的工具调用和内容生成
+                if is_iteration_mode:
+                    continue
+
                 event_type = chunk.get("event")
 
                 # 处理文本流事件
@@ -478,36 +488,43 @@ class AbstractLlmService(ABC):
                     message_chunk = chunk.get("data", {}).get("chunk")
                     if message_chunk and hasattr(message_chunk, "content") and message_chunk.content:
                         content = message_chunk.content
-                        assistant_context += content
 
-                        # 实时更新数据库中的助手消息
-                        assistant_message.context = assistant_context
-                        assistant_message.tools = assistant_tools.copy()
-                        HistoryService.update(assistant_message)
-
-                        yield {'type': 'content', 'content': content}
+                        # 如果消息类型是迭代消息，不输出正文内容（初始消息的正文不需要显示）
+                        if assistant_message.message_type != "iteration":
+                            assistant_context += content
+                            # 实时更新数据库中的助手消息
+                            assistant_message.context = assistant_context
+                            assistant_message.tools = assistant_tools.copy()
+                            HistoryService.update(assistant_message)
+                            yield {'type': 'content', 'content': content}
 
                 # 处理工具调用开始事件
                 elif event_type == "on_tool_start":
                     tool_name = chunk.get("name", "")
 
-                    # 处理工具调用（内部函数不会被添加到列表）
-                    self._process_tool_start_event(chunk, assistant_tools)
+                    # 特殊处理：如果工具是 _start_iteration，等待工具调用完成
+                    if tool_name == "_start_iteration":
+                        # 等待工具调用完成，获取结果
+                        # 注意：这里我们暂时不处理，等待工具调用结束事件
+                        pass
+                    else:
+                        # 处理工具调用（内部函数不会被添加到列表）
+                        self._process_tool_start_event(chunk, assistant_tools)
 
-                    # 更新数据库
-                    assistant_message.tools = assistant_tools.copy()
-                    HistoryService.update(assistant_message)
+                        # 更新数据库
+                        assistant_message.tools = assistant_tools.copy()
+                        HistoryService.update(assistant_message)
 
-                    # 只为非内部函数发送工具调用事件
-                    if not tool_name.startswith("_"):
-                        tool_input = chunk.get("data", {}).get("input", {})
-                        yield {
-                            'type': 'tool_start',
-                            'name': tool_name,
-                            'args': tool_input if isinstance(tool_input, dict) else {}
-                        }
-                        # 发送完整的工具列表
-                        yield {'type': 'tools', 'tools': assistant_tools.copy()}
+                        # 只为非内部函数发送工具调用事件
+                        if not tool_name.startswith("_"):
+                            tool_input = chunk.get("data", {}).get("input", {})
+                            yield {
+                                'type': 'tool_start',
+                                'name': tool_name,
+                                'args': tool_input if isinstance(tool_input, dict) else {}
+                            }
+                            # 发送完整的工具列表
+                            yield {'type': 'tools', 'tools': assistant_tools.copy()}
 
                 # 处理工具调用结束事件
                 elif event_type == "on_tool_end":
@@ -523,7 +540,8 @@ class AbstractLlmService(ABC):
                             else:
                                 logger.info(f"✅ 工具调用完成: {tool_name}, 结果类型=str, 长度={length}")
                         elif isinstance(result_obj, (list, tuple, set)):
-                            logger.info(f"✅ 工具调用完成: {tool_name}, 结果类型={type(result_obj).__name__}, 长度={len(result_obj)}")
+                            logger.info(
+                                f"✅ 工具调用完成: {tool_name}, 结果类型={type(result_obj).__name__}, 长度={len(result_obj)}")
                         elif isinstance(result_obj, dict):
                             logger.info(f"✅ 工具调用完成: {tool_name}, 结果类型=dict, 长度={len(result_obj)}")
                         else:
@@ -532,26 +550,77 @@ class AbstractLlmService(ABC):
                             if len(result_str) <= 100:
                                 logger.info(f"✅ 工具调用完成: {tool_name}, 结果={result_str}")
                             else:
-                                logger.info(f"✅ 工具调用完成: {tool_name}, 结果类型={type(result_obj).__name__}, 长度={len(result_str)}")
+                                logger.info(
+                                    f"✅ 工具调用完成: {tool_name}, 结果类型={type(result_obj).__name__}, 长度={len(result_str)}")
                     except Exception as _e:
                         logger.info(f"✅ 工具调用完成: {tool_name}, 结果类型=unknown")
 
-                    # 处理工具调用结束（内部函数不会被更新到列表）
-                    self._process_tool_end_event(chunk, assistant_tools)
+                    # 特殊处理：如果工具是 _start_iteration，立即更新消息为迭代消息
+                    if tool_name == "_start_iteration":
+                        try:
+                            # 获取工具调用结果
+                            result = tool_output.content
 
-                    # 更新数据库
-                    assistant_message.tools = assistant_tools.copy()
-                    HistoryService.update(assistant_message)
+                            # 处理工具调用结果（tool_wrapper 可能会将字符串包装成 list）
+                            if isinstance(result, list) and len(result) > 0:
+                                result = result[0]  # 取第一个元素
 
-                    # 只为非内部函数发送工具调用结束事件
-                    if not tool_name.startswith("_"):
-                        yield {
-                            'type': 'tool_end',
-                            'name': tool_name,
-                            'result': tool_output.content
-                        }
-                        # 发送完整的工具列表
-                        yield {'type': 'tools', 'tools': assistant_tools.copy()}
+                            # 尝试解析 JSON 字符串
+                            if isinstance(result, str):
+                                try:
+                                    result = json.loads(result)
+                                except json.JSONDecodeError:
+                                    # 如果不是 JSON，检查是否是错误消息
+                                    if result.startswith("错误："):
+                                        logger.error(f"启动迭代模式失败: {result}")
+                                        assistant_message.status = "error"
+                                        assistant_message.context = result
+                                        HistoryService.update(assistant_message)
+                                        continue
+                                    else:
+                                        logger.error(f"无法解析 _start_iteration 返回值: {result}")
+                                        continue
+
+                            # 检查是否有错误
+                            if isinstance(result, dict):
+                                if "error" in result or result.get("target") is None:
+                                    error_msg = result.get("error", "未知错误")
+                                    logger.error(f"启动迭代模式失败: {error_msg}")
+                                    assistant_message.status = "error"
+                                    assistant_message.context = f"错误: {error_msg}"
+                                    HistoryService.update(assistant_message)
+                                elif "data" in result:
+                                    # 立即更新当前助手消息为迭代消息
+                                    assistant_message.message_type = "iteration"
+                                    assistant_message.data = result["data"]
+                                    assistant_message.context = ""  # 初始消息的正文为空
+                                    assistant_message.status = "thinking"
+                                    assistant_message.tools = []  # 迭代中的工具调用不记录
+                                    HistoryService.update(assistant_message)
+                                    is_iteration_mode = True  # 设置标志，忽略后续处理
+                                    logger.info(
+                                        f"已更新消息为迭代消息: message_id={assistant_message.message_id}, target={result.get('target', '')}")
+                                else:
+                                    logger.error(f"_start_iteration 返回值缺少 data 字段: {result}")
+                        except Exception as e:
+                            logger.exception(f"处理 _start_iteration 工具调用结果失败: {e}")
+                    else:
+                        # 处理工具调用结束（内部函数不会被更新到列表）
+                        self._process_tool_end_event(chunk, assistant_tools)
+
+                        # 更新数据库
+                        assistant_message.tools = assistant_tools.copy()
+                        HistoryService.update(assistant_message)
+
+                        # 只为非内部函数发送工具调用结束事件
+                        if not tool_name.startswith("_"):
+                            yield {
+                                'type': 'tool_end',
+                                'name': tool_name,
+                                'result': tool_output.content
+                            }
+                            # 发送完整的工具列表
+                            yield {'type': 'tools', 'tools': assistant_tools.copy()}
 
                     # 特殊处理：如果工具是 add_choices，更新 suggests
                     if tool_name == "add_choices":
@@ -573,14 +642,39 @@ class AbstractLlmService(ABC):
                         # 发送建议更新
                         yield {'type': 'suggests', 'suggests': suggests}
 
-            # 8. 对话完成，更新助手消息状态为 ready
-            assistant_message.status = "ready"
-            assistant_message.context = assistant_context
-            assistant_message.tools = assistant_tools.copy()
-            HistoryService.update(assistant_message)
+            # 8. 对话完成，检查是否需要进入迭代式对话
+            # 如果消息类型是迭代，不更新为 ready，保持 thinking 状态，等待迭代完成
+            if assistant_message.message_type == "iteration" and assistant_message.data:
+                # 迭代式对话：保持 thinking 状态，不更新 context（初始消息的正文为空）
+                assistant_message.status = "thinking"
+                assistant_message.context = ""  # 初始消息的正文为空
+                assistant_message.tools = []  # 迭代中的工具调用不记录
+                HistoryService.update(assistant_message)
 
-            yield {'type': 'status', 'status': 'ready'}
-            logger.info(f"✅ 对话完成: {len(assistant_context)} 字符, {len(assistant_tools)} 个工具调用")
+                try:
+                    iteration = ChatIteration(**assistant_message.data)
+                    logger.info(
+                        f"检测到迭代式对话，开始迭代: target={iteration.target}, index={iteration.index}, stop={iteration.stop}")
+                    # 发送迭代开始事件
+                    yield {'type': 'iteration_start', 'iteration': iteration.model_dump()}
+                    # 启动迭代式对话
+                    async for event in self._handle_iteration(iteration, assistant_message, project_id):
+                        yield event
+                except Exception as e:
+                    logger.exception(f"启动迭代式对话失败: {e}")
+                    assistant_message.status = "error"
+                    assistant_message.context = f"错误: {str(e)}"
+                    HistoryService.update(assistant_message)
+                    yield {'type': 'error', 'error': f"启动迭代式对话失败: {str(e)}"}
+            else:
+                # 普通对话：更新助手消息状态为 ready
+                assistant_message.status = "ready"
+                assistant_message.context = assistant_context
+                assistant_message.tools = assistant_tools.copy()
+                HistoryService.update(assistant_message)
+
+                yield {'type': 'status', 'status': 'ready'}
+                logger.info(f"✅ 对话完成: {len(assistant_context)} 字符, {len(assistant_tools)} 个工具调用")
 
         except Exception as e:
             logger.exception(f"对话失败: {e}")
@@ -588,6 +682,19 @@ class AbstractLlmService(ABC):
             # 检查是否是网络连接错误或超时错误
             error_type = type(e).__name__
             error_str = str(e).lower()
+
+            # 检查是否是 Ollama ResponseError（包含状态码）
+            status_code = None
+            is_ollama_error = False
+            if hasattr(e, 'status_code'):
+                status_code = e.status_code
+                is_ollama_error = True
+            elif error_type == "ResponseError" and "status code" in error_str:
+                # 尝试从错误消息中提取状态码
+                match = re.search(r'status code[:\s]+(\d+)', error_str)
+                if match:
+                    status_code = int(match.group(1))
+                    is_ollama_error = True
 
             is_connection_error = (
                     "connection" in error_str or
@@ -604,11 +711,28 @@ class AbstractLlmService(ABC):
                     error_type in ("TimeoutError", "ConnectTimeout", "ReadTimeout")
             )
 
-            if is_connection_error or is_timeout_error:
+            # 处理 Ollama 503 错误（服务不可用）
+            if is_ollama_error and status_code == 503:
+                error_msg = (
+                    f"Ollama 服务不可用（状态码: 503）。\n"
+                    f"请确保：\n"
+                    f"1. Ollama 服务正在运行（检查 http://127.0.0.1:11434 是否可访问）\n"
+                    f"2. 模型 '{app_settings.llm.model}' 已正确下载\n"
+                    f"3. 可以尝试在终端运行: ollama pull {app_settings.llm.model}"
+                )
+            elif is_connection_error or is_timeout_error:
                 if is_timeout_error:
                     error_msg = ERROR_TIMEOUT_TEMPLATE.format(timeout=app_settings.llm.timeout)
                 else:
                     error_msg = ERROR_CONNECTION_TEMPLATE
+            elif is_ollama_error and status_code:
+                # 其他 Ollama HTTP 错误
+                error_detail = str(e) if str(e) else "未知错误"
+                error_msg = (
+                    f"Ollama 服务返回错误（状态码: {status_code}）。\n"
+                    f"错误详情: {error_detail}\n"
+                    f"请检查 Ollama 服务是否正常运行，以及模型 '{app_settings.llm.model}' 是否可用。"
+                )
             else:
                 error_msg = f"错误：{e}"
 
@@ -643,124 +767,154 @@ class AbstractLlmService(ABC):
                 yield event.get('error', '错误：未知错误')
                 return
 
-    async def chat_iteration(self, iteration_data: dict, project_id: str) -> AsyncGenerator[str, None]:
+    async def _handle_iteration(
+            self,
+            iteration: ChatIteration,
+            iteration_message: ChatMessage,
+            project_id: Optional[str]
+    ) -> AsyncGenerator[dict, None]:
         """
-        迭代模式专用方法。
+        处理迭代式对话（从 chat_streamed 调用）。
         
-        完全基于数据库操作：
-        - 迭代数据存储在 ChatMessage 的 data 字段中（ChatIteration 对象）
-        - 实时更新迭代进度到数据库
-        - 最终操作的工具调用记录到 tools 字段
+        此方法会：
+        1. 根据 index、stop、step 等参数，构建 for 循环
+        2. 循环调用 chat_invoke 函数（不使用历史消息）
+        3. 每次迭代返回最新的 summary，更新到 ChatIteration
+        4. 迭代中的工具调用不记录
+        5. 当循环退出时，执行最终操作（可以使用任何工具）
+        6. 最终操作时记录工具调用和流式传输信息
         
-        通用迭代管理：
-        1. 每次迭代，让 LLM 自行调用工具处理当前 index 的内容
-        2. LLM 处理完成后，更新 index += step
-        3. 累积 summary
-        4. 当 index >= stop 时，执行最终操作并退出
-        
-        :param iteration_data: 迭代数据字典（包含 message_id 或完整的迭代信息）
+        :param iteration: ChatIteration 对象
+        :param iteration_message: 迭代消息对象
         :param project_id: 项目ID
-        :yield: LLM响应的文本片段
+        :yield: 事件字典
         """
         self.initialize_llm()
-        # 1. 获取或创建迭代消息
-        if "message_id" in iteration_data:
-            # 从数据库读取现有迭代消息
-            iteration_message = HistoryService.get(iteration_data["message_id"])
-            if not iteration_message or iteration_message.project_id != project_id:
-                logger.error(f"迭代消息不存在: {iteration_data['message_id']}")
-                yield "错误：迭代消息不存在"
-                return
-            iteration = ChatIteration(**iteration_message.data)
-        else:
-            # 创建新的迭代消息（ID 会自动生成）
-            iteration = ChatIteration(**iteration_data)
-            iteration_message = ChatMessage(
-                project_id=project_id,
-                role="assistant",
-                context="",
-                status="thinking",
-                message_type="iteration",
-                data=iteration.model_dump(),
-                tools=[],
-                suggests=[]
-            )
-            iteration_message = HistoryService.create(iteration_message)
 
-        # 2. 迭代循环
+        # 1. 迭代循环
         while iteration.index < iteration.stop:
+            # 计算当前迭代的进度信息
+            current_index = iteration.index
+            next_index = min(iteration.index + iteration.step, iteration.stop)
+            progress_percent = current_index * 100 // iteration.stop if iteration.stop > 0 else 0
+            
             # 构建迭代模式专用提示词
             iteration_prompt = self._build_iteration_prompt(iteration, project_id)
+
+            # 发送迭代更新事件（前端用于显示进度，包含提示信息）
+            # 注意：这里发送的是更新后的 iteration，前端会通过轮询或事件更新显示
+            yield {
+                'type': 'iteration_update',
+                'iteration': iteration.model_dump(),
+                'progress_info': {
+                    'target': iteration.target,
+                    'current_index': current_index,
+                    'next_index': next_index,
+                    'stop': iteration.stop,
+                    'step': iteration.step,
+                    'progress_percent': progress_percent
+                }
+            }
 
             # 调用LLM处理当前迭代（迭代过程中不记录工具调用，只累积summary）
             full_response = ""
             async for chunk in self._call_llm_in_iteration_mode(iteration_prompt, project_id):
+                # 迭代中的文本内容不发送给前端（只累积到 summary）
                 full_response += chunk
-                yield chunk
 
-            # 更新summary（将LLM的响应追加到summary）
-            if iteration.summary:
-                iteration.summary += "\n\n"
-            iteration.summary += f"[第 {iteration.index // iteration.step + 1} 次迭代] {full_response}"
+            # 更新summary（直接替换，LLM应该返回完整的、更新后的summary）
+            iteration.summary = full_response
 
             # 更新index（将步长叠加到index）
             iteration.index += iteration.step
+            if iteration.index >= iteration.stop:
+                iteration.index = iteration.stop
 
             # 更新数据库中的迭代消息
             iteration_message.data = iteration.model_dump()
             iteration_message.status = "thinking"
             HistoryService.update(iteration_message)
 
-            logger.debug(
-                f"已更新迭代消息进度: index={iteration.index}/{iteration.stop}, "
+            logger.info(
+                f"迭代进度更新: target={iteration.target}, index={iteration.index}/{iteration.stop} ({progress_percent}%), "
                 f"summary长度={len(iteration.summary) if iteration.summary else 0}")
 
-            # 检查是否迭代终止
-            if iteration.index >= iteration.stop:
-                break
+            # 发送迭代更新事件（前端用于显示进度，包含更新后的 summary）
+            yield {
+                'type': 'iteration_update',
+                'iteration': iteration.model_dump(),
+                'progress_info': {
+                    'target': iteration.target,
+                    'current_index': iteration.index,
+                    'next_index': min(iteration.index, iteration.stop),
+                    'stop': iteration.stop,
+                    'step': iteration.step,
+                    'progress_percent': iteration.index * 100 // iteration.stop if iteration.stop > 0 else 0
+                }
+            }
 
-        # 3. 迭代完成，执行最终操作
+        # 2. 迭代完成，执行最终操作
         logger.info(f"迭代完成，开始执行最终操作：{iteration.target}")
         final_prompt = self._build_final_operation_prompt(iteration)
+
+        # 发送最终操作开始事件
+        yield {
+            'type': 'iteration_final_start',
+            'iteration': iteration.model_dump()
+        }
 
         # 清空之前的工具调用（只保留最终操作的工具调用）
         final_tools: list[dict] = []
         final_context_ref = [""]  # 使用列表引用以便修改
 
-        # 4. 调用LLM执行最终操作（记录工具调用）
-        async for chunk in self._call_llm_final_operation(final_prompt, project_id, final_tools, final_context_ref):
+        # 3. 调用LLM执行最终操作（记录工具调用和流式传输信息）
+        async for chunk in self._call_llm_final_operation_streamed(
+                final_prompt, project_id, final_tools, final_context_ref
+        ):
             yield chunk
 
-        # 5. 更新迭代消息（标记为完成，包含最终操作的工具调用）
+        # 4. 更新迭代消息（标记为完成，包含最终操作的工具调用）
         iteration_message.status = "ready"
         iteration_message.context = final_context_ref[0]
         iteration_message.tools = final_tools.copy()
         iteration_message.data = iteration.model_dump()
         HistoryService.update(iteration_message)
 
+        # 发送迭代完成事件
+        yield {
+            'type': 'iteration_complete',
+            'iteration': iteration.model_dump(),
+            'context': final_context_ref[0],
+            'tools': final_tools.copy()
+        }
+
         logger.info(
             f"✅ 迭代完成: index={iteration.index}/{iteration.stop}, "
             f"summary长度={len(iteration.summary)}, 工具调用数={len(final_tools)}")
 
-    def _build_iteration_prompt(self, iteration: ChatIteration, project_id: str) -> str:
+    def _build_iteration_prompt(self, iteration: ChatIteration, project_id: Optional[str]) -> str:
         """构建迭代模式提示词"""
         progress_percent = iteration.index * 100 // iteration.stop if iteration.stop > 0 else 0
-        is_near_completion = "是" if iteration.index + iteration.step >= iteration.stop else "否"
+        next_index = min(iteration.index + iteration.step, iteration.stop)
         summary_display = iteration.summary if iteration.summary else "（暂无）"
 
         return ITERATION_PROMPT_TEMPLATE.format(
             target=iteration.target,
             index=iteration.index,
+            next_index=next_index,
             step=iteration.step,
             stop=iteration.stop,
             progress_percent=progress_percent,
-            is_near_completion=is_near_completion,
             summary_display=summary_display,
         )
 
     def _build_final_operation_prompt(self, iteration: ChatIteration) -> str:
         """构建最终操作提示词"""
-        iterations_count = iteration.stop // iteration.step if iteration.step > 0 else 0
+        # 计算实际迭代次数
+        if iteration.step > 0:
+            iterations_count = (iteration.stop + iteration.step - 1) // iteration.step
+        else:
+            iterations_count = 1
 
         return FINAL_OPERATION_PROMPT_TEMPLATE.format(
             target=iteration.target,
@@ -769,11 +923,17 @@ class AbstractLlmService(ABC):
             summary=iteration.summary,
         )
 
-    async def _call_llm_in_iteration_mode(self, prompt: str, project_id: str) -> AsyncGenerator[str, None]:
+    async def _call_llm_in_iteration_mode(self, prompt: str, project_id: Optional[str]) -> AsyncGenerator[str, None]:
         """
         在迭代模式下调用LLM（不记录到history，只用于累积summary）。
+        
+        迭代中：
+        - 不使用历史消息
+        - 只使用系统提示词和迭代提示词
+        - 工具调用不记录
+        - 只返回文本内容（summary）
         """
-        # 构建消息列表
+        # 构建消息列表（不包含历史消息）
         messages = []
 
         # 添加系统提示词
@@ -783,8 +943,14 @@ class AbstractLlmService(ABC):
         if app_settings.llm.system_prompt:
             messages.append(("system", app_settings.llm.system_prompt))
 
-        # 添加迭代模式专用指南
+        # 添加 MCP 工具使用指南（但强调迭代模式限制）
+        messages.append(("system", MCP_TOOLS_GUIDE))
         messages.append(("system", ITERATION_GUIDE))
+
+        # 添加当前项目信息
+        session_info = self.get_session_context(project_id)
+        if session_info:
+            messages.append(("system", session_info))
 
         # 添加当前提示词
         messages.append(("human", prompt))
@@ -793,7 +959,6 @@ class AbstractLlmService(ABC):
         config = {"recursion_limit": app_settings.llm.recursion_limit}
 
         # 调用LLM（不记录到history）
-        full_response = ""
         async for chunk in self.agent.astream_events({"messages": messages}, version="v2", config=config):
             event_type = chunk.get("event")
 
@@ -802,7 +967,6 @@ class AbstractLlmService(ABC):
                 if message_chunk and hasattr(message_chunk, "content"):
                     content = message_chunk.content
                     if content:
-                        full_response += content
                         yield content
 
         # 迭代过程中的工具调用不需要记录（用户要求）
@@ -896,15 +1060,75 @@ class AbstractLlmService(ABC):
         except Exception as e:
             logger.exception(f"添加建议失败: project={project_id}, index={index}, error={e}")
 
-    async def _call_llm_final_operation(
+    async def _start_iteration(
+            self,
+            project_id: Optional[str],
+            target: str,
+            stop: int,
+            index: int = 0,
+            step: int = 100,
+            summary: str = ""
+    ) -> str:
+        """
+        启动迭代式对话（内部工具函数）。
+        
+        当 LLM 判断需要处理全文或大量内容时，应该调用此工具函数。
+        此函数会立即更新当前消息为迭代消息，并返回简单的确认消息。
+        
+        :param project_id: 项目 ID（None 表示默认工作空间）
+        :param target: 迭代目标（如："提取全文角色"、"生成章节摘要"）
+        :param index: 起始索引（通常为0）
+        :param stop: 终止条件（必须指定，不能为None）
+        :param step: 迭代步长（默认100）
+        :param summary: 初始摘要（通常为空字符串）
+        
+        :return: 确认消息字符串
+        """
+        if project_id == 'null':
+            project_id = None
+
+        try:
+            # 验证参数
+            if stop <= index:
+                return f"错误：stop({stop}) 必须大于 index({index})"
+            if step <= 0:
+                return f"错误：step({step}) 必须大于0"
+
+            # 创建 ChatIteration 对象
+            iteration_data = ChatIteration(
+                target=target,
+                index=index,
+                stop=stop,
+                step=step,
+                summary=summary
+            )
+
+            logger.info(f"已启动迭代模式：target={target}, index={index}, stop={stop}, step={step}")
+
+            # 注意：此函数不能直接更新消息，因为它是工具函数，无法访问 assistant_message
+            # 消息更新将在 chat_streamed 中处理
+            # 返回迭代数据的 JSON 字符串，供 chat_streamed 解析
+            return json.dumps({
+                "target": target,
+                "index": index,
+                "stop": stop,
+                "step": step,
+                "summary": summary,
+                "data": iteration_data.model_dump()
+            })
+        except Exception as e:
+            logger.exception(f"启动迭代模式失败: {e}")
+            return f"错误：启动迭代模式失败: {str(e)}"
+
+    async def _call_llm_final_operation_streamed(
             self,
             prompt: str,
-            project_id: str,
+            project_id: Optional[str],
             tools_list: list,
             context_ref: list
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict, None]:
         """
-        调用LLM执行最终操作（允许所有工具，记录到传入的列表）。
+        调用LLM执行最终操作（允许所有工具，记录到传入的列表，支持流式传输）。
         
         这是 `chat_streamed` 的简化版本，使用自定义消息列表，不写入数据库。
         
@@ -912,6 +1136,7 @@ class AbstractLlmService(ABC):
         :param project_id: 项目ID
         :param tools_list: 工具调用列表（会被实时更新）
         :param context_ref: 上下文内容的引用（列表，用于修改字符串）
+        :yield: 事件字典
         """
         # 构建自定义消息列表（不包含历史消息和聊天摘要）
         messages = []
@@ -946,10 +1171,32 @@ class AbstractLlmService(ABC):
                 if message_chunk and hasattr(message_chunk, "content") and message_chunk.content:
                     content = message_chunk.content
                     context_ref[0] += content
-                    yield content
+                    yield {'type': 'content', 'content': content}
 
             elif event_type == "on_tool_start":
+                tool_name = chunk.get("name", "")
                 self._process_tool_start_event(chunk, tools_list, "最终操作")
 
+                # 发送工具调用开始事件
+                if not tool_name.startswith("_"):
+                    tool_input = chunk.get("data", {}).get("input", {})
+                    yield {
+                        'type': 'tool_start',
+                        'name': tool_name,
+                        'args': tool_input if isinstance(tool_input, dict) else {}
+                    }
+                    yield {'type': 'tools', 'tools': tools_list.copy()}
+
             elif event_type == "on_tool_end":
+                tool_name = chunk.get("name", "")
+                tool_output: ToolMessage = chunk.get("data", {}).get("output")
                 self._process_tool_end_event(chunk, tools_list, "最终操作")
+
+                # 发送工具调用结束事件
+                if not tool_name.startswith("_"):
+                    yield {
+                        'type': 'tool_end',
+                        'name': tool_name,
+                        'result': tool_output.content
+                    }
+                    yield {'type': 'tools', 'tools': tools_list.copy()}

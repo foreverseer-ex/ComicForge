@@ -29,5 +29,6 @@ dependencies = [
     "setuptools>=80.9.0",
     "sqlmodel>=0.0.27",
     "uvicorn[standard]<0.36",
+    "ollama>=0.6.0",
 ]
 

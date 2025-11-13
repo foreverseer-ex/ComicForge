@@ -35,11 +35,10 @@ class TestProjectCRUD:
         )
         
         assert response.status_code == 200
-        data = response.json()
-        
-        assert "project_id" in data
-        # 创建 API 现在只返回 project_id
-        project_id = data["project_id"]
+        # 后端直接返回 project_id 字符串，不是字典
+        project_id = response.json()
+        assert isinstance(project_id, str), f"期望返回字符串，但返回了 {type(project_id)}: {project_id}"
+        assert len(project_id) > 0, "project_id 不能为空"
         
         # 验证项目确实被创建了（通过 GET 接口获取完整信息）
         get_response = client.get(f"/project/{project_id}")
@@ -65,7 +64,9 @@ class TestProjectCRUD:
             params={"title": "测试项目_获取"}
         )
         assert create_response.status_code == 200
-        project_id = create_response.json()["project_id"]
+        # 后端直接返回 project_id 字符串
+        project_id = create_response.json()
+        assert isinstance(project_id, str), f"期望返回字符串，但返回了 {type(project_id)}: {project_id}"
         
         # 获取项目
         response = client.get(f"/project/{project_id}")
@@ -126,7 +127,9 @@ class TestProjectCRUD:
             "/project/create",
             params={"title": "测试项目_更新"}
         )
-        project_id = create_response.json()["project_id"]
+        # 后端直接返回 project_id 字符串
+        project_id = create_response.json()
+        assert isinstance(project_id, str), f"期望返回字符串，但返回了 {type(project_id)}: {project_id}"
         
         # 更新项目
         response = client.put(
@@ -188,7 +191,9 @@ class TestProjectCRUD:
             "/project/create",
             params={"title": "测试项目_删除"}
         )
-        project_id = create_response.json()["project_id"]
+        # 后端直接返回 project_id 字符串
+        project_id = create_response.json()
+        assert isinstance(project_id, str), f"期望返回字符串，但返回了 {type(project_id)}: {project_id}"
         
         # 验证项目存在
         get_response = client.get(f"/project/{project_id}")
@@ -228,7 +233,9 @@ class TestProjectCRUD:
             "/project/create",
             params={"title": "测试项目_进度"}
         )
-        project_id = create_response.json()["project_id"]
+        # 后端直接返回 project_id 字符串
+        project_id = create_response.json()
+        assert isinstance(project_id, str), f"期望返回字符串，但返回了 {type(project_id)}: {project_id}"
         
         # 更新进度
         response = client.put(
@@ -265,7 +272,9 @@ class TestProjectCRUD:
             params={"title": "生命周期测试项目"}
         )
         assert create_response.status_code == 200
-        project_id = create_response.json()["project_id"]
+        # 后端直接返回 project_id 字符串
+        project_id = create_response.json()
+        assert isinstance(project_id, str), f"期望返回字符串，但返回了 {type(project_id)}: {project_id}"
         print(f"\n[生命周期测试] 1. 创建项目: {project_id}")
         
         # 2. 获取
