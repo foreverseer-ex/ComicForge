@@ -150,16 +150,20 @@ class JobService:
             return count
     
     @classmethod
-    def clear(cls, incomplete_only: bool = False) -> int:
+    def clear(cls, incomplete_only: bool = False, failed_only: bool = False) -> int:
         """
-        清空所有任务或仅清空未完成任务。
+        清空所有任务、仅清空未完成任务或仅清空失败任务。
         
         :param incomplete_only: 是否仅清空未完成任务（status != 'completed'，包括失败和生成中）
+        :param failed_only: 是否仅清空失败任务（status == 'failed'）
         :return: 删除的任务数量
         """
         with DatabaseSession() as db:
             statement = select(Job)
-            if incomplete_only:
+            if failed_only:
+                # 只清空失败的任务
+                statement = statement.where(Job.status == "failed")
+            elif incomplete_only:
                 # 清空所有未完成的任务（不等于 'completed'）
                 statement = statement.where(Job.status != "completed")
             
@@ -169,7 +173,9 @@ class JobService:
             for job in jobs:
                 db.delete(job)
             
-            if incomplete_only:
+            if failed_only:
+                logger.info(f"清空失败任务: {count} 条")
+            elif incomplete_only:
                 logger.info(f"清空未完成任务: {count} 条")
             else:
                 logger.info(f"清空所有任务: {count} 条")

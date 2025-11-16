@@ -374,9 +374,39 @@ class CivitaiDrawService(AbstractDrawService):
         if 'loras' not in draw_args_dict:
             draw_args_dict['loras'] = {}
 
+        # 如果 name 为空，从 prompt 中提取默认名称（前30个字符）
+        final_name = name
+        if not final_name or not final_name.strip():
+            if args.prompt:
+                short_prompt = args.prompt[:30].strip()
+                if short_prompt:
+                    final_name = short_prompt + ('...' if len(args.prompt) > 30 else '')
+                else:
+                    final_name = None
+            else:
+                final_name = None
+        
+        # 如果 desc 为空，使用 prompt 作为默认描述
+        # 处理 desc 可能是 FieldInfo 对象的情况（当函数被直接调用时）
+        final_desc = desc
+        if final_desc is not None:
+            # 检查是否是 FieldInfo 对象（Query 返回的类型）
+            if hasattr(final_desc, 'default'):
+                # 这是 FieldInfo 对象，提取默认值
+                final_desc = getattr(final_desc, 'default', None)
+            # 确保是字符串类型
+            if not isinstance(final_desc, str):
+                final_desc = None
+        
+        if not final_desc or (isinstance(final_desc, str) and not final_desc.strip()):
+            if args.prompt:
+                final_desc = args.prompt
+            else:
+                final_desc = None
+
         job = JobService.create(Job(
-            name=name,
-            desc=desc,
+            name=final_name,
+            desc=final_desc,
             created_at=datetime.now(),
             status="pending",
             draw_args=draw_args_dict,

@@ -49,10 +49,10 @@
         </p>
       </div>
 
-      <!-- 清空图片缓存按钮 -->
+      <!-- 清空缓存按钮 -->
       <div>
         <button
-          @click="handleClearImageCache"
+          @click="handleClearCache"
           :class="[
             'px-4 py-2 rounded-lg font-medium transition-colors',
             isDark
@@ -60,7 +60,7 @@
               : 'bg-red-500 hover:bg-red-600 text-white'
           ]"
         >
-          清空图片缓存
+          清空缓存
         </button>
         <p 
           :class="[
@@ -68,17 +68,53 @@
             isDark ? 'text-gray-400' : 'text-gray-500'
           ]"
         >
-          清空当前内存中的图片缓存
+          清空当前内存中的图片缓存和文字缓存
         </p>
       </div>
+
+      <!-- 查看缓存按钮 -->
+      <div class="flex gap-4">
+        <button
+          @click="handleViewImageCache"
+          :class="[
+            'px-4 py-2 rounded-lg font-medium transition-colors',
+            isDark
+              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+              : 'bg-blue-500 hover:bg-blue-600 text-white'
+          ]"
+        >
+          查看图片缓存
+        </button>
+        <button
+          @click="handleViewTextCache"
+          :class="[
+            'px-4 py-2 rounded-lg font-medium transition-colors',
+            isDark
+              ? 'bg-green-600 hover:bg-green-700 text-white'
+              : 'bg-green-500 hover:bg-green-600 text-white'
+          ]"
+        >
+          查看文字缓存
+        </button>
+      </div>
     </div>
+
+    <!-- 缓存查看对话框 -->
+    <CacheViewDialog
+      v-if="showCacheDialog"
+      :is-dark="isDark"
+      :type="cacheDialogType"
+      @close="showCacheDialog = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { updateImageCacheSize, imageCache } from '../../utils/imageCache'
+import { textCache } from '../../utils/textCache'
 import { showToast } from '../../utils/toast'
+import CacheViewDialog from './CacheViewDialog.vue'
 
 defineProps<{
   isDark: boolean
@@ -124,11 +160,28 @@ const handleImageCacheSizeBlur = (event: Event) => {
   }
 }
 
-// 清空图片缓存
-const handleClearImageCache = () => {
-  const cacheSize = imageCache.size
+const showCacheDialog = ref(false)
+const cacheDialogType = ref<'image' | 'text'>('image')
+
+// 清空缓存（图片和文字）
+const handleClearCache = () => {
+  const imageCacheSize = imageCache.size
+  const textCacheSize = textCache.size
   imageCache.clear()
-  showToast(`已清空图片缓存（${cacheSize} 张图片）`, 'success')
+  textCache.clear()
+  showToast(`已清空缓存（图片：${imageCacheSize} 张，文字：${textCacheSize} 条）`, 'success')
+}
+
+// 查看图片缓存
+const handleViewImageCache = () => {
+  cacheDialogType.value = 'image'
+  showCacheDialog.value = true
+}
+
+// 查看文字缓存
+const handleViewTextCache = () => {
+  cacheDialogType.value = 'text'
+  showCacheDialog.value = true
 }
 
 // 组件挂载时初始化

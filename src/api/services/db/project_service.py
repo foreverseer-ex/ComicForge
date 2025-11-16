@@ -54,7 +54,7 @@ class ProjectService:
             if project.novel_path:
                 from api.services.transform import transform_service
                 from api.services.novel_parser import novel_parser
-                from .novel_service import NovelContentService
+                from .content_service import ContentService
                 
                 source_file = Path(project.novel_path)
                 
@@ -78,7 +78,7 @@ class ProjectService:
                         return False
                     
                     # 批量存入数据库
-                    NovelContentService.batch_create(novel_contents)
+                    ContentService.batch_create(novel_contents)
                     logger.success(f"小说解析并存储成功: {len(novel_contents)} 行")
                     
                     # 删除临时文件
@@ -121,9 +121,9 @@ class ProjectService:
         
         # 如果有小说内容，更新统计信息
         if project.novel_path:
-            from .novel_service import NovelContentService
-            total_lines = NovelContentService.count_by_session(project.project_id)
-            total_chapters = NovelContentService.count_chapters(project.project_id)
+            from .content_service import ContentService
+            total_lines = ContentService.count_by_session(project.project_id)
+            total_chapters = ContentService.count_chapters(project.project_id)
             
             # 更新 project 的统计信息
             updated_project = cls.update(
@@ -228,8 +228,8 @@ class ProjectService:
         :return: 是否删除成功
         """
         # 删除关联的小说内容
-        from .novel_service import NovelContentService
-        novel_count = NovelContentService.delete_by_session(project_id)
+        from .content_service import ContentService
+        novel_count = ContentService.delete_by_session(project_id)
         logger.info(f"删除项目关联的小说内容: {project_id}, 共 {novel_count} 行")
         
         # 删除关联的角色

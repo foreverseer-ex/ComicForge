@@ -8,10 +8,10 @@ from loguru import logger
 from sqlmodel import select
 
 from .base import DatabaseSession
-from api.schemas.novel import NovelContent
+from api.schemas.content import NovelContent
 
 
-class NovelContentService:
+class ContentService:
     """
     小说内容数据库服务（单例模式）。
     
@@ -50,6 +50,32 @@ class NovelContentService:
             db.flush()
             logger.info(f"批量创建小说内容: {len(novel_contents)} 条")
             return len(novel_contents)
+    
+    @classmethod
+    def get_by_index(cls, project_id: str, index: int) -> Optional[NovelContent]:
+        """
+        根据全局行号（索引）获取内容。
+        
+        :param project_id: 会话 ID
+        :param index: 全局行号（从0开始，按章节和行号排序）
+        :return: 小说内容对象，如果不存在则返回 None
+        """
+        with DatabaseSession() as db:
+            # 查询所有内容，按章节和行号排序
+            statement = select(NovelContent).where(
+                NovelContent.project_id == project_id
+            ).order_by(NovelContent.chapter, NovelContent.line)
+            
+            contents = list(db.exec(statement).all())
+            
+            if index < 0 or index >= len(contents):
+                logger.warning(f"行索引超出范围: project={project_id}, index={index}, 总行数={len(contents)}")
+                return None
+            
+            content = contents[index]
+            db.expunge(content)
+            logger.debug(f"获取行内容: project={project_id}, index={index}, chapter={content.chapter}, line={content.line}")
+            return content
     
     @classmethod
     def get_by_session(cls, project_id: str, limit: Optional[int] = None) -> list[NovelContent]:

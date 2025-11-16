@@ -21,6 +21,31 @@
       
       <div class="flex items-center gap-2">
         <button
+          @click="generateFullActors"
+          :disabled="generatingActors || !selectedProjectId"
+          :class="[
+            'p-2 rounded-lg transition-colors',
+            generatingActors || !selectedProjectId
+              ? isDark
+                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              : isDark
+                ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                : 'bg-purple-600 hover:bg-purple-700 text-white'
+          ]"
+          :title="!selectedProjectId ? '请先选择项目' : generatingActors ? '正在提取角色...' : '一键AI提取全文角色'"
+        >
+          <SparklesIcon 
+            v-if="!generatingActors"
+            class="w-5 h-5" 
+          />
+          <div 
+            v-else
+            class="animate-spin rounded-full h-5 w-5 border-b-2"
+            :class="isDark ? 'border-white' : 'border-white'"
+          ></div>
+        </button>
+        <button
           v-if="actors.length > 0"
           @click="handleClearAll"
           :class="[
@@ -302,7 +327,7 @@ import { useThemeStore } from '../stores/theme'
 import { useProjectStore } from '../stores/project'
 import { usePrivacyStore } from '../stores/privacy'
 import { storeToRefs } from 'pinia'
-import { UserGroupIcon, PlusIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { UserGroupIcon, PlusIcon, TrashIcon, SparklesIcon } from '@heroicons/vue/24/outline'
 import ActorCard from '../components/ActorCard.vue'
 import ActorDetailDialog from '../components/ActorDetailDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -336,6 +361,7 @@ const editingActor = ref<Actor | null>(null)
 const detailActor = ref<Actor | null>(null)
 const saving = ref(false)
 const deleting = ref(false)
+const generatingActors = ref(false)
 
 // 统一确认对话框
 const confirmDialog = ref({
@@ -515,6 +541,41 @@ const handleDelete = (actor: Actor) => {
   }
 }
 
+// 一键AI提取全文角色
+const generateFullActors = async () => {
+  if (!selectedProjectId.value || generatingActors.value) return
+
+  generatingActors.value = true
+  try {
+    const response = await api.post('/llm/generate-full-actors', {
+      project_id: selectedProjectId.value,
+      direct_mode: true  // 默认使用直接模式
+    }, {
+      timeout: 5 * 60 * 1000  // 5分钟超时（300000毫秒）
+    })
+
+    const result = response as any
+    const extractedCount = result.extracted_count || 0
+    const updatedCount = result.updated || 0
+    const createdCount = result.created || 0
+
+    // 刷新角色列表
+    await loadActors()
+
+    // 显示成功消息
+    showToast(
+      `成功提取 ${extractedCount} 个角色（更新 ${updatedCount} 个，创建 ${createdCount} 个）`,
+      'success'
+    )
+  } catch (error: any) {
+    console.error('提取角色失败:', error)
+    const errorMsg = error.response?.data?.detail || error.message || '提取角色失败'
+    showToast(`提取角色失败: ${errorMsg}`, 'error')
+  } finally {
+    generatingActors.value = false
+  }
+}
+
 // 刷新角色列表（用于详情对话框更新后刷新）
 const handleRefresh = async () => {
   // 先保存当前 detailActor 的 ID
@@ -538,11 +599,16 @@ const handleRefresh = async () => {
 }
 
 // 检查是否有正在生成的立绘
+const getExampleSnapshot = (ex: any) => ({
+  file: ex?.filename ?? ex?.image_path ?? '',
+  title: ex?.title ?? ''
+})
+
 const hasGeneratingPortrait = computed(() => {
   return actors.value.some(actor => 
     actor.examples && actor.examples.some((ex: any) => {
-      const imagePath = ex?.filename || ex?.image_path
-      return !imagePath || (typeof imagePath === 'string' && imagePath.startsWith('generating_'))
+      const file = ex?.filename ?? ex?.image_path
+      return !file || (typeof file === 'string' && file.startsWith('generating_'))
     })
   )
 })
@@ -563,10 +629,7 @@ watch([hasGeneratingPortrait, selectedProjectId], ([hasGenerating, projectId]) =
   if (actors.value.length > 0) {
     lastActorsState.value = JSON.stringify(actors.value.map(actor => ({
       actor_id: actor.actor_id,
-      examples: actor.examples?.map((ex: any) => ({
-        image_path: ex.image_path,
-        title: ex.title
-      })) || []
+      examples: actor.examples?.map((ex: any) => getExampleSnapshot(ex)) || []
     })))
   }
   
@@ -587,10 +650,7 @@ watch([hasGeneratingPortrait, selectedProjectId], ([hasGenerating, projectId]) =
           // 比较当前状态和上次状态
           const currentState = JSON.stringify(response.map((actor: any) => ({
             actor_id: actor.actor_id,
-            examples: actor.examples?.map((ex: any) => ({
-              image_path: ex.image_path,
-              title: ex.title
-            })) || []
+            examples: actor.examples?.map((ex: any) => getExampleSnapshot(ex)) || []
           })))
           
           // 如果有变化（比如 image_path 从 null 变成了有值），才更新
@@ -604,14 +664,8 @@ watch([hasGeneratingPortrait, selectedProjectId], ([hasGenerating, projectId]) =
               if (existingIndex >= 0 && actors.value[existingIndex]) {
                 // 检查这个 actor 的 examples 是否有变化
                 const existingActor = actors.value[existingIndex]
-                const existingExamplesState = JSON.stringify(existingActor.examples?.map((ex: any) => ({
-                  image_path: ex.image_path,
-                  title: ex.title
-                })) || [])
-                const updatedExamplesState = JSON.stringify(updatedActor.examples?.map((ex: any) => ({
-                  image_path: ex.image_path,
-                  title: ex.title
-                })) || [])
+                const existingExamplesState = JSON.stringify(existingActor.examples?.map((ex: any) => getExampleSnapshot(ex)) || [])
+                const updatedExamplesState = JSON.stringify(updatedActor.examples?.map((ex: any) => getExampleSnapshot(ex)) || [])
                 
                 // 只有 examples 有变化时才更新
                 if (existingExamplesState !== updatedExamplesState) {

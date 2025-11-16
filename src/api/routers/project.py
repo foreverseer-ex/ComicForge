@@ -46,27 +46,44 @@ async def create_project(
     - 如果提供了小说路径，触发小说解析
     - 依赖配置从 settings 模块读取
     """
-    # 生成唯一项目ID
     # 创建项目对象（ID 会自动生成）
-    project = Project(
+    # 先创建临时项目以获取 project_id
+    temp_project = Project(
         title=title,
         novel_path=novel_path,
-        project_path="",  # 先创建空路径，创建后再设置
+        project_path="",  # 临时空路径，稍后设置
         created_at=datetime.now(),
         updated_at=datetime.now(),
     )
     
-    # 保存到数据库
-    project = ProjectService.create(project)
+    # 先保存到数据库以获取 project_id
+    from api.services.db.base import DatabaseSession
+    with DatabaseSession() as db:
+        db.add(temp_project)
+        db.flush()
+        db.refresh(temp_project)
+        project_id = temp_project.project_id
+        project_path = str(project_home / project_id)
+        # 更新 project_path 并保存到数据库
+        temp_project.project_path = project_path
+        db.add(temp_project)
+        db.flush()
+        db.expunge(temp_project)
     
-    # 创建项目路径（使用生成的 project_id）
-    project_path = str(project_home / project.project_id)
-    project.project_path = project_path
-    project = ProjectService.update(project.project_id, project_path=project_path)
+    # 手动调用 init_project 来创建文件夹结构
+    # 注意：这里不能再次调用 ProjectService.create，因为项目已在数据库中
+    ProjectService.init_project(temp_project)
     
-    logger.info(f"创建项目: {project.project_id}, 标题: {title}")
+    # 如果有小说内容，更新统计信息
+    if temp_project.novel_path:
+        from api.services.db.content_service import ContentService
+        total_lines = ContentService.count_by_session(project_id)
+        total_chapters = ContentService.count_chapters(project_id)
+        ProjectService.update(project_id, total_lines=total_lines, total_chapters=total_chapters)
     
-    return project.project_id
+    logger.info(f"创建项目: {project_id}, 标题: {title}, 路径: {project_path}")
+    
+    return project_id
 
 
 @router.get("/all", response_model=List[Project], summary="列出所有项目")

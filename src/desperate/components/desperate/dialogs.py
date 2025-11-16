@@ -157,8 +157,8 @@ class CreateProjectDialog(ft.AlertDialog):
             return
         
         try:
-            # 生成项目 ID 和项目路径
-            project_id = str(uuid.uuid4())
+            # 生成项目 ID 和项目路径（不带连字符的UUID）
+            project_id = uuid.uuid4().hex
             project_path = Path(f"storage/data/projects/{project_id}")
             
             # 处理文件上传（保存原始文件路径，不拷贝）

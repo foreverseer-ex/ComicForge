@@ -8,9 +8,10 @@ from .project_service import ProjectService
 from .memory_service import MemoryService
 from .actor_service import ActorService
 from .draw_service import JobService, BatchJobService
-from .novel_service import NovelContentService
+from .content_service import ContentService
 from .history_service import HistoryService
 from .summary_service import SummaryService
+from .draw_iteration_service import DrawIterationService
 
 __all__ = [
     # 数据库基础
@@ -24,6 +25,7 @@ __all__ = [
     "HistoryService",
     "JobService",
     "BatchJobService",
-    "NovelContentService",
+    "ContentService",
     "SummaryService",
+    "DrawIterationService",
 ]

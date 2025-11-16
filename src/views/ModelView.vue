@@ -89,7 +89,7 @@
 
         <!-- 导出 AIR -->
         <button
-          @click="exportAllAir"
+          @click.stop="exportAllAir"
           :class="[
             'p-2 rounded-lg transition-colors',
             isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'
@@ -429,8 +429,6 @@
         删除元数据
       </button>
     </div>
-    <!-- 页面级 Toaster：固定在右下角，避免遮挡右上角操作按钮 -->
-    <Toaster position="bottom-right" />
   </div>
 
   <!-- 模型详情对话框 -->
@@ -456,7 +454,7 @@ import {
 import ModelCard from '../components/ModelCard.vue'
 import ModelDetailDialog from '../components/ModelDetailDialog.vue'
 import api from '../api'
-import { Toaster, toast } from 'vue-sonner'
+import { toast } from 'vue-sonner'
 
 interface ModelMeta {
   model_id: number
@@ -645,18 +643,22 @@ const batchImport = async () => {
   
   // 获取最大并发数与后端超时设置
   let maxConcurrency = 4 // 默认值
-  let civitaiTimeoutMs = 60000 // 默认与后端一致（后端默认60秒）
+  let civitaiTimeoutSeconds = 60 // 默认与后端一致（后端默认60秒）
   try {
     const response = await api.get('/settings/civitai')
     const settings = (response as any)?.data || response
     maxConcurrency = settings?.parallel_workers || 4
     if (settings?.timeout) {
       const t = Number(settings.timeout)
-      if (!Number.isNaN(t) && t > 0) civitaiTimeoutMs = Math.round(t * 1000)
+      if (!Number.isNaN(t) && t > 0) civitaiTimeoutSeconds = t
     }
   } catch (error) {
     console.warn('获取并发数设置失败，使用默认值:', error)
   }
+  
+  // 计算总超时时间：模型数量 * civitai请求超时时间
+  const totalTimeoutMs = Math.round(lines.length * civitaiTimeoutSeconds * 1000)
+  const civitaiTimeoutMs = totalTimeoutMs
   
   // 并发导入函数
   const importSingleModel = async (air: string, _index: number, parallelDownload: boolean = false) => {

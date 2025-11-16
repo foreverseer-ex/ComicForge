@@ -52,9 +52,9 @@ class LlmSettings(BaseModel):
     )
 
     timeout: float = Field(
-        default=60.0,
+        default=120.0,
         gt=0,
-        description="API 请求超时时间（秒），当网络连接失败或响应超时时会触发"
+        description="API 请求超时时间（秒），当网络连接失败或响应超时时会触发，默认2分钟"
     )
 
     # 高级配置

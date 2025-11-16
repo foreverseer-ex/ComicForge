@@ -107,7 +107,7 @@ import { HeartIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import { HeartIcon as HeartIconSolid } from '@heroicons/vue/24/solid'
 import { getImageUrl } from '../utils/imageUtils'
 import api from '../api'
-import { showToast } from '../utils/toast'
+import { toast } from 'vue-sonner'
 
 interface ModelMeta {
   model_id: number
@@ -303,11 +303,11 @@ const togglePreference = async () => {
       disliked: '已设为不喜欢',
       neutral: '已设为中性'
     }
-    showToast(messages[newPreference], 'success')
+    toast.success(messages[newPreference])
   } catch (error: any) {
     console.error('设置偏好状态失败:', error)
     const errorMsg = error.response?.data?.detail || error.message || '设置失败'
-    showToast(`❌ ${errorMsg}`, 'error')
+    toast.error(`❌ ${errorMsg}`)
   }
 }
 </script>

@@ -427,7 +427,7 @@ const loadContents = async () => {
   loading.value = true
     try {
     // 加载所有内容（不限制数量）
-    const data = await api.get('/context/project', {
+    const data = await api.get('/content/project', {
       params: {
         project_id: selectedProjectId.value
       }
@@ -458,7 +458,7 @@ const startEdit = async (content: NovelContent) => {
     if (hasChanged) {
       // 有修改，先保存
       try {
-        await api.put('/context/line', {
+        await api.put('/content/line', {
           content: editingText.value.trim()
         }, {
           params: {
@@ -520,7 +520,7 @@ const saveEdit = async () => {
     
       if (lines.length === 0) {
       // 如果删除所有内容，删除这个段落
-      await api.delete('/context/line', {
+      await api.delete('/content/line', {
         params: {
           project_id: editingContent.value.project_id,
           chapter: editingContent.value.chapter,
@@ -529,7 +529,7 @@ const saveEdit = async () => {
       })
       } else if (lines.length === 1) {
       // 单行，直接更新
-      await api.put('/context/line', {
+      await api.put('/content/line', {
         content: lines[0]
       }, {
         params: {
@@ -541,7 +541,7 @@ const saveEdit = async () => {
     } else {
       // 多行，需要切分成多个段落
       // 先更新第一个段落
-      await api.put('/context/line', {
+      await api.put('/content/line', {
         content: lines[0]
       }, {
         params: {
@@ -553,7 +553,7 @@ const saveEdit = async () => {
       
       // 批量插入后续段落
       if (lines.length > 1) {
-        await api.post('/context/lines/insert-batch', lines.slice(1), {
+        await api.post('/content/lines/insert-batch', lines.slice(1), {
           params: {
             project_id: editingContent.value.project_id,
             chapter: editingContent.value.chapter,
@@ -650,7 +650,7 @@ const showContextMenu = async (event: MouseEvent, content: NovelContent, index: 
     if (hasChanged) {
       // 有修改，先保存
     try {
-        await api.put('/context/line', {
+        await api.put('/content/line', {
           content: editingText.value.trim()
         }, {
           params: {
@@ -853,7 +853,7 @@ const saveInsert = async () => {
       return
     } else if (lines.length === 1) {
       // 单行，使用单条插入API
-      await api.post('/context/line/insert', null, {
+      await api.post('/content/line/insert', null, {
         params: {
           project_id: selectedProjectId.value,
           chapter: chapter,
@@ -863,7 +863,7 @@ const saveInsert = async () => {
       })
     } else {
       // 多行，使用批量插入API
-      await api.post('/context/lines/insert-batch', lines, {
+      await api.post('/content/lines/insert-batch', lines, {
         params: {
           project_id: selectedProjectId.value,
           chapter: chapter,
@@ -890,7 +890,7 @@ const handleDelete = async () => {
   
   deleting.value = true
   try {
-    await api.delete('/context/line', {
+    await api.delete('/content/line', {
       params: {
         project_id: deletingContent.value.project_id,
         chapter: deletingContent.value.chapter,

@@ -80,7 +80,7 @@
     </div>
   </div>
   <!-- 全局 Toast（shadcn 风格，通过 vue-sonner） -->
-  <Toaster :theme="isDark ? 'dark' : 'light'" position="top-right" :rich-colors="true" />
+  <Toaster :theme="isDark ? 'dark' : 'light'" position="bottom-right" :rich-colors="true" />
 </template>
 
 <script setup lang="ts">

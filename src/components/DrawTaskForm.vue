@@ -739,16 +739,12 @@ const handleSubmit = () => {
   
   // 构建 LoRA 字典
   const lorasDict: Record<string, number> = {}
-  console.log('[DrawTaskForm] loras.value:', loras.value)
   loras.value.forEach(lora => {
     const weight = Number(lora.weight)
-    console.log('[DrawTaskForm] Processing lora:', { name: lora.name, weight, weightType: typeof lora.weight, weightNumber: weight, isFinite: Number.isFinite(weight) })
     if (lora.name && Number.isFinite(weight)) {
       lorasDict[lora.name] = weight
     }
   })
-  console.log('[DrawTaskForm] Final lorasDict:', lorasDict)
-  console.log('[DrawTaskForm] lorasDict keys length:', Object.keys(lorasDict).length)
   
   // 合并附加信息到任务描述（只有在显示附加信息时才合并）
   let finalDesc = formData.value.desc || ''
@@ -777,7 +773,6 @@ const handleSubmit = () => {
     loras: lorasDict,
     batch_size: formData.value.batch_size || 1
   }
-  console.log('[DrawTaskForm] Emitting submit with data:', submitData)
   emit('submit', submitData)
 }
 

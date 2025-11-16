@@ -27,9 +27,9 @@ class SdForgeSettings(BaseModel):
     )
     
     generate_timeout: float = Field(
-        default=300.0,
+        default=1800.0,
         gt=0,
-        description="图像生成超时时间（秒），默认5分钟（因为SD-Forge是串行处理的）"
+        description="图像生成超时时间（秒），默认30分钟（因为SD-Forge是串行处理的）"
     )
 
     @property

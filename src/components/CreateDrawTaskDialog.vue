@@ -193,12 +193,21 @@ const handleGenerateWithAI = async () => {
   try {
     // 获取当前任务名称和描述
     const name = drawFormRef.value.formData?.name || ''
-    const desc = drawFormRef.value.formData?.desc || ''
+    let desc = drawFormRef.value.formData?.desc || ''
     
     if (!name.trim()) {
       showToast('请先填写任务名称', 'info')
       generatingParams.value = false
       return
+    }
+    
+    // 合并附加信息到描述中
+    if (props.additionalInfo) {
+      if (desc) {
+        desc = `${desc}\n\n${props.additionalInfo}`
+      } else {
+        desc = props.additionalInfo
+      }
     }
     
     // 调用后端 API 生成参数

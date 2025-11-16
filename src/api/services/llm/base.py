@@ -8,6 +8,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from typing import Optional, List, AsyncGenerator, Any
+from datetime import datetime
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolMessage, AIMessage
@@ -40,6 +41,7 @@ from api.routers.memory import (
     create_memory, get_memory, get_all_memories, update_memory,
     delete_memory, clear_memories, get_key_description, get_all_key_descriptions,
 )
+from api.utils.path import chat_home
 # ============================================================================
 # ⚠️ 安全要求：所有MCP工具函数必须来自routers，不能直接调用服务函数
 # ============================================================================
@@ -48,7 +50,7 @@ from api.routers.memory import (
 from api.routers.project import (
     get_project, update_project,
 )
-from api.routers.context import (
+from api.routers.content import (
     get_line, get_chapter_lines, get_lines_range, get_chapters,
     get_chapter, update_chapter, get_stats, get_project_content,
 )
@@ -279,22 +281,55 @@ class AbstractLlmService(ABC):
         """
         logger.info(f"🔧 工具调用 LLM: {message[:1000]}{'...' if len(message) > 1000 else ''}")
 
+        # 初始化调用记录列表
+        chat_log: List[dict[str, Any]] = []
+        
+        # 记录初始信息
+        chat_log.append({
+            "type": "request",
+            "timestamp": datetime.now().isoformat(),
+            "message": message,
+            "project_id": project_id,
+            "output_schema": output_schema.__name__ if output_schema and hasattr(output_schema, '__name__') else (
+                "JSON Schema" if isinstance(output_schema, dict) else str(type(output_schema).__name__) if output_schema else None
+            )
+        })
+
         try:
             # 1. 构建系统消息（不包含历史消息和摘要）
             messages = self.build_system_messages()
+            chat_log.append({
+                "type": "system_messages_built",
+                "timestamp": datetime.now().isoformat(),
+                "count": len(messages),
+                "messages": [{"role": role, "content": content[:500] + "..." if len(content) > 500 else content} for role, content in messages]
+            })
 
             # 2. 添加项目上下文信息（支持 project_id=None，表示默认工作空间）
             session_info = self.get_session_context(project_id)
             if session_info:
                 messages.append(("system", session_info))
+                chat_log.append({
+                    "type": "session_info_added",
+                    "timestamp": datetime.now().isoformat(),
+                    "session_info_length": len(session_info)
+                })
 
             # 3. 如果 project_id 为 None，添加工具使用说明
             if project_id is None:
                 from api.constants.llm import NO_PROJECT_ID_WARNING
                 messages.append(("system", NO_PROJECT_ID_WARNING))
+                chat_log.append({
+                    "type": "no_project_warning_added",
+                    "timestamp": datetime.now().isoformat()
+                })
 
             # 4. 添加用户消息
             messages.append(("human", message))
+            chat_log.append({
+                "type": "user_message_added",
+                "timestamp": datetime.now().isoformat()
+            })
 
             # 5. 如果有输出 schema，需要重新初始化 agent 以支持结构化输出
             if output_schema is not None:
@@ -304,8 +339,24 @@ class AbstractLlmService(ABC):
             self.initialize_llm(response_format=output_schema)
 
             # 6. 调用 agent（使用异步调用）
+            schema_name = '无'
+            if output_schema:
+                if hasattr(output_schema, '__name__'):
+                    schema_name = output_schema.__name__
+                elif isinstance(output_schema, dict):
+                    schema_name = "JSON Schema"
+                else:
+                    schema_name = str(type(output_schema).__name__)
             logger.info(f"开始调用 LLM，使用 {len(self.tools)} 个工具" + (
-                f"，结构化输出: {output_schema.__name__ if output_schema else '无'}" if output_schema else ""))
+                f"，结构化输出: {schema_name}" if output_schema else ""))
+            
+            chat_log.append({
+                "type": "llm_invoke_start",
+                "timestamp": datetime.now().isoformat(),
+                "tools_count": len(self.tools),
+                "schema_name": schema_name
+            })
+            
             config = {"recursion_limit": app_settings.llm.recursion_limit}
             result: dict = await self.agent.ainvoke({"messages": messages}, config=config, stream_mode='values')
             result_message: AIMessage = result['messages'][-1]
@@ -314,16 +365,62 @@ class AbstractLlmService(ABC):
             # 7. 如果有结构化输出，直接返回文本（LLM 已经返回了 JSON）
             if output_schema is not None:
                 logger.info(f"✅ LLM 调用完成，返回结构化输出，长度={len(context)}")
+                # 记录结果
+                chat_log.append({
+                    "type": "result",
+                    "timestamp": datetime.now().isoformat(),
+                    "success": True,
+                    "content": context,
+                    "content_length": len(context),
+                    "output_type": "structured"
+                })
+                # 保存调用记录
+                self._save_chat_log(chat_log)
                 return context
 
             # 8. 如果没有结构化输出，返回普通文本内容
             logger.info(f"✅ LLM 调用完成，返回长度={len(context)}")
             logger.debug(f"最终提取的内容: {context[:500] if context else '(空)'}")
+            # 记录结果
+            chat_log.append({
+                "type": "result",
+                "timestamp": datetime.now().isoformat(),
+                "success": True,
+                "content": context,
+                "content_length": len(context),
+                "output_type": "text"
+            })
+            # 保存调用记录
+            self._save_chat_log(chat_log)
             return context
 
         except Exception as e:
             logger.exception(f"LLM 调用失败: {e}")
+            # 记录错误
+            chat_log.append({
+                "type": "result",
+                "timestamp": datetime.now().isoformat(),
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+            # 保存调用记录
+            self._save_chat_log(chat_log)
             return f"错误：LLM 调用失败 - {str(e)}"
+    
+    def _save_chat_log(self, chat_log: List[dict[str, Any]]) -> None:
+        """保存 chat_invoke 调用记录到文件"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"chat_invoke_{timestamp}.json"
+            file_path = chat_home / filename
+
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(chat_log, f, indent=2, ensure_ascii=False)
+
+            logger.debug(f"已保存 chat_invoke 调用记录到: {file_path}")
+        except Exception as e:
+            logger.warning(f"保存 chat_invoke 调用记录到文件失败: {e}")
 
     def summary_history(self, project_id: Optional[str]):
         """

@@ -9,8 +9,8 @@ from flet_toast import flet_toast
 from flet_toast.Types import Position
 
 from api.components import EditableCard
-from api.services.db import NovelContentService
-from api.schemas.novel import NovelContent
+from api.services.db import ContentService
+from api.schemas.content import NovelContent
 from api.settings import app_settings
 
 
@@ -69,7 +69,7 @@ class ContentManagePage(ft.Column):
             return
         
         try:
-            self.contents = NovelContentService.get_by_session(self.project_id)
+            self.contents = ContentService.get_by_session(self.project_id)
             logger.info(f"预加载了 {len(self.contents)} 行内容")
         except Exception as e:
             logger.exception(f"预加载内容失败: {e}")
@@ -144,7 +144,7 @@ class ContentManagePage(ft.Column):
         
         try:
             # 获取前 100 行（分页加载可以后续优化）
-            self.contents = NovelContentService.get_by_session(self.project_id)
+            self.contents = ContentService.get_by_session(self.project_id)
             logger.info(f"加载了 {len(self.contents)} 行内容")
             
             # 更新列表视图
@@ -379,7 +379,7 @@ class ContentManagePage(ft.Column):
             new_contents.append(new_content)
         
         # 批量保存
-        NovelContentService.batch_create(new_contents)
+        ContentService.batch_create(new_contents)
         logger.info(f"创建了 {len(new_contents)} 个新段落")
     
     def _update_content(self, content: NovelContent, new_text: str):
@@ -390,7 +390,7 @@ class ContentManagePage(ft.Column):
             content: 原内容对象
             new_text: 新文本
         """
-        NovelContentService.update(
+        ContentService.update(
             project_id=content.project_id,
             chapter=content.chapter,
             line=content.line,
@@ -415,7 +415,7 @@ class ContentManagePage(ft.Column):
         # 如果有多行，需要在后面插入新段落
         if len(lines) > 1:
             # 获取该章节所有内容，找到插入位置
-            chapter_contents = NovelContentService.get_by_chapter(
+            chapter_contents = ContentService.get_by_chapter(
                 content.project_id,
                 content.chapter
             )
@@ -434,20 +434,20 @@ class ContentManagePage(ft.Column):
             shift = len(lines) - 1  # 需要移动的行数
             
             for c in lines_to_update:
-                NovelContentService.update(
+                ContentService.update(
                     project_id=c.project_id,
                     chapter=c.chapter,
                     line=c.line,
                     new_content=c.content,
                 )
                 # 先删除旧的
-                NovelContentService.delete_single(
+                ContentService.delete_single(
                     project_id=c.project_id,
                     chapter=c.chapter,
                     line=c.line,
                 )
                 # 创建新的（新行号）
-                NovelContentService.create(
+                ContentService.create(
                     NovelContent(
                         project_id=c.project_id,
                         chapter=c.chapter,
@@ -458,7 +458,7 @@ class ContentManagePage(ft.Column):
             
             # 插入新段落
             for i, line_text in enumerate(lines[1:], start=1):
-                NovelContentService.create(
+                ContentService.create(
                     NovelContent(
                         project_id=content.project_id,
                         chapter=content.chapter,
@@ -486,8 +486,8 @@ class ContentManagePage(ft.Column):
         """段落删除成功的回调"""
         try:
             # 删除段落
-            from api.services.db import NovelContentService
-            success = NovelContentService.delete_single(
+            from api.services.db import ContentService
+            success = ContentService.delete_single(
                 project_id=content.project_id,
                 chapter=content.chapter,
                 line=content.line,

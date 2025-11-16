@@ -64,9 +64,17 @@ class OllamaLlmService(AbstractLlmService):
                 self.agent = create_agent(llm_with_tools, self.tools)
                 self._structured_llm = None
             
+            response_format_name = '无'
+            if response_format:
+                if hasattr(response_format, '__name__'):
+                    response_format_name = response_format.__name__
+                elif isinstance(response_format, dict):
+                    response_format_name = "JSON Schema"
+                else:
+                    response_format_name = str(type(response_format).__name__)
             logger.success(
                 f"Ollama 服务初始化成功: {app_settings.llm.model} "
-                f"({len(self.tools)} 个工具" + (f"，结构化输出: {response_format.__name__ if response_format else '无'}" if response_format else "") + ")"
+                f"({len(self.tools)} 个工具" + (f"，结构化输出: {response_format_name}" if response_format else "") + ")"
             )
             return True
         except Exception as e:

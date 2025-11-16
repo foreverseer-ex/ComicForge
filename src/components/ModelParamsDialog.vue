@@ -199,7 +199,7 @@
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { XMarkIcon, ClipboardIcon } from '@heroicons/vue/24/outline'
-import { showToast } from '../utils/toast'
+import { toast } from 'vue-sonner'
 
 export interface DrawParams {
   model?: string
@@ -240,10 +240,10 @@ const copyJobId = async () => {
   
   try {
     await navigator.clipboard.writeText(props.jobId)
-    showToast('Job ID 已复制到剪贴板', 'success')
+    toast.success('Job ID 已复制到剪贴板')
   } catch (error) {
     console.error('复制失败:', error)
-    showToast('复制失败，请重试', 'error')
+    toast.error('复制失败，请重试')
   }
 }
 
@@ -295,10 +295,10 @@ const copyParams = async () => {
     await navigator.clipboard.writeText(jsonString)
     
     // 使用 toast 显示成功提示
-    showToast('参数已复制到剪贴板', 'success')
+    toast.success('参数已复制到剪贴板')
   } catch (error) {
     console.error('复制失败:', error)
-    showToast('复制失败，请重试', 'error')
+    toast.error('复制失败，请重试')
   }
 }
 

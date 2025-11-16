@@ -27,6 +27,8 @@ class DrawArgs(BaseModel):
     clip_skip: int | None = 2
     vae: str | None = None  # VAE 模型名称
     loras: dict[str, float] | None = None  # LoRA 字典 {name: weight}，权重可以是负数（负数表示负面 LoRA，会被添加到负面提示词）
+    reference_image_path: str | None = None  # ControlNet reference_only 的参考图像路径（可选，用于保持人物一致性）
+    reference_weight: float = 0.8  # ControlNet reference 权重（0.0-1.0，默认 0.8）
 
 
 class Example(BaseModel):
@@ -97,7 +99,7 @@ class Job(SQLModel, table=True):
     data: Optional[Dict[str, Any]] = Field(
         default=None,
         sa_column=Column(JSON()),
-        description="额外数据（JSON 格式），用于存储后端特定的信息，如 Civitai 的 job_token"
+        description="额外数据（JSON 格式），用于存储后端特定的信息，如 Civitai 的 job_token、错误信息等"
     )
 
 
@@ -115,3 +117,12 @@ class BatchJob(SQLModel, table=True):
         description="关联的任务 ID 列表"
     )
 
+
+class DrawIterationResult(BaseModel):
+    """
+    绘图迭代结果。
+    
+    用于 LLM 返回绘图参数和更新后的摘要。
+    """
+    summary: str = PydanticField(description="更新后的摘要")
+    draw_args: DrawArgs = PydanticField(description="绘图参数")

@@ -22,9 +22,13 @@ jobs_home = app_temp_path / 'jobs'
 # 请求响应JSON保存目录（用于调试）
 requests_home = app_temp_path / 'requests'
 
+# chat_invoke 调用记录保存目录（用于调试）
+chat_home = app_temp_path / 'chat'
+
 # 创建必要的目录
 checkpoint_meta_home.mkdir(parents=True, exist_ok=True)
 lora_meta_home.mkdir(parents=True, exist_ok=True)
 project_home.mkdir(parents=True, exist_ok=True)
 jobs_home.mkdir(parents=True, exist_ok=True)
 requests_home.mkdir(parents=True, exist_ok=True)
+chat_home.mkdir(parents=True, exist_ok=True)

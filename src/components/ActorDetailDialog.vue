@@ -661,7 +661,9 @@
       :images="allExampleUrls"
       :initial-index="galleryInitialIndex"
       :visible="showImageGallery"
+      :job-ids="allExampleJobIds"
       @close="showImageGallery = false"
+      @show-params="handleShowParamsFromGallery"
     />
     
     <!-- 确认对话框 -->
@@ -1261,6 +1263,71 @@ const openImageGallery = () => {
     showImageGallery.value = true
   }
 }
+
+// 从图片画廊显示参数对话框
+const handleShowParamsFromGallery = (jobId?: string, galleryIndex?: number) => {
+  if (!props.actor?.examples) {
+    // 如果找不到对应的 example，使用当前 example 的参数（后备方案）
+    if (currentExample.value?.draw_args) {
+      showParamsDialog.value = true
+    }
+    return
+  }
+  
+  // 优先使用传入的 galleryIndex（当前图片在画廊中的索引）
+  const targetIndex = galleryIndex !== undefined ? galleryIndex : galleryInitialIndex.value
+  
+  // 方法1：如果有 jobId，根据 jobId 查找对应的 example
+  if (jobId) {
+    for (let i = 0; i < props.actor.examples.length; i++) {
+      const example = props.actor.examples[i]
+      if (example?.extra?.job_id === jobId && example?.draw_args) {
+        currentExampleIndex.value = i
+        showParamsDialog.value = true
+        return
+      }
+    }
+  }
+  
+  // 方法2：根据 galleryIndex 找到对应的 example（allExampleUrls 和 examples 的对应关系）
+  if (targetIndex >= 0 && targetIndex < allExampleUrls.value.length) {
+    let validCount = 0
+    for (let i = 0; i < props.actor.examples.length; i++) {
+      const example = props.actor.examples[i]
+      const imagePath = example?.filename || example?.image_path
+      if (imagePath && !imagePath.startsWith('generating_')) {
+        if (validCount === targetIndex) {
+          // 找到了对应的 example
+          if (example?.draw_args) {
+            currentExampleIndex.value = i
+            showParamsDialog.value = true
+            return
+          }
+        }
+        validCount++
+      }
+    }
+  }
+  
+  // 如果找不到对应的 example，使用当前 example 的参数（后备方案）
+  if (currentExample.value?.draw_args) {
+    showParamsDialog.value = true
+  }
+}
+
+// 获取所有有效图片对应的 jobIds（用于 ImageGalleryDialog）
+const allExampleJobIds = computed(() => {
+  if (!props.actor?.examples) return []
+  const jobIds: (string | undefined)[] = []
+  props.actor.examples.forEach((ex: any) => {
+    const imagePath = ex?.filename || ex?.image_path
+    if (imagePath && !imagePath.startsWith('generating_')) {
+      // 从 extra.job_id 中获取 job_id
+      jobIds.push(ex?.extra?.job_id)
+    }
+  })
+  return jobIds
+})
 
 // 复制生成参数到剪贴板
 const copyParams = async () => {

@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from loguru import logger
 
-from api.schemas.novel import NovelContent
+from api.schemas.content import NovelContent
 
 
 class NovelParser:

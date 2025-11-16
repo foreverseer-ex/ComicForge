@@ -42,9 +42,12 @@ export const useAuthStore = defineStore('auth', () => {
         const response = await api.get('/auth/me')
         user.value = response  // API 拦截器已经返回了 response.data
         isInitialized.value = true
-      } catch (error) {
-        // token 无效，清除
-        console.error('Token 验证失败，清除登录状态:', error)
+      } catch (error: any) {
+        // token 无效或已过期，静默清除（这是正常情况，不需要输出错误日志）
+        // 只在开发环境输出调试信息
+        if (import.meta.env.DEV) {
+          console.debug('Token 验证失败，清除登录状态（这是正常情况，用户可能未登录或token已过期）')
+        }
         logout()
         isInitialized.value = true
       }

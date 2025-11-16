@@ -159,24 +159,14 @@
           <div class="col-span-2 md:col-span-2 flex items-center">
             <div class="flex-1 min-w-0">
               <div 
-                v-if="job.name"
                 @click="openParamsDialog(job)"
                 :class="[
                   'text-xs truncate cursor-pointer hover:underline',
                   isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-600 hover:text-gray-900'
                 ]"
-                :title="job.name + ' (点击查看参数)'"
+                :title="(job.name || getJobDisplayName(job)) + ' (点击查看参数)'"
               >
-                {{ job.name }}
-              </div>
-              <div 
-                v-else
-                :class="[
-                  'text-xs truncate',
-                  isDark ? 'text-gray-400' : 'text-gray-600'
-                ]"
-              >
-                -
+                {{ job.name || getJobDisplayName(job) }}
               </div>
             </div>
           </div>
@@ -184,15 +174,15 @@
           <!-- 任务描述（移动端隐藏） -->
           <div class="hidden md:flex md:col-span-5 items-center">
             <div 
-              v-if="job.desc"
-              @click="copyToClipboard(job.desc)"
+              v-if="job.desc || getJobDisplayDesc(job)"
+              @click="copyToClipboard(job.desc || getJobDisplayDesc(job) || '')"
               :class="[
                 'text-xs truncate cursor-pointer hover:underline',
                 isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-600 hover:text-gray-900'
               ]"
-              :title="job.desc + ' (点击复制)'"
+              :title="(job.desc || getJobDisplayDesc(job) || '') + ' (点击复制)'"
             >
-              {{ job.desc }}
+              {{ job.desc || getJobDisplayDesc(job) || '-' }}
             </div>
             <div 
               v-else
@@ -380,6 +370,10 @@ interface Job {
   created_at: string
   completed_at?: string
   status?: string  // 'completed' | 'failed' | 'pending'
+  data?: {
+    error?: string  // 错误信息
+    [key: string]: any
+  }
   draw_args?: {
     model?: string
     prompt?: string
@@ -591,15 +585,15 @@ const handleClearAll = async () => {
     show: true,
     title: '确认清空',
     message: '确定要清空任务吗？此操作不可恢复！',
-    checkboxLabel: '仅清空未完成任务',
-    checkboxDefaultValue: false,
-    onConfirm: async (incompleteOnly: boolean = false) => {
+    checkboxLabel: '只清空失败项目',
+    checkboxDefaultValue: true,
+    onConfirm: async (failedOnly: boolean = true) => {
       confirmDialog.value.show = false
       try {
-        await api.delete('/draw/clear', { params: { incomplete_only: incompleteOnly } })
+        await api.delete('/draw/clear', { params: { failed_only: failedOnly } })
         selectedJobIds.value.clear() // 清除选中状态
         await loadJobs()
-        showToast(incompleteOnly ? '未完成任务已清空' : '所有任务已清空', 'success')
+        showToast(failedOnly ? '失败任务已清空' : '所有任务已清空', 'success')
       } catch (error: any) {
         console.error('清空任务失败:', error)
         alertDialog.value = {
@@ -698,20 +692,67 @@ const openParamsDialog = (job: Job) => {
 }
 
 // 从图片画廊打开参数对话框
-const handleShowParamsFromGallery = (jobId: string) => {
-  const job = jobs.value.find(j => j.job_id === jobId)
-  if (job) {
-    selectedJobForParams.value = job
+const handleShowParamsFromGallery = (jobId?: string, index?: number) => {
+  if (jobId) {
+    const job = jobs.value.find(j => j.job_id === jobId)
+    if (job) {
+      selectedJobForParams.value = job
+      return
+    }
+  }
+  
+  // 如果没有 jobId，但提供了 index，尝试从 completedJobIds 中获取
+  if (index !== undefined && index >= 0 && index < completedJobIds.value.length) {
+    const targetJobId = completedJobIds.value[index]
+    const job = jobs.value.find(j => j.job_id === targetJobId)
+    if (job) {
+      selectedJobForParams.value = job
+    }
   }
 }
 
 // 显示错误对话框
 const showErrorDialog = (job: Job) => {
+  const errorMsg = job.data?.error || `任务执行失败（${job.job_id?.substring(0, 8) || 'unknown'}...），请检查参数或重试`
   alertDialog.value = {
     show: true,
     title: '任务失败',
-    message: `任务执行失败（${job.job_id?.substring(0, 8) || 'unknown'}...），请检查参数或重试`
+    message: errorMsg
   }
+}
+
+// 获取任务的显示名称（如果 name 为空，从 draw_args.prompt 提取）
+const getJobDisplayName = (job: Job): string => {
+  if (job.name && job.name.trim()) {
+    return job.name
+  }
+  
+  // 如果 name 为空，尝试从 draw_args.prompt 提取
+  if (job.draw_args?.prompt) {
+    const prompt = job.draw_args.prompt
+    // 提取前30个字符作为默认名称
+    const shortPrompt = prompt.substring(0, 30).trim()
+    if (shortPrompt) {
+      return shortPrompt + (prompt.length > 30 ? '...' : '')
+    }
+  }
+  
+  // 如果都没有，返回默认名称
+  return `任务 ${job.job_id?.substring(0, 8) || 'unknown'}`
+}
+
+// 获取任务的显示描述（如果 desc 为空，从 draw_args.prompt 提取）
+const getJobDisplayDesc = (job: Job): string | null => {
+  if (job.desc && job.desc.trim()) {
+    return job.desc
+  }
+  
+  // 如果 desc 为空，尝试从 draw_args.prompt 提取
+  if (job.draw_args?.prompt) {
+    return job.draw_args.prompt
+  }
+  
+  return null
 }
 
 // 提交任务
@@ -737,21 +778,21 @@ const handleTaskSubmit = async (data: any) => {
     
     // 构建查询参数：后端期望使用查询参数（Query parameters）
     const requestParams: Record<string, any> = {
-      model: data.model,
-      prompt: data.prompt,
+        model: data.model,
+        prompt: data.prompt,
       negative_prompt: data.negative_prompt || "",
-      sampler_name: data.sampler_name,
-      steps: data.steps,
-      cfg_scale: data.cfg_scale,
-      width: data.width,
-      height: data.height,
-      seed: data.seed,
+        sampler_name: data.sampler_name,
+        steps: data.steps,
+        cfg_scale: data.cfg_scale,
+        width: data.width,
+        height: data.height,
+        seed: data.seed,
       ...(data.name ? { name: data.name } : {}),
       ...(data.desc ? { desc: data.desc } : {}),
       ...(data.clip_skip ? { clip_skip: data.clip_skip } : {}),
       ...(data.vae ? { vae: data.vae } : {}),
-      ...(batchSize > 1 ? { batch_size: batchSize } : {})
-    }
+        ...(batchSize > 1 ? { batch_size: batchSize } : {})
+      }
     
     // 只有当 lorasDict 不为空时才添加 loras 参数（作为 JSON 字符串传递）
     if (Object.keys(lorasDict).length > 0) {

@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Column, JSON
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlmodel import SQLModel, Field
-from typing import Optional
+from typing import Optional, List
 from .draw import DrawArgs, Example
 
 
@@ -43,3 +43,23 @@ class Actor(SQLModel, table=True):
     examples: list[dict] = Field(default_factory=list,
                                  sa_column=Column(MutableList.as_mutable(JSON())),
                                  description="示例图列表（序列化的 Example）")
+
+
+class ActorList(BaseModel):
+    """
+    用于 LLM 结构化输出的 Actor 列表包装类。
+    
+    用于一键提取角色功能，LLM 返回的格式为：
+    {
+        "actors": [
+            {
+                "name": "角色名",
+                "desc": "角色描述",
+                "color": "#FF69B4",
+                "tags": {"type": "角色", "gender": "男"}
+            },
+            ...
+        ]
+    }
+    """
+    actors: List[Actor] = Field(description="角色列表")

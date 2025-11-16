@@ -182,6 +182,27 @@ async def create_draw_job(
         job_id（任务 ID）
     """
     try:
+        # 处理 Query 对象：当函数被直接调用（非 HTTP）时，Query 对象不会被解析
+        # Query 返回的是 FieldInfo 对象，需要提取实际值
+        def extract_value(value):
+            """从可能的 FieldInfo 对象中提取实际值"""
+            if value is None:
+                return None
+            # 检查是否是 FieldInfo 对象（Query 返回的类型）
+            # FieldInfo 对象有 'default' 属性
+            if hasattr(value, 'default'):
+                # 这是 FieldInfo 对象，提取默认值
+                return getattr(value, 'default', None)
+            # 如果是字符串 "null" 或 "None"，转换为 None
+            if isinstance(value, str) and value.lower() in ('null', 'none', ''):
+                return None
+            return value
+        
+        # 提取各参数的实际值
+        actual_vae = extract_value(vae)
+        actual_name = extract_value(name)
+        actual_desc = extract_value(desc)
+        
         args = DrawArgs(
             model=model,
             prompt=prompt,
@@ -193,7 +214,7 @@ async def create_draw_job(
             width=width,
             height=height,
             clip_skip=clip_skip,
-            vae=vae,
+            vae=actual_vae,
             loras=loras or {},
         )
         
@@ -225,7 +246,7 @@ async def create_draw_job(
         
         # 调用绘图服务
         draw_service = get_current_draw_service()
-        job_id = draw_service.draw(args, name=name, desc=desc)
+        job_id = draw_service.draw(args, name=actual_name, desc=actual_desc)
         
         return job_id
         
@@ -283,7 +304,25 @@ async def create_batch_job(
         # 验证 batch_size
         if batch_size < 1 or batch_size > 16:
             raise HTTPException(status_code=400, detail="batch_size 必须在 1-16 之间")
-
+        
+        # 处理 Query 对象：当函数被直接调用（非 HTTP）时，Query 对象不会被解析
+        def extract_value(value):
+            """从可能的 FieldInfo 对象中提取实际值"""
+            if value is None:
+                return None
+            # 检查是否是 FieldInfo 对象（Query 返回的类型）
+            if hasattr(value, 'default'):
+                return getattr(value, 'default', None)
+            # 如果是字符串 "null" 或 "None"，转换为 None
+            if isinstance(value, str) and value.lower() in ('null', 'none', ''):
+                return None
+            return value
+        
+        # 提取各参数的实际值
+        actual_vae = extract_value(vae)
+        actual_name = extract_value(name)
+        actual_desc = extract_value(desc)
+        
         args = DrawArgs(
             model=model,
             prompt=prompt,
@@ -295,7 +334,7 @@ async def create_batch_job(
             width=width,
             height=height,
             clip_skip=clip_skip,
-            vae=vae,
+            vae=actual_vae,
             loras=loras or {},
         )
         
@@ -327,7 +366,7 @@ async def create_batch_job(
         
         # 调用绘图服务
         draw_service = get_current_draw_service()
-        batch_id = draw_service.draw_batch(args, batch_size=batch_size, name=name, desc=desc)
+        batch_id = draw_service.draw_batch(args, batch_size=batch_size, name=actual_name, desc=actual_desc)
         
         return batch_id
         
@@ -442,17 +481,21 @@ async def delete_draw_jobs_batch(job_ids: list[str]) -> dict:
 
 
 @router.delete("/clear", summary="清空所有绘图任务")
-async def clear_draw_jobs(incomplete_only: bool = Query(False, description="是否仅清空未完成任务")) -> dict:
+async def clear_draw_jobs(
+    incomplete_only: bool = Query(False, description="是否仅清空未完成任务（包括失败和生成中）"),
+    failed_only: bool = Query(False, description="是否仅清空失败任务")
+) -> dict:
     """
-    清空所有绘图任务或仅清空未完成任务。
+    清空所有绘图任务、仅清空未完成任务或仅清空失败任务。
     
     Args:
         incomplete_only: 是否仅清空未完成任务（status != 'completed'，包括失败和生成中，默认 False 清空所有）
+        failed_only: 是否仅清空失败任务（status == 'failed'，默认 False）
     
     Returns:
         删除的任务数量
     """
-    count = JobService.clear(incomplete_only=incomplete_only)
+    count = JobService.clear(incomplete_only=incomplete_only, failed_only=failed_only)
     return {"count": count}
 
 

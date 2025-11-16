@@ -9,8 +9,8 @@
 """
 import uuid
 from datetime import datetime
-from typing import Optional
-from sqlmodel import SQLModel, Field
+from typing import Optional, Dict, Any
+from sqlmodel import SQLModel, Field, Column, JSON, Index
 from pydantic import BaseModel
 
 
@@ -42,14 +42,18 @@ class ChapterSummary(SQLModel, table=True):
     
     用于存储章节的元数据和AI生成的梗概。
     小说按行解析，每行对应一个段落和一张图片。
+    
+    注意：
+    - chapter_index = -1 表示全文摘要（文章摘要）
+    - chapter_index >= 0 表示章节摘要
     """
     id: Optional[int] = Field(default=None, primary_key=True)
     project_id: Optional[str] = Field(default=None, description="所属项目ID（None 表示默认工作空间）", index=True)
-    chapter_index: int = Field(ge=0, description="章节索引（从0开始）", index=True)
-    title: str = Field(description="章节标题")
+    chapter_index: int = Field(ge=-1, description="章节索引（-1 表示全文摘要，>=0 表示章节索引，从0开始）", index=True)
+    title: str = Field(description="章节标题（全文摘要时通常为项目标题）")
     summary: Optional[str] = Field(default=None, description="章节故事梗概（AI生成）")
-    start_line: int = Field(ge=0, description="起始行号")
-    end_line: int = Field(ge=0, description="结束行号")
+    start_line: int = Field(ge=0, description="起始行号（全文摘要时为0）")
+    end_line: int = Field(ge=0, description="结束行号（全文摘要时为最后一行的行号）")
 
 
 class ChatSummary(SQLModel, table=True):
@@ -63,6 +67,26 @@ class ChatSummary(SQLModel, table=True):
     data: Optional[str] = Field(default=None, description="摘要内容")
     created_at: datetime = Field(default_factory=datetime.now)
 
+class DrawIteration(SQLModel, table=True):
+    """
+    迭代式绘图的数据库模型。
+    
+    状态说明：
+    - pending: 创建状态（初始化），没有 draw_args 和 summary，但其他参数已初始化
+    - drawing: 绘图状态，已经生成了 draw_args 和 summary，但还没有生成实际的图像
+    - completed: 完成状态，即有 draw_args，也有 summary，并且已经生成了实际图像
+    - cancelled: 取消状态，用户主动取消的任务，迭代过程中遇到此状态会提前退出
+    """
+    __table_args__ = (
+        Index('idx_draw_iteration_project_index', 'project_id', 'index', unique=True),
+    )
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: str = Field(description="所属项目ID", index=True)
+    index: int = Field(description="迭代索引", index=True)
+    status: str = Field(default="pending", description="任务状态：pending（创建状态）、drawing（绘图状态）、completed（完成状态）、cancelled（取消状态）", index=True)
+    summary: Optional[str] = Field(default=None, description="迭代摘要")
+    draw_args: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON), description="绘图参数（JSON格式）")
 
 class MemoryCreateRequest(BaseModel):
     """创建记忆条目的请求模型"""

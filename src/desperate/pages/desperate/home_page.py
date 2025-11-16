@@ -8,7 +8,7 @@ from loguru import logger
 from flet_toast import flet_toast
 from flet_toast.Types import Position
 
-from api.services.db import ProjectService, NovelContentService
+from api.services.db import ProjectService, ContentService
 from api.schemas.project import Project
 from api.components import CreateProjectDialog, DeleteProjectDialog
 from api.settings import app_settings
@@ -494,7 +494,7 @@ class HomePage(ft.Column):
         
         try:
             # 从数据库获取当前行的内容
-            novel_content = NovelContentService.get_by_line(
+            novel_content = ContentService.get_by_line(
                 self.current_project.project_id,
                 self.current_project.current_chapter,
                 self.current_project.current_line

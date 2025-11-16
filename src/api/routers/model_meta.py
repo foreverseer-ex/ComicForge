@@ -5,7 +5,7 @@
 """
 import asyncio
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, Query
 from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
@@ -218,9 +218,16 @@ async def batch_import_models(request: BatchImportModelRequest) -> BatchImportMo
     
     logger.info(f"开始批量导入 {total} 个模型（最大并发数: {max_concurrency}）")
     
+    # 计算总超时时间：模型数量 * civitai请求超时时间
+    total_timeout = total * app_settings.civitai.timeout
+    logger.info(f"批量导入总超时时间: {total_timeout} 秒（{total} 个模型 × {app_settings.civitai.timeout} 秒）")
+    
     try:
-        # 并发导入所有模型（遵循最大并发数）
-        results = await asyncio.gather(*[import_with_semaphore(air) for air in request.airs])
+        # 并发导入所有模型（遵循最大并发数），设置总体超时时间
+        results = await asyncio.wait_for(
+            asyncio.gather(*[import_with_semaphore(air) for air in request.airs]),
+            timeout=total_timeout
+        )
         
         # 统计结果
         for result in results:
@@ -238,6 +245,9 @@ async def batch_import_models(request: BatchImportModelRequest) -> BatchImportMo
             results=results
         )
         
+    except asyncio.TimeoutError:
+        logger.error(f"批量导入超时（总超时时间: {total_timeout} 秒）")
+        raise HTTPException(status_code=408, detail=f"批量导入超时（总超时时间: {total_timeout} 秒），请检查网络连接或减少批量数量")
     except Exception as e:
         logger.exception(f"批量导入失败: {e}")
         raise HTTPException(status_code=500, detail=f"批量导入失败: {str(e)}")
@@ -246,7 +256,12 @@ async def batch_import_models(request: BatchImportModelRequest) -> BatchImportMo
 # ==================== 模型列表 API ====================
 
 @router.get("/loras", summary="获取本地 LoRA 元数据列表")
-async def get_loras() -> List[Dict[str, Any]]:
+async def get_loras(
+    only_preferred: bool = Query(
+        False,
+        description="是否仅返回偏好为 neutral / liked 的 LoRA（过滤掉 disliked）"
+    )
+) -> List[Dict[str, Any]]:
     """
     获取数据库中的 LoRA 模型列表。
     
@@ -263,6 +278,11 @@ async def get_loras() -> List[Dict[str, Any]]:
     try:
         # 从数据库获取 LoRA 元数据
         lora_metas = model_meta_db_service.lora_list
+        if only_preferred:
+            lora_metas = [
+                lora for lora in lora_metas
+                if (getattr(lora, "preference", "neutral") or "neutral") in {"neutral", "liked"}
+            ]
         
         # 构建返回列表
         result = []
@@ -281,7 +301,12 @@ async def get_loras() -> List[Dict[str, Any]]:
 
 
 @router.get("/checkpoint", summary="获取本地 Checkpoint 元数据列表")
-async def get_checkpoints() -> List[Dict[str, Any]]:
+async def get_checkpoints(
+    only_preferred: bool = Query(
+        False,
+        description="是否仅返回偏好为 neutral / liked 的 Checkpoint（过滤掉 disliked）"
+    )
+) -> List[Dict[str, Any]]:
     """
     获取数据库中的 Checkpoint 模型列表。
     
@@ -297,6 +322,11 @@ async def get_checkpoints() -> List[Dict[str, Any]]:
     try:
         # 从数据库获取 Checkpoint 元数据
         checkpoint_metas = model_meta_db_service.sd_list
+        if only_preferred:
+            checkpoint_metas = [
+                model for model in checkpoint_metas
+                if (getattr(model, "preference", "neutral") or "neutral") in {"neutral", "liked"}
+            ]
         
         # 构建返回列表
         result = []

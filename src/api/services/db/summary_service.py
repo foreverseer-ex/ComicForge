@@ -41,7 +41,7 @@ class SummaryService:
         根据项目ID和章节索引获取摘要。
 
         :param project_id: 项目ID
-        :param chapter_index: 章节索引
+        :param chapter_index: 章节索引（-1 表示全文摘要，>=0 表示章节索引）
         :return: 章节摘要对象，如果不存在则返回 None
         """
         with DatabaseSession() as db:

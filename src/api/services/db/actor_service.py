@@ -4,7 +4,7 @@ Actor（角色/要素）数据库服务。
 提供 Actor 的增删改查操作。
 Actor 可以是角色、地点、组织等小说要素。
 """
-from typing import Optional
+from typing import Optional, Any
 from loguru import logger
 from sqlmodel import select
 
@@ -67,7 +67,7 @@ class ActorService:
         with DatabaseSession() as db:
             # 如果 project_id 为 None，查询 project_id 为 None 的记录
             if project_id is None:
-                statement = select(Actor).where(Actor.project_id.is_(None)).offset(offset)
+                statement = select(Actor).where(Actor.project_id.is_(None)).offset(offset)  # type: ignore
             else:
                 statement = select(Actor).where(Actor.project_id == project_id).offset(offset)
             if limit is not None:
@@ -78,6 +78,35 @@ class ActorService:
                 db.expunge(actor)
             logger.debug(f"获取 Actor 列表: {len(actors)} 条 (project_id={project_id})")
             return list(actors)
+    
+    @classmethod
+    def get_by_name(cls, project_id: Optional[str], name: str) -> Optional[Actor]:
+        """
+        根据项目ID和名称获取 Actor。
+        
+        :param project_id: 项目ID（None 表示默认工作空间）
+        :param name: Actor 名称
+        :return: Actor 对象，如果不存在则返回 None
+        """
+        project_id = normalize_project_id(project_id)
+        with DatabaseSession() as db:
+            if project_id is None:
+                statement = select(Actor).where(
+                    Actor.project_id.is_(None),  # type: ignore
+                    Actor.name == name
+                )
+            else:
+                statement = select(Actor).where(
+                    Actor.project_id == project_id,
+                    Actor.name == name
+                )
+            actor = db.exec(statement).first()
+            if actor:
+                db.expunge(actor)
+                logger.debug(f"通过名称获取 Actor: {name} (project_id={project_id})")
+            else:
+                logger.debug(f"Actor 不存在: {name} (project_id={project_id})")
+            return actor
     
     @classmethod
     def update(cls, actor_id: str, **kwargs) -> Optional[Actor]:
@@ -357,4 +386,70 @@ class ActorService:
             logger.debug(f"批量删除后 examples 列表: {[ex.get('title', '未命名') for ex in actor.examples]}")
             logger.info(f"批量删除 Actor 示例: {actor_id}, 删除了 {len(valid_indices)} 个示例, 剩余数量={len(actor.examples)}")
             return actor
+    
+    @classmethod
+    def batch_update_by_name(cls, project_id: Optional[str], actors: list[Actor]) -> dict[str, Any]:
+        """
+        批量更新或创建 Actor（通过名称匹配）。
+        
+        遍历每个 Actor，如果项目中已存在同名 Actor，则更新其信息（desc、tags 等）；
+        如果不存在，则创建新的 Actor。
+        
+        :param project_id: 项目ID（None 表示默认工作空间）
+        :param actors: 要更新或创建的 Actor 列表
+        :return: 包含更新和创建数量的字典
+        """
+        project_id = normalize_project_id(project_id)
+        updated_count = 0
+        created_count = 0
+        
+        with DatabaseSession() as db:
+            for actor_data in actors:
+                # 查找是否已存在同名 Actor
+                existing_actor = None
+                if project_id is None:
+                    statement = select(Actor).where(
+                        Actor.project_id.is_(None),  # type: ignore
+                        Actor.name == actor_data.name
+                    )
+                else:
+                    statement = select(Actor).where(
+                        Actor.project_id == project_id,
+                        Actor.name == actor_data.name
+                    )
+                existing_actor = db.exec(statement).first()
+                
+                if existing_actor:
+                    # 更新现有 Actor（在现有基础上更新 desc、tags、color）
+                    # 注意：desc 和 tags 使用新的值更新，color 也更新
+                    # 但是 examples 保持不变，保留原有的示例图（立绘）
+                    existing_actor.desc = actor_data.desc  # 更新描述
+                    existing_actor.color = actor_data.color  # 更新颜色
+                    existing_actor.tags = actor_data.tags  # 更新标签
+                    # 重要：不更新 examples，保留原有的示例图（后续会通过 add_example 添加新的）
+                    db.add(existing_actor)
+                    updated_count += 1
+                    logger.debug(f"更新 Actor: {actor_data.name} (project_id={project_id}), 保留 {len(existing_actor.examples)} 个现有示例图")
+                else:
+                    # 创建新 Actor
+                    new_actor = Actor(
+                        project_id=project_id,
+                        name=actor_data.name,
+                        desc=actor_data.desc,
+                        color=actor_data.color,
+                        tags=actor_data.tags,
+                        examples=[]  # 新创建的 Actor 没有示例图
+                    )
+                    db.add(new_actor)
+                    created_count += 1
+                    logger.debug(f"创建 Actor: {actor_data.name} (project_id={project_id})")
+            
+            db.flush()
+            logger.info(f"批量更新 Actor: 更新 {updated_count} 个，创建 {created_count} 个 (project_id={project_id})")
+        
+        return {
+            "updated": updated_count,
+            "created": created_count,
+            "total": len(actors)
+        }
 

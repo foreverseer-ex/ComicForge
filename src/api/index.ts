@@ -44,6 +44,20 @@ api.interceptors.response.use(
   async (error) => {
     const original = error.config
     const status = error?.response?.status
+    const url = original?.url || ''
+    
+    // 对于 /content/image 的 404 错误，静默处理（图片不存在是正常现象）
+    if (status === 404 && url.includes('/content/image')) {
+      // 静默返回一个 rejected promise，但不在控制台输出错误
+      return Promise.reject(error)
+    }
+    
+    // 对于 /auth/me 的 401/404 错误，静默处理（token验证失败是正常现象，用户可能未登录）
+    if ((status === 401 || status === 404) && url.includes('/auth/me')) {
+      // 静默返回一个 rejected promise，但不在控制台输出错误
+      return Promise.reject(error)
+    }
+    
     if (status === 401) {
       const auth = useAuthStore()
       const isRefresh = (original?.url?.includes('/auth/refresh'))
@@ -68,6 +82,8 @@ api.interceptors.response.use(
         router.replace({ name: 'Login' })
       }
     }
+    
+    // 对于其他错误，正常输出
     console.error('API Error:', error)
     return Promise.reject(error)
   }

@@ -29,7 +29,7 @@ def init_admin_user():
             
             # 删除所有之前的管理员账户
             for admin in all_admins:
-                logger.info(f"删除旧的管理员账户: {admin.username}")
+                logger.debug(f"删除旧的管理员账户: {admin.username}")
                 db.delete(admin)
             
             # 确保删除操作完成
@@ -43,7 +43,7 @@ def init_admin_user():
                 is_active=True,
             )
             db.add(new_admin)
-            logger.info(f"创建新的管理员账户: {admin_config.username}")
+            logger.debug(f"创建新的管理员账户: {admin_config.username}")
             
             # 提交由 DatabaseSession 上下文自动完成
             

@@ -27,7 +27,7 @@
 
       <!-- 生成参数按钮 -->
       <button
-        v-if="currentImageUrl && jobIds && jobIds.length > currentIndex"
+        v-if="currentImageUrl"
         @click.stop="handleShowParams"
         class="absolute top-4 right-28 md:right-36 z-50 p-3 rounded-full bg-black bg-opacity-50 hover:bg-opacity-70 text-white transition-colors pointer-events-auto"
         title="查看生成参数"
@@ -134,7 +134,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'show-params', jobId: string): void  // 显示生成参数对话框
+  (e: 'show-params', jobId?: string, index?: number): void  // 显示生成参数对话框（jobId可选，index为当前图片索引）
 }>()
 
 const privacyStore = usePrivacyStore()
@@ -355,8 +355,12 @@ const handleShowParams = () => {
   if (props.jobIds && props.jobIds.length > currentIndex.value) {
     const jobId: string | undefined = props.jobIds[currentIndex.value]
     if (jobId) {
-      emit('show-params', jobId)
+      emit('show-params', jobId, currentIndex.value)
+    } else {
+      emit('show-params', undefined, currentIndex.value)
     }
+  } else {
+    emit('show-params', undefined, currentIndex.value)
   }
 }
 

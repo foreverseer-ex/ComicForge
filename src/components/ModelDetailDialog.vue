@@ -376,7 +376,7 @@ import {
   ArrowPathIcon
 } from '@heroicons/vue/24/outline'
 import { getImageUrl } from '../utils/imageUtils'
-import { showToast } from '../utils/toast'
+import { toast } from 'vue-sonner'
 import api from '../api'
 import ModelParamsDialog from './ModelParamsDialog.vue'
 import ImageGalleryDialog from './ImageGalleryDialog.vue'
@@ -591,10 +591,10 @@ const copyParams = async () => {
     await navigator.clipboard.writeText(jsonString)
     
     // 使用 toast 显示成功提示
-    showToast('参数已复制到剪贴板', 'success')
+    toast.success('参数已复制到剪贴板')
   } catch (error) {
     console.error('复制失败:', error)
-    showToast('复制失败，请重试', 'error')
+    toast.error('复制失败，请重试')
   }
 }
 
@@ -625,14 +625,14 @@ const saveDesc = async () => {
     }
     
     // 显示成功提示
-    showToast('说明已保存', 'success')
+    toast.success('说明已保存')
     
     editingDesc.value = ''
     isEditingDesc.value = false
   } catch (error: any) {
     console.error('保存失败:', error)
     const errorMsg = error.response?.data?.detail || error.message || '保存失败'
-    showToast(`保存失败: ${errorMsg}`, 'error')
+    toast.error(`保存失败: ${errorMsg}`)
   }
 }
 
@@ -693,7 +693,7 @@ const handleReset = () => {
       confirmDialog.value.show = false
       resetting.value = true
       try {
-        showToast('正在重置模型元数据...', 'info')
+        toast.info('正在重置模型元数据...')
         
         // 调用重置 API
         const response = await api.post(`/model-meta/${props.model!.version_id}/reset`, null, {
@@ -704,7 +704,7 @@ const handleReset = () => {
         const responseData = (response as any)?.data || response
         
         if (responseData?.success) {
-          showToast(`重置成功：${responseData.model_name}`, 'success')
+          toast.success(`重置成功：${responseData.model_name}`)
           // 触发模型更新事件，让父组件刷新模型列表
           emit('model-updated')
           // 关闭对话框，让用户重新打开查看更新后的数据
@@ -715,7 +715,7 @@ const handleReset = () => {
       } catch (error: any) {
         console.error('重置模型失败:', error)
         const errorMsg = error.response?.data?.detail || error.message || '重置失败，请重试'
-        showToast(errorMsg, 'error')
+        toast.error(errorMsg)
       } finally {
         resetting.value = false
       }

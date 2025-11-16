@@ -103,6 +103,8 @@ class SdForgeDrawService(AbstractDrawService):
         height: int = 1024,
         clip_skip: int | None = None,
         save_images: bool = True,
+        reference_image_path: str | None = None,
+        reference_weight: float = 0.8,
     ) -> Dict[str, Any]:
         """
         文生图（/sdapi/v1/txt2img）。
@@ -155,6 +157,49 @@ class SdForgeDrawService(AbstractDrawService):
         if clip_skip is not None:
             payload["CLIP_stop_at_last_layers"] = clip_skip
 
+        # 如果提供了参考图像路径，添加 ControlNet reference_only 控制
+        if reference_image_path:
+            try:
+                import base64
+                from pathlib import Path
+                
+                ref_path = Path(reference_image_path)
+                if ref_path.exists() and ref_path.is_file():
+                    # 读取图像并转换为 base64
+                    with open(ref_path, 'rb') as f:
+                        image_bytes = f.read()
+                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                    
+                    # 构建 ControlNet reference_only 参数
+                    # control_mode: 0=平衡, 1=更偏向提示词, 2=更偏向 ControlNet
+                    # 对于 reference_only，通常使用 1（更偏向提示词，但保持人物特征一致）
+                    controlnet_args = {
+                        "input_image": image_base64,
+                        "model": "reference_only",  # ControlNet reference_only 模型
+                        "weight": max(0.0, min(1.0, reference_weight)),  # 限制在 0.0-1.0 之间
+                        "control_mode": 1,  # 1=更偏向提示词，但保持人物特征
+                        "resize_mode": 1,  # 1=缩放以适配
+                        "pixel_perfect": False,
+                        "processor_res": 512,
+                        "threshold_a": 64,
+                        "threshold_b": 64,
+                        "guidance_start": 0.0,
+                        "guidance_end": 1.0,
+                    }
+                    
+                    # 添加 alwayson_scripts 字段（ControlNet 扩展）
+                    payload["alwayson_scripts"] = {
+                        "controlnet": {
+                            "args": [controlnet_args]
+                        }
+                    }
+                    
+                    logger.info(f"✅ 已添加 ControlNet reference_only 控制: weight={reference_weight}, image={reference_image_path}")
+                else:
+                    logger.warning(f"⚠️ 参考图像不存在，跳过 ControlNet: {reference_image_path}")
+            except Exception as e:
+                logger.warning(f"⚠️ 添加 ControlNet reference_only 失败，继续生成: {e}")
+
         url = f"{app_settings.sd_forge.base_url}/sdapi/v1/txt2img"
         with httpx.Client(timeout=app_settings.sd_forge.generate_timeout) as client:
             resp = client.post(url, json=payload)
@@ -185,9 +230,39 @@ class SdForgeDrawService(AbstractDrawService):
         if 'loras' not in draw_args_dict:
             draw_args_dict['loras'] = {}
         
+        # 如果 name 为空，从 prompt 中提取默认名称（前30个字符）
+        final_name = name
+        if not final_name or not final_name.strip():
+            if args.prompt:
+                short_prompt = args.prompt[:30].strip()
+                if short_prompt:
+                    final_name = short_prompt + ('...' if len(args.prompt) > 30 else '')
+                else:
+                    final_name = None
+            else:
+                final_name = None
+        
+        # 如果 desc 为空，使用 prompt 作为默认描述
+        # 处理 desc 可能是 FieldInfo 对象的情况（当函数被直接调用时）
+        final_desc = desc
+        if final_desc is not None:
+            # 检查是否是 FieldInfo 对象（Query 返回的类型）
+            if hasattr(final_desc, 'default'):
+                # 这是 FieldInfo 对象，提取默认值
+                final_desc = getattr(final_desc, 'default', None)
+            # 确保是字符串类型
+            if not isinstance(final_desc, str):
+                final_desc = None
+        
+        if not final_desc or (isinstance(final_desc, str) and not final_desc.strip()):
+            if args.prompt:
+                final_desc = args.prompt
+            else:
+                final_desc = None
+        
         job = Job(
-            name=name,
-            desc=desc,
+            name=final_name,
+            desc=final_desc,
             created_at=datetime.now(),
             status="pending",
             draw_args=draw_args_dict,
@@ -220,7 +295,15 @@ class SdForgeDrawService(AbstractDrawService):
             # 如果指定了 model 或 vae，先检查当前选项，如果不同则设置
             if args.model or args.vae:
                 # 在线程池中执行同步操作
-                current_options = await asyncio.to_thread(self._get_options)
+                try:
+                    current_options = await asyncio.to_thread(self._get_options)
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 502:
+                        error_msg = "❌ SD-Forge 服务未启动。请先启动 SD-Forge/sd-webui 服务（默认地址: http://127.0.0.1:7860）"
+                        logger.error(error_msg)
+                        JobService.update(job_id, status="failed", completed_at=datetime.now(), data={"error": error_msg})
+                        return
+                    raise
                 need_update = False
                 update_kwargs = {}
                 
@@ -278,20 +361,30 @@ class SdForgeDrawService(AbstractDrawService):
                     loras_for_sd_forge[lora_filename_stem] = strength
             
             # 调用 SD-Forge API（在线程池中执行，避免阻塞事件循环）
-            result = await asyncio.to_thread(
-                self._create_text2image,
-                prompt=args.prompt,
-                negative_prompt=args.negative_prompt,
-                loras=loras_for_sd_forge,
-                seed=args.seed,
-                sampler=args.sampler,
-                steps=args.steps,
-                cfg_scale=args.cfg_scale,
-                width=args.width,
-                height=args.height,
-                clip_skip=args.clip_skip,
-                save_images=True,
-            )
+            try:
+                result = await asyncio.to_thread(
+                    self._create_text2image,
+                    prompt=args.prompt,
+                    negative_prompt=args.negative_prompt,
+                    loras=loras_for_sd_forge,
+                    seed=args.seed,
+                    sampler=args.sampler,
+                    steps=args.steps,
+                    cfg_scale=args.cfg_scale,
+                    width=args.width,
+                    height=args.height,
+                    clip_skip=args.clip_skip,
+                    save_images=True,
+                    reference_image_path=getattr(args, 'reference_image_path', None),
+                    reference_weight=getattr(args, 'reference_weight', 0.8),
+                )
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 502:
+                    error_msg = "❌ SD-Forge 服务未启动。请先启动 SD-Forge/sd-webui 服务（默认地址: http://127.0.0.1:7860）"
+                    logger.error(error_msg)
+                    JobService.update(job_id, status="failed", completed_at=datetime.now(), data={"error": error_msg})
+                    return
+                raise
             
             # 保存图片
             images = result.get("images", [])

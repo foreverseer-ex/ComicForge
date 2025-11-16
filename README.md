@@ -80,8 +80,19 @@ AI 驱动的漫画创作与可视化工具：对话、绘图、模型元数据�
 - **健康检查**：后端提供 `/health` 健康检查端点
 - **自动监控**：前端自动定期检查后端服务连接状态（默认每5秒）
 - **状态指示**：导航栏显示实时连接状态（已连接/未连接）
-- **连接保护**：服务端未连接时显示遮罩层，阻止用户操作
+- **连接保护**：服务端未连接时显示遮罩层，阻止用户操作，并显示后端地址与重试按钮
 - **自动恢复**：连接恢复后自动恢复正常功能
+
+### 🔐 用户认证与授权
+- **用户管理**：支持用户注册、登录、登出
+- **角色系统**：支持 admin/viewer 等多种角色
+- **令牌机制**：使用 JWT 访问令牌和刷新令牌
+- **HttpOnly Cookie**：安全的刷新令牌存储
+- **权限控制**：基于角色的访问控制（RBAC）
+- **用户别名**：支持为用户设置多个别名用于登录
+- **登录体验**：独立的 `LoginView` + Pinia `auth` Store，支持自动恢复登录状态、路由守卫与失败提示
+- **令牌自动刷新**：Axios 拦截器携带 Bearer Token，401 时通过 `/auth/refresh` 自动刷新，失败后跳转登录页
+- **管理员初始化**：后端启动时根据 `config.json` 自动重建管理员账号，确保凭证受控
 
 ## 🗂 目录结构
 
@@ -90,12 +101,12 @@ ComicForge/
 ├── src/
 │   ├── api/                   # 后端 FastAPI 服务
 │   │   ├── main.py            # FastAPI 主应用
+│   │   ├── security.py        # JWT、密码哈希、权限校验
 │   │   ├── routers/           # API 路由
 │   │   │   ├── project.py     # 项目管理路由
 │   │   │   ├── actor.py       # 角色管理路由
 │   │   │   ├── memory.py      # 记忆管理路由
-│   │   │   ├── reader.py      # 内容读取路由
-│   │   │   ├── novel.py       # 小说内容路由
+│   │   │   ├── context.py     # 内容服务路由（统一管理小说内容、章节、段落）
 │   │   │   ├── draw.py        # 图像生成路由
 │   │   │   ├── llm.py         # LLM 路由
 │   │   │   ├── chat.py        # 聊天路由
@@ -103,7 +114,9 @@ ComicForge/
 │   │   │   ├── file.py        # 文件路由
 │   │   │   ├── help.py        # 帮助路由
 │   │   │   ├── settings.py    # 设置路由
-│   │   │   └── model_meta.py  # 模型元数据路由
+│   │   │   ├── summary.py     # 摘要管理路由（章节摘要、全文摘要）
+│   │   │   ├── auth.py        # 用户认证与授权路由
+│   │   │   ├── model_meta.py  # 模型元数据路由
 │   │   ├── services/          # 业务服务层
 │   │   │   ├── db/            # 数据库服务（SQLModel）
 │   │   │   │   ├── base.py          # 数据库基础类
@@ -115,6 +128,7 @@ ComicForge/
 │   │   │   │   ├── history_service.py   # 历史记录（包含聊天消息管理）
 │   │   │   │   ├── summary_service.py   # 摘要服务
 │   │   │   │   └── desperate/            # 旧版聊天服务（已废弃）
+│   │   │   ├── admin_init.py  # 管理员账号初始化
 │   │   │   ├── llm/           # LLM 服务
 │   │   │   │   ├── base.py    # 抽象基类
 │   │   │   │   ├── openai.py  # OpenAI 兼容（xAI/OpenAI/Anthropic/Google）
@@ -151,6 +165,8 @@ ComicForge/
 │   │   │   ├── draw_setting.py     # 绘图配置
 │   │   │   ├── sd_forge_setting.py # SD-Forge 配置
 │   │   │   ├── civitai_setting.py  # Civitai 配置
+│   │   │   ├── admin_setting.py    # 管理员配置（用户认证）
+│   │   │   ├── ratelimit_setting.py # 限流配置
 │   │   │   └── frontend_setting.py # 前端 UI 配置
 │   │   └── utils/             # 工具函数
 │   │       ├── path.py        # 路径工具
@@ -159,6 +175,8 @@ ComicForge/
 │   │       ├── hash.py        # 哈希工具
 │   │       ├── url_util.py    # URL 工具
 │   │       ├── pubsub.py      # 发布订阅工具
+│   │       ├── retry.py       # 重试工具
+│   │       ├── timeout.py     # 超时工具
 │   │       ├── responsive.py # 响应式工具（Flet UI，已废弃）
 │   │       └── flet_util.py   # Flet 工具（已废弃）
 │   │
@@ -171,7 +189,8 @@ ComicForge/
 │   │   ├── ModelView.vue      # 模型管理视图
 │   │   ├── TaskView.vue       # 任务管理视图
 │   │   ├── HelpView.vue       # 帮助视图
-│   │   └── SettingsView.vue   # 设置视图
+│   │   ├── SettingsView.vue   # 设置视图
+│   │   └── LoginView.vue      # 登录视图
 │   ├── components/            # Vue 组件
 │   │   ├── Navigation.vue     # 导航组件
 │   │   ├── ActorCard.vue      # 角色卡片组件
@@ -182,6 +201,7 @@ ComicForge/
 │   │   ├── DrawTaskForm.vue   # 绘图任务表单
 │   │   ├── GeneratePortraitDialog.vue  # 生成立绘对话框（支持创建新任务/选择已有任务）
 │   │   ├── ImageGalleryDialog.vue  # 图片画廊对话框
+│   │   ├── ImageSuggestions.vue # Actor 立绘推荐/导入组件
 │   │   ├── JobImageSelector.vue    # 任务图像选择器组件（用于选择已有任务图像）
 │   │   ├── ModelCard.vue      # 模型卡片组件（支持喜爱标记、隐私模式）
 │   │   ├── ModelDetailDialog.vue  # 模型详情对话框
@@ -192,6 +212,9 @@ ComicForge/
 │   │       ├── SdForgeSettingsSection.vue
 │   │       ├── CivitaiSettingsSection.vue
 │   │       └── FrontendSettingsSection.vue
+│   │   └── ui/                # 通用 UI 组件
+│   │       ├── Button.vue
+│   │       └── Input.vue
 │   ├── router/                # Vue Router 配置
 │   │   └── index.ts
 │   ├── stores/                # Pinia 状态管理
@@ -200,11 +223,13 @@ ComicForge/
 │   │   ├── theme.ts           # 主题状态
 │   │   ├── connection.ts      # 连接状态管理
 │   │   ├── navigation.ts      # 导航状态管理（折叠状态）
-│   │   └── privacy.ts          # 隐私模式状态管理
+│   │   ├── privacy.ts          # 隐私模式状态管理
+│   │   └── auth.ts            # 登录状态、Token 管理
 │   ├── styles/                # 样式文件
 │   │   └── highlight.css      # 代码高亮样式
 │   ├── utils/                 # 前端工具函数
 │   │   ├── apiConfig.ts       # API 配置（基础URL管理）
+│   │   ├── confirm.ts         # 通用确认弹窗
 │   │   ├── device.ts          # 设备检测工具
 │   │   ├── imageCache.ts      # 图片缓存管理
 │   │   ├── imageUtils.ts      # 图片工具函数（file:// URL 处理）
@@ -218,11 +243,13 @@ ComicForge/
 │   ├── main.ts                # 前端入口文件
 │   └── style.css              # 全局样式
 │
-├── storage/                   # 数据存储目录
-│   └── data/
-│       ├── database.db        # SQLite 数据库（包含聊天历史）
-│       ├── model_meta/        # 模型元数据缓存
-│       └── projects/          # 项目数据（图像等）
+├── storage/
+│   ├── config.json            # 自动生成的配置文件（优先读取）
+│   ├── data/                  # 持久数据
+│   │   ├── database.db        # SQLite 数据库（包含聊天历史）
+│   │   ├── model_meta/        # 模型元数据缓存
+│   │   └── projects/          # 项目数据（图像等）
+│   └── temp/                  # 临时数据（jobs、requests 等）
 │
 ├── tests/                     # 测试文件
 │   ├── api/                   # API 测试
@@ -357,10 +384,23 @@ export CIVITAI_API_TOKEN="..."
 
 #### 方式三：配置文件
 
-在项目根目录创建或编辑 `config.json`：
+默认配置文件位于 `storage/config.json`（首次启动会自动生成，并随机创建管理员密码；如需手动指定，可将路径传入 `AppSettings.load()`）。典型内容：
 
 ```json
 {
+  "admin": {
+    "username": "admin",
+    "password": "auto-generated-strong-password"
+  },
+  "draw": {
+    "backend": "civitai"
+  },
+  "ratelimit": {
+    "enabled": true,
+    "global_per_minute": 1000,
+    "login_per_minute": 60,
+    "burst": 200
+  },
   "llm": {
     "provider": "xai",
     "api_key": "xai-...",
@@ -394,7 +434,7 @@ export CIVITAI_API_TOKEN="..."
 }
 ```
 
-**配置优先级**：环境变量 > 配置文件 > 默认值
+**配置优先级**：环境变量 > `storage/config.json` > 默认值
 
 ## 🎨 前端架构
 
@@ -411,6 +451,7 @@ ComicForge 使用 Vue 3 + TypeScript 构建现代化的前后端分离架构。
 - **TaskView** - 任务管理页面（绘图任务列表、状态跟踪、批量操作、图片预览）
 - **HelpView** - 帮助文档页面（MCP 工具说明、使用指南）
 - **SettingsView** - 设置页面（LLM、绘图、SD-Forge、Civitai、前端配置）
+- **LoginView** - 登录页面（受保护的环境入口，支持错误提示与跳转）
 
 ### 状态管理（Pinia）
 
@@ -419,10 +460,17 @@ ComicForge 使用 Vue 3 + TypeScript 构建现代化的前后端分离架构。
 - **connection** - 前后端连接状态监控（健康检查、自动重连，默认每5秒检查一次）
 - **navigation** - 导航状态管理（导航栏折叠/展开状态，持久化到 localStorage）
 - **privacy** - 隐私模式状态管理（控制是否显示图片，状态持久化到 localStorage）
+- **auth** - 登录状态、Access Token、用户信息和自动初始化
 
 ### 路由配置
 
-使用 Vue Router 进行单页应用路由管理，支持动态路由和路由守卫。
+使用 Vue Router 进行单页应用路由管理，支持动态路由和路由守卫：所有业务路由默认受保护，未认证时自动跳转到 `LoginView`，登录后若访问登录页则重定向到主页。
+
+### 网络层与跨端支持
+- Axios 客户端注入 Bearer Token，并在 401 时利用 HttpOnly 刷新 Cookie 自动续期
+- `getApiBaseURL()` 自动适配浏览器 / Tauri 桌面端：Tauri 固定访问本地后端，其余环境使用 Vite 代理或环境变量
+- 集成 `vite-plugin-pwa`，自动注册 Service Worker，支持离线提示与即时更新
+- 全局 `vue-sonner` Toast + `confirm.ts` 统一反馈体验
 
 ## 🔌 API 服务
 
@@ -442,13 +490,14 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - `/project/*` - 项目管理（CRUD、列表）
 - `/actor/*` - 角色管理（创建、更新、删除、立绘生成）
 - `/memory/*` - 记忆管理（键值存储、预定义键）
-- `/reader/*` - 内容读取（单行、批量、章节）
-- `/novel/*` - 小说内容（章节列表、摘要）
+- `/context/*` - 内容服务（小说文件上传、行/章节 CRUD、批量操作、统计信息）
+- `/summary/*` - 摘要管理（章节摘要、全文摘要、CRUD 操作）
 - `/draw/*` - 图像生成（创建任务、批量创建、任务管理、状态查询、批量删除、清空任务、获取图像、SD-Forge 可用模型查询）
 - `/model-meta/*` - 模型元数据管理（本地扫描、Civitai 导入、元数据查询、示例图片）
 - `/llm/*` - LLM 相关功能（模型列表、工具定义、AI 生成绘图参数、选项管理）
 - `/chat/*` - 聊天对话（invoke/stream 双模式、迭代模式、消息状态查询）
 - `/history/*` - 历史记录（会话管理、消息历史）
+- `/auth/*` - 用户认证与授权（注册、登录、登出、令牌刷新、用户管理）
 - `/file/*` - 文件服务（图片访问）
 - `/help/*` - 帮助文档（MCP 工具说明）
 - `/settings/*` - 设置管理（配置读取与保存）
@@ -518,6 +567,30 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - **任务创建**：通过对话框创建新任务，支持 AI 生成参数和从剪切板粘贴参数
 - **任务选择器**：支持从已完成任务中选择图像，用于角色立绘等场景
 
+### 内容管理
+
+- **文件上传**：支持上传小说文件（txt/pdf/doc/docx/md，限制100MB）
+- **行级操作**：创建、读取、更新、删除单行内容
+- **批量操作**：批量创建、插入、删除内容行
+- **范围查询**：支持按行号范围查询内容（支持跨章节）
+- **章节管理**：章节列表、详情查询、更新、删除
+- **摘要管理**：支持章节摘要和全文摘要的创建、更新、删除
+- **统计信息**：获取项目的总行数、章节数等统计数据
+- **图像访问**：获取内容行的生成图像
+
+### 用户认证与授权
+
+- **用户注册**：管理员创建新用户（仅管理员权限）
+- **用户登录**：支持用户名、别名登录，支持大小写不敏感匹配
+- **令牌管理**：JWT 访问令牌（15分钟）和刷新令牌（14天）
+- **安全存储**：刷新令牌使用 HttpOnly Cookie 安全存储
+- **令牌刷新**：支持使用刷新令牌获取新的访问令牌
+- **用户管理**：管理员可查看、更新、删除用户，支持重置密码
+- **角色系统**：支持 admin/viewer 等多种角色，基于角色的访问控制
+- **用户别名**：支持为用户设置多个别名用于登录
+- **刷新令牌**：后端维护刷新令牌表（含过期时间、撤销状态），前端通过 Cookie 静默刷新
+- **限流**：可选的全局/登录限流配置防止暴力破解
+
 ## 📝 开发说明
 
 ### 技术栈
@@ -526,10 +599,12 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - **构建工具**: Vite (rolldown-vite) - 使用 rolldown 引擎提升构建性能
 - **框架**: Vue 3 + TypeScript
 - **UI 框架**: Tailwind CSS + Headless UI + Heroicons
+- **通知/确认**: vue-sonner + 自定义 confirm API
 - **状态管理**: Pinia
 - **路由**: Vue Router
 - **HTTP 客户端**: Axios（`src/api/index.ts`，支持开发环境代理和生产环境配置）
 - **API 配置**: `src/utils/apiConfig.ts` - 统一管理 API 基础URL（开发环境使用代理，生产环境使用环境变量）
+- **跨端支持**: 自动判断 Tauri 运行时，PWA Service Worker 注册
 - **Markdown 渲染**: marked + highlight.js（代码高亮）
 - **图片缓存**: 前端图片缓存机制（`src/utils/imageCache.ts`，支持配置缓存数量，持久化到 localStorage）
 - **Toast 通知**: 自定义 Toast 通知系统（`src/utils/toast.ts`）
@@ -548,6 +623,9 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - **图像处理**: Pillow
 - **Civitai 集成**: civitai-py
 - **日志**: loguru
+- **配置体系**: Pydantic Settings（`AppSettings`）+ `storage/config.json` 自动加载/保存
+- **可靠性工具**: 通用重试/超时装饰器（`api/utils/retry.py`, `api/utils/timeout.py`）
+- **安全**: 集成 `RateLimitSettings`、刷新令牌持久化、管理员自动初始化服务
 
 ### 项目特点
 
@@ -558,6 +636,9 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - **响应式布局**：前端支持不同屏幕尺寸的自适应布局
 - **错误处理**：完善的错误处理和日志记录
 - **API 文档**：自动生成的 Swagger/OpenAPI 文档
+- **自动初始化**：首次启动即生成 `storage/config.json`、本地数据库及管理员账户
+- **限流/速率控制**：可配置的全局与登录限流策略，增强安全性
+- **离线能力**：PWA + 图片缓存支撑弱网环境
 
 ## 🧪 测试
 
@@ -663,7 +744,8 @@ def test_your_endpoint(client):
 - ✅ 项目管理（CRUD、列表、切换）
 - ✅ 角色管理（创建、更新、删除、示例图管理、立绘生成、双模式立绘生成、自动清理示例图文件）
 - ✅ 记忆管理（键值存储、预定义键、批量操作）
-- ✅ 小说内容读取（单行、批量、章节范围、摘要）
+- ✅ 内容管理（文件上传、行/章节 CRUD、批量操作、范围查询、统计信息）
+- ✅ 摘要管理（章节摘要、全文摘要、CRUD 操作）
 - ✅ 图像生成（SD-Forge 本地生成、Civitai 集成、批量创建任务）
 - ✅ 任务管理（创建、批量创建、查询、删除、批量操作、状态跟踪、图片获取、SD-Forge 可用模型查询）
 - ✅ 模型元数据（本地扫描、Civitai 抓取、批量导入、筛选、模型喜爱）
@@ -671,6 +753,7 @@ def test_your_endpoint(client):
 - ✅ AI 对话（invoke/stream 双模式、流式输出、工具调用、迭代模式、自动总结）
 - ✅ AI 参数生成（使用 LLM 生成绘图参数）
 - ✅ 历史记录（会话管理、消息持久化）
+- ✅ 用户认证与授权（注册、登录、登出、令牌管理、用户管理、角色系统）
 - ✅ 配置管理（读取、保存、环境变量优先级）
 - ✅ 文件服务（图片访问、静态资源）
 - ✅ 帮助文档（MCP 工具定义、使用说明）
@@ -702,7 +785,9 @@ def test_your_endpoint(client):
 - ✅ LLM 服务（抽象基类设计，支持多提供商扩展）
 - ✅ 小说解析器（章节识别、摘要生成）
 - ✅ 数据转换工具（格式转换、数据映射）
-- ✅ 章节摘要服务（章节摘要的 CRUD 操作）
+- ✅ 内容服务（行/章节 CRUD、批量操作、范围查询）
+- ✅ 摘要服务（章节摘要、全文摘要的 CRUD 操作）
+- ✅ 用户认证服务（JWT 令牌、密码哈希、权限验证）
 - ✅ 图片缓存系统（前端自动缓存，提升性能，持久化到 localStorage）
 - ✅ Toast 通知系统（前端消息提示）
 - ✅ 图片工具函数（file:// URL 转换、缓存集成）
