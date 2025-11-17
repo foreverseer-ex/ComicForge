@@ -171,21 +171,34 @@ class SdForgeDrawService(AbstractDrawService):
                     image_base64 = base64.b64encode(image_bytes).decode('utf-8')
                     
                     # 构建 ControlNet reference_only 参数
-                    # control_mode: 0=平衡, 1=更偏向提示词, 2=更偏向 ControlNet
-                    # 对于 reference_only，通常使用 1（更偏向提示词，但保持人物特征一致）
+                    # control_mode: 0=平衡(Balanced), 1=更偏向提示词, 2=更偏向 ControlNet
+                    # 对于 reference_only，使用 0（Balanced）以与网页行为一致
+                    # reference_only 是预处理器模块，不是模型文件
+                    # module 指定预处理器，model 指定 ControlNet 模型文件（可以是 None）
+                    # 注意：添加 enabled=True 以启用 ControlNet，确保参数格式正确
                     controlnet_args = {
+                        "enabled": True,  # 启用 ControlNet
                         "input_image": image_base64,
-                        "model": "reference_only",  # ControlNet reference_only 模型
+                        "module": "reference_only",  # ControlNet 预处理器模块：reference_only
+                        "model": None,  # ControlNet 模型文件（reference_only 可以使用 None）
                         "weight": max(0.0, min(1.0, reference_weight)),  # 限制在 0.0-1.0 之间
-                        "control_mode": 1,  # 1=更偏向提示词，但保持人物特征
-                        "resize_mode": 1,  # 1=缩放以适配
-                        "pixel_perfect": False,
-                        "processor_res": 512,
-                        "threshold_a": 64,
-                        "threshold_b": 64,
+                        "resize_mode": 0,  # 0=Just Resize（与网页一致）
+                        "lowvram": False,  # 不使用低显存模式
+                        "processor_res": 0.5,  # Processor Res: 0.5（与网页一致，可能是比例值）
+                        "threshold_a": 0.5,  # Threshold A: 0.5（与网页一致）
+                        "threshold_b": 0.5,  # Threshold B: 0.5（与网页一致）
                         "guidance_start": 0.0,
                         "guidance_end": 1.0,
+                        "control_mode": 0,  # 0=Balanced（平衡模式，与网页一致）
+                        "pixel_perfect": False,  # Pixel Perfect: False（与网页一致）
+                        "hr_option": "Both",  # Hr Option: Both（与网页一致）
                     }
+                    
+                    # 关键修复：根据错误日志分析，ControlNet 扩展在 get_input_data 中尝试访问 p.resize_mode
+                    # 虽然 txt2img API 不直接支持 resize_mode，但 ControlNet 扩展期望它存在
+                    # 在 payload 根级别添加 resize_mode 以修复 AttributeError
+                    # 值 0 = Just Resize（与 ControlNet args 中的设置一致）
+                    payload["resize_mode"] = 0  # 修复：添加 resize_mode 以修复 AttributeError
                     
                     # 添加 alwayson_scripts 字段（ControlNet 扩展）
                     payload["alwayson_scripts"] = {
