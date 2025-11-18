@@ -7,10 +7,12 @@ import base64
 import io
 from pathlib import Path
 from typing import Optional, Dict, Any
+from urllib.parse import urlparse
 
-import httpx
+import requests
 from PIL import Image
 from loguru import logger
+from webuiapi import WebUIApi, ControlNetUnit, raw_b64_img
 
 from api.settings import app_settings
 from api.schemas.draw import DrawArgs
@@ -28,48 +30,66 @@ class SdForgeDrawService(AbstractDrawService):
     def __init__(self):
         """初始化服务。"""
         self._jobs: dict[str, dict[str, Any]] = {}  # 存储任务信息 {job_id: result}
+        self._client: WebUIApi | None = None
 
-    @staticmethod
-    def _get_loras() -> Dict[str, Any]:
+    @property
+    def client(self) -> WebUIApi:
+        """懒加载 WebUIApi 客户端。"""
+        if self._client is None:
+            self._client = self._build_client()
+        return self._client
+
+    def _build_client(self) -> WebUIApi:
+        """根据配置构建 WebUIApi 客户端并注入超时。"""
+        parsed = urlparse(app_settings.sd_forge.base_url)
+        scheme = parsed.scheme or "http"
+        host = parsed.hostname or "127.0.0.1"
+        default_port = 443 if scheme == "https" else 80
+        port = parsed.port or default_port
+        base_endpoint = f"{scheme}://{host}:{port}"
+        if parsed.path:
+            base_endpoint += parsed.path.rstrip("/")
+        if base_endpoint.endswith("/sdapi/v1"):
+            api_base = base_endpoint
+        else:
+            api_base = f"{base_endpoint.rstrip('/')}/sdapi/v1"
+
+        api = WebUIApi(baseurl=api_base, use_https=(scheme == "https"))
+        original_request = api.session.request
+
+        def request_with_timeout(*args, **kwargs):
+            kwargs.setdefault("timeout", app_settings.sd_forge.generate_timeout)
+            return original_request(*args, **kwargs)
+
+        api.session.request = request_with_timeout  # type: ignore[assignment]
+        return api
+
+    def _get_loras(self) -> Dict[str, Any]:
         """
         获取 LoRA 模型列表（/sdapi/v1/loras）。
         
         :return: LoRA 模型列表
         """
-        url = f"{app_settings.sd_forge.base_url}/sdapi/v1/loras"
-        with httpx.Client(timeout=app_settings.sd_forge.timeout) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
-            return resp.json()
+        return self.client.get_loras()
 
-    @staticmethod
-    def _get_sd_models() -> Dict[str, Any]:
+    def _get_sd_models(self) -> Dict[str, Any]:
         """
         获取 SD 模型列表（/sdapi/v1/sd-models）。
         
         :return: SD 模型列表
         """
-        url = f"{app_settings.sd_forge.base_url}/sdapi/v1/sd-models"
-        with httpx.Client(timeout=app_settings.sd_forge.timeout) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
-            return resp.json()
+        return self.client.get_sd_models()
 
-    @staticmethod
-    def _get_options() -> Dict[str, Any]:
+    def _get_options(self) -> Dict[str, Any]:
         """
         获取 SD 模型选项（/sdapi/v1/options）。
         
         :return: SD 模型选项
         """
-        url = f"{app_settings.sd_forge.base_url}/sdapi/v1/options"
-        with httpx.Client(timeout=app_settings.sd_forge.timeout) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
-            return resp.json()
+        return self.client.get_options()
 
-    @staticmethod
     def _set_options(
+        self,
         sd_model_checkpoint: str | None = None,
         sd_vae: str | None = None,
     ) -> None:
@@ -79,15 +99,13 @@ class SdForgeDrawService(AbstractDrawService):
         :param sd_model_checkpoint: 模型检查点，来自 /sdapi/v1/sd-models 的 title 字段
         :param sd_vae: VAE 模型，来自 /sdapi/v1/options 的 sd_vae 字段
         """
-        url = f"{app_settings.sd_forge.base_url}/sdapi/v1/options"
         payload = {}
         if sd_model_checkpoint:
             payload["sd_model_checkpoint"] = sd_model_checkpoint
         if sd_vae:
             payload["sd_vae"] = sd_vae
-        with httpx.Client(timeout=app_settings.sd_forge.timeout) as client:
-            resp = client.post(url, json=payload)
-            resp.raise_for_status()
+        if payload:
+            self.client.set_options(payload)
 
     def _create_text2image(
         self,
@@ -111,113 +129,88 @@ class SdForgeDrawService(AbstractDrawService):
         
         :return: 包含 images、parameters 等字段的响应
         """
-        # 处理 LoRA：分离正面和负面 LoRA
+        client = self.client
         final_prompt = prompt
         final_negative_prompt = negative_prompt or ""
-        
+
         if loras:
             positive_tags = []
             negative_tags = []
             for name, weight in loras.items():
                 if weight < 0:
-                    # 负数权重表示负面 LoRA，正化后添加到负面提示词
                     negative_tags.append(f"<lora:{name}:{abs(weight)}>")
                 else:
-                    # 正数权重表示正面 LoRA，添加到正向提示词
                     positive_tags.append(f"<lora:{name}:{weight}>")
-            
+
             if positive_tags:
                 final_prompt = " ".join(positive_tags) + " " + (prompt or "")
             if negative_tags:
                 final_negative_prompt = " ".join(negative_tags) + " " + (negative_prompt or "")
 
-        payload: Dict[str, Any] = {
-            "prompt": final_prompt,
-            "negative_prompt": final_negative_prompt,
-            "width": width,
-            "height": height,
-            "steps": steps,
-            "cfg_scale": cfg_scale,
-            "n_iter": 1,
-            "batch_size": 1,
-            # 保存策略：保存单图、不保存网格
-            "save_images": bool(save_images),
-            "do_not_save_grid": True,
-            "do_not_save_samples": not bool(save_images),
-            # 响应返回图片
-            "send_images": True,
-        }
-        
-        if sampler:
-            payload["sampler_name"] = sampler
-        payload["seed"] = seed
-        if styles:
-            payload["styles"] = list(styles)
-        # 映射 clip_skip 到 webui 的 CLIP_stop_at_last_layers
+        override_settings: Dict[str, Any] = {}
         if clip_skip is not None:
-            payload["CLIP_stop_at_last_layers"] = clip_skip
+            override_settings["CLIP_stop_at_last_layers"] = clip_skip
 
-        # 如果提供了参考图像路径，添加 ControlNet reference_only 控制
+        controlnet_units: list[ControlNetUnit] = []
         if reference_image_path:
             try:
-                import base64
-                from pathlib import Path
-                
                 ref_path = Path(reference_image_path)
                 if ref_path.exists() and ref_path.is_file():
-                    # 读取图像并转换为 base64
-                    with open(ref_path, 'rb') as f:
-                        image_bytes = f.read()
-                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-                    
-                    # 构建 ControlNet reference_only 参数
-                    # control_mode: 0=平衡(Balanced), 1=更偏向提示词, 2=更偏向 ControlNet
-                    # 对于 reference_only，使用 0（Balanced）以与网页行为一致
-                    # reference_only 是预处理器模块，不是模型文件
-                    # module 指定预处理器，model 指定 ControlNet 模型文件（可以是 None）
-                    # 注意：添加 enabled=True 以启用 ControlNet，确保参数格式正确
-                    controlnet_args = {
-                        "enabled": True,  # 启用 ControlNet
-                        "input_image": image_base64,
-                        "module": "reference_only",  # ControlNet 预处理器模块：reference_only
-                        "model": None,  # ControlNet 模型文件（reference_only 可以使用 None）
-                        "weight": max(0.0, min(1.0, reference_weight)),  # 限制在 0.0-1.0 之间
-                        "resize_mode": 0,  # 0=Just Resize（与网页一致）
-                        "lowvram": False,  # 不使用低显存模式
-                        "processor_res": 0.5,  # Processor Res: 0.5（与网页一致，可能是比例值）
-                        "threshold_a": 0.5,  # Threshold A: 0.5（与网页一致）
-                        "threshold_b": 0.5,  # Threshold B: 0.5（与网页一致）
-                        "guidance_start": 0.0,
-                        "guidance_end": 1.0,
-                        "control_mode": 0,  # 0=Balanced（平衡模式，与网页一致）
-                        "pixel_perfect": False,  # Pixel Perfect: False（与网页一致）
-                        "hr_option": "Both",  # Hr Option: Both（与网页一致）
-                    }
-                    
-                    # 关键修复：根据错误日志分析，ControlNet 扩展在 get_input_data 中尝试访问 p.resize_mode
-                    # 虽然 txt2img API 不直接支持 resize_mode，但 ControlNet 扩展期望它存在
-                    # 在 payload 根级别添加 resize_mode 以修复 AttributeError
-                    # 值 0 = Just Resize（与 ControlNet args 中的设置一致）
-                    payload["resize_mode"] = 0  # 修复：添加 resize_mode 以修复 AttributeError
-                    
-                    # 添加 alwayson_scripts 字段（ControlNet 扩展）
-                    payload["alwayson_scripts"] = {
-                        "controlnet": {
-                            "args": [controlnet_args]
-                        }
-                    }
-                    
-                    logger.info(f"✅ 已添加 ControlNet reference_only 控制: weight={reference_weight}, image={reference_image_path}")
+                    with Image.open(ref_path) as img:
+                        reference_image = img.convert("RGB")
+                    controlnet_units.append(
+                        ControlNetUnit(
+                            image=reference_image,
+                            module="reference_only",
+                            model="None",
+                            weight=max(0.0, min(1.0, reference_weight)),
+                            resize_mode="Just Resize",
+                            low_vram=False,
+                            processor_res=0.5,
+                            threshold_a=0.5,
+                            threshold_b=0.5,
+                            guidance_start=0.0,
+                            guidance_end=1.0,
+                            control_mode=0,
+                            pixel_perfect=False,
+                            hr_option="Both",
+                            enabled=True,
+                        )
+                    )
+                    logger.info(
+                        "✅ 已添加 ControlNet reference_only 控制: weight=%s, image=%s",
+                        reference_weight,
+                        reference_image_path,
+                    )
                 else:
                     logger.warning(f"⚠️ 参考图像不存在，跳过 ControlNet: {reference_image_path}")
             except Exception as e:
                 logger.warning(f"⚠️ 添加 ControlNet reference_only 失败，继续生成: {e}")
 
-        url = f"{app_settings.sd_forge.base_url}/sdapi/v1/txt2img"
-        with httpx.Client(timeout=app_settings.sd_forge.generate_timeout) as client:
-            resp = client.post(url, json=payload)
-            resp.raise_for_status()
-            return resp.json()
+        api_result = client.txt2img(
+            prompt=final_prompt,
+            negative_prompt=final_negative_prompt,
+            width=width,
+            height=height,
+            steps=steps,
+            cfg_scale=cfg_scale,
+            sampler_name=sampler,
+            seed=seed,
+            styles=list(styles) if styles else [],
+            batch_size=1,
+            n_iter=1,
+            send_images=True,
+            save_images=bool(save_images),
+            override_settings=override_settings,
+            controlnet_units=controlnet_units,
+        )
+
+        images_base64 = [raw_b64_img(img) for img in api_result.images]
+        return {
+            "images": images_base64,
+            "parameters": api_result.parameters,
+            "info": api_result.info,
+        }
 
     # ========== 实现抽象接口 ==========
 
@@ -310,8 +303,8 @@ class SdForgeDrawService(AbstractDrawService):
                 # 在线程池中执行同步操作
                 try:
                     current_options = await asyncio.to_thread(self._get_options)
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 502:
+                except (RuntimeError, requests.exceptions.RequestException) as e:
+                    if self._is_gateway_error(e):
                         error_msg = "❌ SD-Forge 服务未启动。请先启动 SD-Forge/sd-webui 服务（默认地址: http://127.0.0.1:7860）"
                         logger.error(error_msg)
                         JobService.update(job_id, status="failed", completed_at=datetime.now(), data={"error": error_msg})
@@ -391,8 +384,8 @@ class SdForgeDrawService(AbstractDrawService):
                     reference_image_path=getattr(args, 'reference_image_path', None),
                     reference_weight=getattr(args, 'reference_weight', 0.8),
                 )
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 502:
+            except (RuntimeError, requests.exceptions.RequestException) as e:
+                if self._is_gateway_error(e):
                     error_msg = "❌ SD-Forge 服务未启动。请先启动 SD-Forge/sd-webui 服务（默认地址: http://127.0.0.1:7860）"
                     logger.error(error_msg)
                     JobService.update(job_id, status="failed", completed_at=datetime.now(), data={"error": error_msg})
@@ -482,6 +475,20 @@ class SdForgeDrawService(AbstractDrawService):
             await f.write(img_bytes.read())
         
         logger.info(f"图片已保存: {save_path}")
+
+    @staticmethod
+    def _is_gateway_error(error: Exception) -> bool:
+        """判断 SD-Forge 服务是否不可用。"""
+        if isinstance(error, RuntimeError) and error.args:
+            status = error.args[0]
+            if isinstance(status, int) and status == 502:
+                return True
+        response = getattr(error, "response", None)
+        if response is not None and getattr(response, "status_code", None) == 502:
+            return True
+        if isinstance(error, requests.exceptions.ConnectionError):
+            return True
+        return False
 
 
 # 全局单例

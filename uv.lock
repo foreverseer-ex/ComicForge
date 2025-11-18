@@ -361,6 +361,7 @@ dependencies = [
     { name = "setuptools" },
     { name = "sqlmodel" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "webuiapi" },
 ]
 
 [package.metadata]
@@ -387,6 +388,7 @@ requires-dist = [
     { name = "setuptools", specifier = ">=80.9.0" },
     { name = "sqlmodel", specifier = ">=0.0.27" },
     { name = "uvicorn", extras = ["standard"], specifier = "<0.36" },
+    { name = "webuiapi", specifier = ">=0.9.17" },
 ]
 
 [[package]]
@@ -2300,6 +2302,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/86/eb/20b6cdf273913d0ad05a6a14aed4b9a85591c18a987a3d47f20fa13dcc47/websockets-15.0.1-cp313-cp313-win32.whl", hash = "sha256:ba9e56e8ceeeedb2e080147ba85ffcd5cd0711b89576b83784d8605a7df455fa", size = 176393, upload-time = "2025-03-05T20:02:53.814Z" },
     { url = "https://files.pythonhosted.org/packages/1b/6c/c65773d6cab416a64d191d6ee8a8b1c68a09970ea6909d16965d26bfed1e/websockets-15.0.1-cp313-cp313-win_amd64.whl", hash = "sha256:e09473f095a819042ecb2ab9465aee615bd9c2028e4ef7d933600a8401c79561", size = 176837, upload-time = "2025-03-05T20:02:55.237Z" },
     { url = "https://files.pythonhosted.org/packages/fa/a8/5b41e0da817d64113292ab1f8247140aac61cbf6cfd085d6a0fa77f4984f/websockets-15.0.1-py3-none-any.whl", hash = "sha256:f7a866fbc1e97b5c617ee4116daaa09b722101d4a3c170c787450ba409f9736f", size = 169743, upload-time = "2025-03-05T20:03:39.41Z" },
+]
+
+[[package]]
+name = "webuiapi"
+version = "0.9.17"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pillow" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/53/a7/5d6c6a10456a642568e3c02c3400963d305b2b3caccdaa305397396a41ea/webuiapi-0.9.17.tar.gz", hash = "sha256:b37effbbd27dea550152391285dc26a9b15e2a7395b0d1af320e637e20b425a7", size = 28865, upload-time = "2024-12-14T00:59:15.147Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b4/79/bd7390a49e0bc7cfc348cbc3469d50424a2eba3fdac9378e325852399433/webuiapi-0.9.17-py3-none-any.whl", hash = "sha256:5ee61943405b6a9b889e36114a6c1e386d83597c1e369796ab871080489443e9", size = 22563, upload-time = "2024-12-14T00:59:12.514Z" },
 ]
 
 [[package]]

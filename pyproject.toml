@@ -30,5 +30,6 @@ dependencies = [
     "sqlmodel>=0.0.27",
     "uvicorn[standard]<0.36",
     "ollama>=0.6.0",
+    "webuiapi>=0.9.17",
 ]
 

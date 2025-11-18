@@ -23,12 +23,15 @@ AI 驱动的漫画创作与可视化工具：对话、绘图、模型元数据�
 - **开发者模式**：突破模型限制，支持自定义系统提示词
 - **超时控制**：可配置的网络请求超时时间
 - **递归限制**：可配置的工具调用递归深度限制
+- **调用日志**：每次 `chat_invoke` 请求都会在 `storage/temp/chat` 下生成 JSON 日志，完整记录系统提示、上下文、工具调用与 LLM 返回结果，方便问题追踪
 
 ### 🎨 图像生成
 - **本地生成**：对接 SD-Forge/sd-webui，支持 LoRA/模型切换
 - **Civitai 集成**：支持从 Civitai 导入模型元数据（AIR 标识符）
+- **并发与超时**：Civitai 批量导入默认使用 4 个并行 worker，总超时时间自动按 `模型数量 × 单次请求超时` 计算，避免大批量导入时提前终止
 - **结果管理**：按会话/批次保存生成的图像
 - **AI 参数生成**：使用 LLM 根据任务名称和描述自动生成绘图参数（prompt、模型、LoRA 等）
+- **角色一致性**：自动检索段落中出现的角色，并将其默认立绘作为 SD-Forge ControlNet `reference_only` 的参考图（`reference_image_path`），保持面部与体态一致
 - **参数粘贴**：支持从剪切板粘贴绘图参数
 - **任务管理**：完整的绘图任务管理系统，支持创建、查看、删除、批量操作
 - **批量创建**：支持批量创建任务（batch_size: 1-16），一次创建多个任务
@@ -249,7 +252,9 @@ ComicForge/
 │   │   ├── database.db        # SQLite 数据库（包含聊天历史）
 │   │   ├── model_meta/        # 模型元数据缓存
 │   │   └── projects/          # 项目数据（图像等）
-│   └── temp/                  # 临时数据（jobs、requests 等）
+│   └── temp/                  # 临时数据（jobs、requests、chat 日志等）
+│       ├── request/           # 工具/HTTP 请求日志
+│       └── chat/              # `chat_invoke` 生成的对话调用日志（JSON 列表，包含 LLM 返回内容）
 │
 ├── tests/                     # 测试文件
 │   ├── api/                   # API 测试
@@ -436,6 +441,13 @@ export CIVITAI_API_TOKEN="..."
 
 **配置优先级**：环境变量 > `storage/config.json` > 默认值
 
+## 🪵 日志与调试
+
+- **请求日志**：所有工具/HTTP 请求会在 `storage/temp/request` 下生成带时间戳的 JSON，记录调用参数与响应
+- **对话日志**：每次 `chat_invoke` 调用都会在 `storage/temp/chat` 生成 `chat_invoke_*.json`，保存系统提示、上下文、工具调用、LLM 输出等关键步骤
+- **绘图文件**：SD-Forge 生成的图片与参考图路径写入 `storage/data/projects/<project_id>/images`
+- **清理策略**：`storage/temp` 可按需清理，不影响持久数据；`storage/data` 与数据库文件需妥善备份
+
 ## 🎨 前端架构
 
 ComicForge 使用 Vue 3 + TypeScript 构建现代化的前后端分离架构。
@@ -561,6 +573,7 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - **任务列表**：查看所有绘图任务，显示任务名称、描述、状态、Job ID
 - **批量创建**：支持批量创建任务（batch_size: 1-16），一次创建多个任务
 - **状态跟踪**：自动检查任务状态（已完成/生成中），实时刷新生成中的任务（每3秒）
+- **段落迭代控制**：在前端可一键“开始迭代”“停止迭代”和“清空本段所有图片”，后端将 `DrawIteration` 状态从 `pending`、`drawing` 精确切换到 `completed`/`cancelled`，被取消的迭代会立即停止轮询
 - **批量操作**：支持全选、批量删除、清空所有任务
 - **图片预览**：点击已完成任务可预览图片，支持键盘导航（←/→）和缩放
 - **图片下载**：支持下载任务生成的图片
@@ -669,13 +682,13 @@ tests/
 ├── api/                    # API 测试
 │   ├── __init__.py
 │   └── test_chat.py        # 聊天对话 API 测试
-├── sd_forge/               # SD-Forge 相关测试
+├── sd_forge/               # SD-Forge 相关测试（含 ControlNet reference_only 集成）
 └── ...
 ```
 
 ### 测试示例
 
-测试使用 FastAPI 的 `TestClient`，无需启动实际服务器：
+测试使用 FastAPI 的 `TestClient`，无需启动实际服务器；SD-Forge 端到端测试直接调用 WebUI API 验证 ControlNet：
 
 ```python
 from fastapi.testclient import TestClient
@@ -704,6 +717,7 @@ def test_chat_stream():
 - ✅ 根端点和健康检查
 - ✅ 直接对话端点（`/chat/invoke`）- invoke 模式
 - ✅ 流式对话端点（`/chat/stream`）- stream 模式
+- ✅ SD-Forge ControlNet `reference_only`（含参考图像、批量生成、无 ControlNet 对照组，防止 regression）
 - ✅ 迭代式对话端点（`/chat/iteration`）
 - ✅ 聊天总结功能（自动生成对话摘要）
 - ✅ 工具调用测试（invoke 和 stream 模式下的工具调用）
