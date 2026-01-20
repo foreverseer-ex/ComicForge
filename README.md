@@ -12,12 +12,13 @@ AI 驱动的漫画创作与可视化工具：对话、绘图、模型元数据�
 - **流式输出**：实时显示 AI 响应，支持 Markdown 渲染和代码高亮
 - **会话管理**：多会话支持，会话历史持久化到 SQLite 数据库
 - **自动总结**：当消息数量达到配置的倍数时，自动生成对话摘要，保持长期对话连贯性
-- **工具调用**：基于 LangChain + LangGraph 构建，集成 43+ 个 MCP 工具函数，支持：
+- **工具调用**：基于 LangChain + LangGraph 构建，集成 39 个 MCP 工具函数（20 个读取工具 + 19 个写入工具），支持：
   - 项目管理（查询、更新、进度跟踪）
-  - 角色管理（创建、更新、删除、立绘生成、标签管理）
-  - 记忆管理（创建、查询、更新、删除、批量操作）
-  - 小说内容读取（单行、批量、章节、摘要）
-  - 图像生成（SD-Forge 本地生成）
+  - 角色管理（创建、更新、删除、立绘生成、标签管理、示例图管理）
+  - 记忆管理（创建、查询、更新、删除、批量操作、键描述查询）
+  - 小说内容读取（单行、批量、章节、摘要、统计信息）
+  - 图像生成（SD-Forge 本地生成、批量创建、任务管理）
+  - 模型查询（Checkpoint/LoRA 模型列表）
   - 迭代模式（批量处理章节内容）
 - **消息状态**：支持消息状态查询（ready/error/success），实时跟踪处理进度
 - **开发者模式**：突破模型限制，支持自定义系统提示词
@@ -26,18 +27,22 @@ AI 驱动的漫画创作与可视化工具：对话、绘图、模型元数据�
 - **调用日志**：每次 `chat_invoke` 请求都会在 `storage/temp/chat` 下生成 JSON 日志，完整记录系统提示、上下文、工具调用与 LLM 返回结果，方便问题追踪
 
 ### 🎨 图像生成
-- **本地生成**：对接 SD-Forge/sd-webui，支持 LoRA/模型切换
-- **Civitai 集成**：支持从 Civitai 导入模型元数据（AIR 标识符）
+- **本地生成**：对接 SD-Forge/sd-webui，支持 LoRA/模型切换、VAE 配置
+- **Civitai 集成**：支持从 Civitai 导入模型元数据（AIR 标识符），支持批量导入
 - **并发与超时**：Civitai 批量导入默认使用 4 个并行 worker，总超时时间自动按 `模型数量 × 单次请求超时` 计算，避免大批量导入时提前终止
-- **结果管理**：按会话/批次保存生成的图像
+- **结果管理**：按会话/批次保存生成的图像，支持任务图像获取和下载
 - **AI 参数生成**：使用 LLM 根据任务名称和描述自动生成绘图参数（prompt、模型、LoRA 等）
 - **角色一致性**：自动检索段落中出现的角色，并将其默认立绘作为 SD-Forge ControlNet `reference_only` 的参考图（`reference_image_path`），保持面部与体态一致
+- **ControlNet 支持**：支持为角色立绘启用 ControlNet，自动将角色的默认立绘作为参考图像，确保同一角色的多张立绘在面部、身材、肤色等方面保持一致
+- **ControlNet 配置**：可配置 ControlNet 权重、缩放模式、预处理分辨率、引导步数、控制模式、高分辨率选项、低显存模式等参数
+- **参考图像格式**：支持多种参考图像格式（`[job_reference]:job_id={job_id}`、`[actor_reference]:actor_id={actor_id}&index={index}` 或直接路径）
 - **参数粘贴**：支持从剪切板粘贴绘图参数
-- **任务管理**：完整的绘图任务管理系统，支持创建、查看、删除、批量操作
-- **批量创建**：支持批量创建任务（batch_size: 1-16），一次创建多个任务
-- **状态跟踪**：自动检查任务状态，实时刷新生成中的任务
-- **图片预览**：图片画廊对话框，支持键盘导航和缩放
+- **任务管理**：完整的绘图任务管理系统，支持创建、查看、删除、批量操作、清空任务
+- **批量创建**：支持批量创建任务（batch_size: 1-16），一次创建多个任务，支持从多个 job 组合成 batch
+- **状态跟踪**：自动检查任务状态，实时刷新生成中的任务（每3秒）
+- **图片预览**：图片画廊对话框，支持键盘导航（←/→）和缩放
 - **任务选择器**：支持从已有任务中选择图像，用于角色立绘等场景
+- **段落迭代控制**：在前端可一键"开始迭代""停止迭代"和"清空本段所有图片"，后端精确控制迭代状态
 
 ### 📦 模型元数据管理
 - **本地扫描**：自动扫描本地 Checkpoint/LoRA 模型
@@ -54,6 +59,7 @@ AI 驱动的漫画创作与可视化工具：对话、绘图、模型元数据�
 - **立绘生成**：自动为角色生成 AI 立绘（使用 SD-Forge）
   - **双模式**：支持创建新任务生成立绘，或从已有任务中选择图像
   - **自动关联**：生成或选择后自动将图像添加为角色示例图
+  - **ControlNet 集成**：支持为角色立绘启用 ControlNet，自动将角色的默认立绘作为参考图像，确保形象一致性
 - **颜色标识**：每个角色支持自定义颜色标识
 - **图片重试**：图片加载失败时自动重试（最多3次），提升加载成功率
 - **隐私模式**：支持隐私模式，隐藏角色立绘预览（适用于公共场合）
@@ -61,23 +67,28 @@ AI 驱动的漫画创作与可视化工具：对话、绘图、模型元数据�
 
 ### 🧠 记忆管理
 - **键值存储**：基于键值对的记忆条目管理
-- **预定义键**：提供常用键的描述和建议
+- **预定义键**：提供常用键的描述和建议，支持查询键描述
 - **批量操作**：支持批量删除会话的所有记忆
+- **记忆查询**：支持按键查询、获取所有记忆、键描述查询
 
 ### 📖 小说内容管理
+- **文件上传**：支持上传小说文件（txt/pdf/doc/docx/md，限制100MB）
 - **内容读取**：支持单行、批量、章节范围读取
-- **章节管理**：章节列表、摘要、进度跟踪
+- **章节管理**：章节列表、摘要、进度跟踪、章节更新
 - **迭代模式**：批量处理章节内容，支持自定义步长和范围
 - **段落导航**：便捷的前后段落切换
+- **图像绑定**：支持为段落绑定生成的图像，自动检索角色并使用 ControlNet 保持一致性
+- **统计信息**：获取项目的总行数、章节数等统计数据
 
 ### ⚙️ 设置与配置
-- **可视化配置**：图形界面配置所有设置项
-- **自动保存**：配置修改自动保存到 `config.json`
-- **环境变量支持**：优先使用环境变量配置
+- **可视化配置**：图形界面配置所有设置项（LLM、绘图、SD-Forge、Civitai、前端）
+- **自动保存**：配置修改自动保存到 `storage/config.json`
+- **环境变量支持**：优先使用环境变量配置（环境变量 > `storage/config.json` > 默认值）
 - **响应式布局**：支持不同窗口尺寸的自适应布局
 - **前端设置**：图片缓存数量配置（10-1000，默认100）
 - **导航栏折叠**：支持导航栏折叠/展开，状态持久化到 localStorage
 - **隐私模式**：全局隐私模式开关，控制是否显示图片（状态持久化到 localStorage）
+- **ControlNet 配置**：可配置 ControlNet 默认参数（权重、缩放模式、预处理分辨率等）
 
 ### 🔌 连接状态管理
 - **健康检查**：后端提供 `/health` 健康检查端点
@@ -109,7 +120,7 @@ ComicForge/
 │   │   │   ├── project.py     # 项目管理路由
 │   │   │   ├── actor.py       # 角色管理路由
 │   │   │   ├── memory.py      # 记忆管理路由
-│   │   │   ├── context.py     # 内容服务路由（统一管理小说内容、章节、段落）
+│   │   │   ├── content.py    # 内容服务路由（统一管理小说内容、章节、段落）
 │   │   │   ├── draw.py        # 图像生成路由
 │   │   │   ├── llm.py         # LLM 路由
 │   │   │   ├── chat.py        # 聊天路由
@@ -128,9 +139,11 @@ ComicForge/
 │   │   │   │   ├── memory_service.py    # 记忆管理
 │   │   │   │   ├── novel_service.py     # 小说内容
 │   │   │   │   ├── draw_service.py      # 绘图服务
+│   │   │   │   ├── draw_iteration_service.py  # 绘图迭代服务
 │   │   │   │   ├── history_service.py   # 历史记录（包含聊天消息管理）
 │   │   │   │   ├── summary_service.py   # 摘要服务
-│   │   │   │   └── desperate/            # 旧版聊天服务（已废弃）
+│   │   │   │   ├── content_service.py  # 内容服务（统一管理小说内容）
+│   │   │   │   └── desperate/            # 旧版聊天服务（已废弃，不影响新版本功能）
 │   │   │   ├── admin_init.py  # 管理员账号初始化
 │   │   │   ├── llm/           # LLM 服务
 │   │   │   │   ├── base.py    # 抽象基类
@@ -146,7 +159,7 @@ ComicForge/
 │   │   │   │   └── civitai.py # Civitai 元数据获取
 │   │   │   ├── novel_parser.py # 小说解析器
 │   │   │   └── transform.py   # 数据转换工具
-│   │   │   # 注意：聊天服务功能在 history_service.py 中实现
+│   │   │   # 注意：聊天服务功能在 history_service.py 中实现，LLM 服务在 services/llm/ 中
 │   │   ├── schemas/           # Pydantic 数据模型
 │   │   │   ├── project.py
 │   │   │   ├── actor.py
@@ -154,7 +167,10 @@ ComicForge/
 │   │   │   ├── novel.py
 │   │   │   ├── chat.py
 │   │   │   ├── draw.py
-│   │   │   └── model_meta.py
+│   │   │   ├── model_meta.py
+│   │   │   ├── content.py
+│   │   │   ├── user.py
+│   │   │   └── desperate/     # 旧版 schemas（已废弃）
 │   │   ├── constants/         # 常量定义
 │   │   │   ├── llm.py         # LLM 提供商、模型列表
 │   │   │   ├── actor.py       # 角色标签定义
@@ -206,6 +222,11 @@ ComicForge/
 │   │   ├── ImageGalleryDialog.vue  # 图片画廊对话框
 │   │   ├── ImageSuggestions.vue # Actor 立绘推荐/导入组件
 │   │   ├── JobImageSelector.vue    # 任务图像选择器组件（用于选择已有任务图像）
+│   │   ├── JobImageSelectorDialog.vue  # 任务图像选择器对话框
+│   │   ├── ActorPortraitSelectorDialog.vue  # 角色立绘选择器对话框
+│   │   ├── ActorSelectorDialog.vue  # 角色选择器对话框
+│   │   ├── ControlNetSettings.vue  # ControlNet 设置组件
+│   │   ├── ReferenceImageSelector.vue  # 参考图像选择器组件
 │   │   ├── ModelCard.vue      # 模型卡片组件（支持喜爱标记、隐私模式）
 │   │   ├── ModelDetailDialog.vue  # 模型详情对话框
 │   │   ├── ModelParamsDialog.vue  # 模型参数对话框
@@ -263,9 +284,15 @@ ComicForge/
 ├── scripts/                   # 开发脚本
 │   ├── dev-server.py          # 开发服务器启动脚本
 │   ├── dev-server.bat         # Windows 启动脚本
-│   └── dev-server.sh          # Linux/Mac 启动脚本
+│   ├── dev-server.sh          # Linux/Mac 启动脚本
+│   └── build-backend.ps1      # 后端构建脚本（PowerShell）
 │
-├── config.json                # 配置文件（自动生成）
+├── docker-compose.yml         # Docker Compose 配置
+├── Dockerfile.backend         # 后端 Docker 镜像
+├── Dockerfile.frontend        # 前端 Docker 镜像
+├── nginx.conf                 # Nginx 配置（前端）
+├── .dockerignore              # Docker 忽略文件
+├── config.json                # 配置文件（自动生成，已废弃，使用 storage/config.json）
 ├── package.json               # 前端依赖配置
 ├── pyproject.toml             # 后端依赖配置
 ├── vite.config.ts             # Vite 配置
@@ -279,6 +306,57 @@ ComicForge/
 - **Node.js**: 18+ (用于前端)
 - **Python**: 3.13+ (用于后端)
 - **可选**: SD-Forge/sd-webui（用于本地图像生成）
+- **可选**: Docker 和 Docker Compose（用于容器化部署）
+
+### 部署方式
+
+#### 方式一：Docker 部署（推荐）
+
+使用 Docker Compose 一键部署前后端服务，适合生产环境。
+
+```bash
+# 1. 克隆项目
+git clone <repository-url>
+cd ComicForge
+
+# 2. 配置环境变量（可选）
+# 创建 .env 文件，添加 API Keys
+echo "XAI_API_KEY=your_key_here" > .env
+echo "OPENAI_API_KEY=your_key_here" >> .env
+echo "CIVITAI_API_TOKEN=your_token_here" >> .env
+
+# 3. 启动服务
+docker compose up -d
+
+# 4. 查看服务状态
+docker compose ps
+
+# 5. 查看日志
+docker compose logs -f
+
+# 6. 访问应用
+# 前端: http://localhost:7863
+# 后端 API: http://localhost:7864
+# API 文档: http://localhost:7864/docs
+```
+
+**停止服务：**
+```bash
+# 停止服务（保留容器）
+docker compose stop
+
+# 停止并删除容器（保留数据卷）
+docker compose down
+
+# 停止并删除容器和数据卷（⚠️ 会删除所有数据）
+docker compose down -v
+```
+
+详细部署说明请参考 [DOCKER.md](DOCKER.md)。
+
+#### 方式二：本地开发部署
+
+适合开发和调试环境。
 
 ### 安装依赖
 
@@ -361,6 +439,11 @@ pnpm preview
 - 前端开发服务器（Vite）会自动将 `/api` 开头的请求代理到后端 `http://127.0.0.1:7864`
 - 前端代码中使用 `getApiBaseURL()` 获取基础URL，开发环境返回 `/api`，生产环境使用环境变量或默认值
 
+**首次启动**：
+- 后端首次启动会自动创建 `storage/config.json` 配置文件
+- 自动初始化 SQLite 数据库和表结构
+- 自动创建管理员账户（用户名和密码保存在 `storage/config.json` 中）
+
 ### 配置
 
 #### 方式一：环境变量（推荐）
@@ -389,7 +472,7 @@ export CIVITAI_API_TOKEN="..."
 
 #### 方式三：配置文件
 
-默认配置文件位于 `storage/config.json`（首次启动会自动生成，并随机创建管理员密码；如需手动指定，可将路径传入 `AppSettings.load()`）。典型内容：
+默认配置文件位于 `storage/config.json`（首次启动会自动生成，并随机创建管理员密码）。典型内容：
 
 ```json
 {
@@ -446,23 +529,24 @@ export CIVITAI_API_TOKEN="..."
 - **请求日志**：所有工具/HTTP 请求会在 `storage/temp/request` 下生成带时间戳的 JSON，记录调用参数与响应
 - **对话日志**：每次 `chat_invoke` 调用都会在 `storage/temp/chat` 生成 `chat_invoke_*.json`，保存系统提示、上下文、工具调用、LLM 输出等关键步骤
 - **绘图文件**：SD-Forge 生成的图片与参考图路径写入 `storage/data/projects/<project_id>/images`
+- **ControlNet 参考图像**：角色立绘的参考图像使用 `[actor_reference]:actor_id={actor_id}&index=0` 格式，自动解析并加载
 - **清理策略**：`storage/temp` 可按需清理，不影响持久数据；`storage/data` 与数据库文件需妥善备份
 
 ## 🎨 前端架构
 
-ComicForge 使用 Vue 3 + TypeScript 构建现代化的前后端分离架构。
+ComicForge 使用 Vue 3 + TypeScript 构建现代化的前后端分离架构，采用 MVVM 架构模式。
 
 ### 主要视图页面
 
 - **HomeView** - 项目主页（项目信息、小说段落、图片展示）
-- **ChatView** - AI 对话页面（流式对话、工具调用、迭代模式）
-- **ActorView** - 角色管理页面（角色列表、创建编辑、立绘生成）
-- **MemoryView** - 记忆管理页面（键值对管理、批量操作）
-- **ContentView** - 内容管理页面（章节导航、段落编辑）
-- **ModelView** - 模型管理页面（本地扫描、Civitai 集成、元数据查看）
-- **TaskView** - 任务管理页面（绘图任务列表、状态跟踪、批量操作、图片预览）
+- **ChatView** - AI 对话页面（流式对话、工具调用、迭代模式、消息编辑、Markdown 渲染、代码高亮）
+- **ActorView** - 角色管理页面（角色列表、创建编辑、立绘生成、示例图管理、标签管理、颜色标识）
+- **MemoryView** - 记忆管理页面（键值对管理、批量操作、预定义键查询）
+- **ContentView** - 内容管理页面（章节导航、段落编辑、文件上传、统计信息）
+- **ModelView** - 模型管理页面（本地扫描、Civitai 集成、元数据查看、模型喜爱、筛选功能）
+- **TaskView** - 任务管理页面（绘图任务列表、状态跟踪、批量操作、图片预览、段落迭代控制）
 - **HelpView** - 帮助文档页面（MCP 工具说明、使用指南）
-- **SettingsView** - 设置页面（LLM、绘图、SD-Forge、Civitai、前端配置）
+- **SettingsView** - 设置页面（LLM、绘图、SD-Forge、Civitai、前端配置、ControlNet 配置）
 - **LoginView** - 登录页面（受保护的环境入口，支持错误提示与跳转）
 
 ### 状态管理（Pinia）
@@ -483,6 +567,8 @@ ComicForge 使用 Vue 3 + TypeScript 构建现代化的前后端分离架构。
 - `getApiBaseURL()` 自动适配浏览器 / Tauri 桌面端：Tauri 固定访问本地后端，其余环境使用 Vite 代理或环境变量
 - 集成 `vite-plugin-pwa`，自动注册 Service Worker，支持离线提示与即时更新
 - 全局 `vue-sonner` Toast + `confirm.ts` 统一反馈体验
+- 图片缓存系统：自动缓存图片到 localStorage，提升加载速度，支持配置缓存数量
+- 图片工具函数：支持 file:// URL 转换和缓存集成
 
 ## 🔌 API 服务
 
@@ -494,25 +580,25 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - **开发环境**：通过 Vite 代理，使用 `/api` 路径（自动转发到 `http://127.0.0.1:7864`）
 - **生产环境**：使用环境变量 `VITE_API_BASE_URL`（默认：`http://127.0.0.1:7864`）
 - **配置管理**：`src/utils/apiConfig.ts` 提供 `getApiBaseURL()` 函数统一管理基础URL
-- **请求拦截器**：自动处理 FormData（不设置 Content-Type，让浏览器自动设置）
-- **响应拦截器**：统一错误处理，自动提取 `response.data`
+- **请求拦截器**：自动处理 FormData（不设置 Content-Type，让浏览器自动设置），自动注入 Bearer Token
+- **响应拦截器**：统一错误处理，自动提取 `response.data`，401 时自动刷新 Token
 
-### 主要路由
+### 主要路由（14个路由模块）
 
-- `/project/*` - 项目管理（CRUD、列表）
-- `/actor/*` - 角色管理（创建、更新、删除、立绘生成）
-- `/memory/*` - 记忆管理（键值存储、预定义键）
-- `/context/*` - 内容服务（小说文件上传、行/章节 CRUD、批量操作、统计信息）
-- `/summary/*` - 摘要管理（章节摘要、全文摘要、CRUD 操作）
-- `/draw/*` - 图像生成（创建任务、批量创建、任务管理、状态查询、批量删除、清空任务、获取图像、SD-Forge 可用模型查询）
-- `/model-meta/*` - 模型元数据管理（本地扫描、Civitai 导入、元数据查询、示例图片）
-- `/llm/*` - LLM 相关功能（模型列表、工具定义、AI 生成绘图参数、选项管理）
-- `/chat/*` - 聊天对话（invoke/stream 双模式、迭代模式、消息状态查询）
-- `/history/*` - 历史记录（会话管理、消息历史）
-- `/auth/*` - 用户认证与授权（注册、登录、登出、令牌刷新、用户管理）
-- `/file/*` - 文件服务（图片访问）
-- `/help/*` - 帮助文档（MCP 工具说明）
-- `/settings/*` - 设置管理（配置读取与保存）
+- `/project/*` - 项目管理（CRUD、列表、切换、统计信息）
+- `/actor/*` - 角色管理（创建、更新、删除、立绘生成、示例图管理、标签查询、导入导出）
+- `/memory/*` - 记忆管理（键值存储、预定义键、批量操作、键描述查询）
+- `/content/*` - 内容服务（小说文件上传、行/章节 CRUD、批量操作、范围查询、统计信息、图像绑定、段落图像绑定）
+- `/summary/*` - 摘要管理（章节摘要、全文摘要、CRUD 操作、统计信息）
+- `/draw/*` - 图像生成（创建任务、批量创建、任务管理、状态查询、批量删除、清空任务、获取图像、SD-Forge 可用模型查询、ControlNet 支持）
+- `/model-meta/*` - 模型元数据管理（本地扫描、Civitai 导入、批量导入、元数据查询、示例图片、模型喜爱、筛选功能）
+- `/llm/*` - LLM 相关功能（模型列表、工具定义、AI 生成绘图参数、选项管理、角色提取、段落图像绑定）
+- `/chat/*` - 聊天对话（invoke/stream 双模式、迭代模式、消息状态查询、工具调用、自动总结）
+- `/history/*` - 历史记录（会话管理、消息历史、消息状态查询、消息编辑）
+- `/auth/*` - 用户认证与授权（注册、登录、登出、令牌刷新、用户管理、角色系统、用户别名）
+- `/file/*` - 文件服务（图片访问、静态资源）
+- `/help/*` - 帮助文档（MCP 工具说明、使用指南）
+- `/settings/*` - 设置管理（配置读取与保存、环境变量优先级）
 - `/health` - 健康检查端点（用于连接状态监控）
 
 ## 🛠 主要功能详解
@@ -523,10 +609,12 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - **流式输出**：实时显示 AI 响应，支持 Markdown 格式
 - **会话历史**：自动保存对话历史，支持多会话切换
 - **自动总结**：当消息数量达到配置阈值时，自动生成对话摘要并保存到记忆系统
-- **工具调用**：基于 LangChain 的 tool 机制，AI 可以调用 43+ 个工具函数执行实际操作
+- **工具调用**：基于 LangChain 的 tool 机制，AI 可以调用 39 个工具函数执行实际操作
+  - 工具分为两类：读取类工具（20 个，只查询数据）和写入类工具（19 个，可修改数据）
   - 工具函数通过路由层暴露，确保安全性（所有工具必须来自 `routers` 目录，不能直接调用服务层）
   - 支持工具调用状态跟踪和错误处理
   - 使用 LangGraph 管理工具调用的状态流转
+  - ask_agent 只能使用读取类工具，write_agent 可以使用全部工具
 - **重新编辑**：支持重新编辑已发送的消息（重新发送并继续对话）
 - **迭代模式**：批量处理章节内容，支持自定义范围和步长
 - **图片缓存**：前端自动缓存图片，提升加载速度
@@ -536,6 +624,8 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - **项目选择**：支持多项目切换，自动保存当前选择的项目
 - **项目持久化**：使用 localStorage 保存项目选择，刷新后自动恢复
 - **自动加载**：启动时自动加载项目列表，并恢复上次选择的项目
+- **项目统计**：支持查询项目的总行数、章节数、角色数等统计信息
+- **进度跟踪**：支持更新项目的章节游标，跟踪阅读进度
 
 ### 角色管理
 
@@ -546,6 +636,7 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
   - **创建新任务**：通过对话框创建新的绘图任务生成立绘
   - **选择已有任务**：从已完成的任务中选择图像作为立绘
   - **自动关联**：生成或选择后自动将图像添加为角色示例图
+  - **ControlNet 支持**：启用后自动将角色的默认立绘作为参考图像，确保形象一致性
 - **右键删除**：支持右键删除角色，删除时自动清理关联的示例图文件
 - **图片重试**：图片加载失败时自动重试（最多3次），提升加载成功率
 - **隐私模式**：支持隐私模式，隐藏角色立绘预览
@@ -573,12 +664,13 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - **任务列表**：查看所有绘图任务，显示任务名称、描述、状态、Job ID
 - **批量创建**：支持批量创建任务（batch_size: 1-16），一次创建多个任务
 - **状态跟踪**：自动检查任务状态（已完成/生成中），实时刷新生成中的任务（每3秒）
-- **段落迭代控制**：在前端可一键“开始迭代”“停止迭代”和“清空本段所有图片”，后端将 `DrawIteration` 状态从 `pending`、`drawing` 精确切换到 `completed`/`cancelled`，被取消的迭代会立即停止轮询
+- **段落迭代控制**：在前端可一键"开始迭代""停止迭代"和"清空本段所有图片"，后端将 `DrawIteration` 状态从 `pending`、`drawing` 精确切换到 `completed`/`cancelled`，被取消的迭代会立即停止轮询
 - **批量操作**：支持全选、批量删除、清空所有任务
 - **图片预览**：点击已完成任务可预览图片，支持键盘导航（←/→）和缩放
 - **图片下载**：支持下载任务生成的图片
 - **任务创建**：通过对话框创建新任务，支持 AI 生成参数和从剪切板粘贴参数
 - **任务选择器**：支持从已完成任务中选择图像，用于角色立绘等场景
+- **ControlNet 配置**：在创建任务时可配置 ControlNet 参数（权重、缩放模式、预处理分辨率等）
 
 ### 内容管理
 
@@ -589,7 +681,10 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - **章节管理**：章节列表、详情查询、更新、删除
 - **摘要管理**：支持章节摘要和全文摘要的创建、更新、删除
 - **统计信息**：获取项目的总行数、章节数等统计数据
-- **图像访问**：获取内容行的生成图像
+- **图像访问**：获取内容行的生成图像（`get_line_image`）
+- **段落图像绑定**：支持为段落绑定生成的图像，自动检索角色并使用 ControlNet 保持一致性
+  - **单段落绑定**：从已完成的任务中选择图像绑定到指定段落（`bind_image_from_job`）
+  - **批量绑定**：自动为段落生成绘图参数并创建任务，完成后自动绑定（`bind_paragraph_images`）
 
 ### 用户认证与授权
 
@@ -611,10 +706,10 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 #### 前端
 - **构建工具**: Vite (rolldown-vite) - 使用 rolldown 引擎提升构建性能
 - **框架**: Vue 3 + TypeScript
-- **UI 框架**: Tailwind CSS + Headless UI + Heroicons
+- **UI 框架**: Tailwind CSS + Headless UI + Heroicons + Radix Vue
 - **通知/确认**: vue-sonner + 自定义 confirm API
-- **状态管理**: Pinia
-- **路由**: Vue Router
+- **状态管理**: Pinia（项目状态、主题、连接状态、导航状态、隐私模式、认证状态）
+- **路由**: Vue Router（路由守卫、动态路由、受保护路由）
 - **HTTP 客户端**: Axios（`src/api/index.ts`，支持开发环境代理和生产环境配置）
 - **API 配置**: `src/utils/apiConfig.ts` - 统一管理 API 基础URL（开发环境使用代理，生产环境使用环境变量）
 - **跨端支持**: 自动判断 Tauri 运行时，PWA Service Worker 注册
@@ -623,35 +718,42 @@ ComicForge 提供 FastAPI 实现的 RESTful API 服务，前端通过 HTTP API�
 - **Toast 通知**: 自定义 Toast 通知系统（`src/utils/toast.ts`）
 - **图片工具**: 图片 URL 处理工具（`src/utils/imageUtils.ts`，支持 file:// URL 转换和缓存集成）
 - **设备检测**: 设备检测工具（`src/utils/device.ts`）
+- **文本缓存**: 文本缓存工具（`src/utils/textCache.ts`）
 - **类型系统**: TypeScript
 
 #### 后端
-- **Web 框架**: FastAPI
-- **数据库**: SQLite (SQLModel)
-- **LLM 集成**: LangChain + LangGraph（状态图管理）
-- **工具系统**: fastapi-mcp（MCP 工具协议）
-- **HTTP 客户端**: httpx
+- **Web 框架**: FastAPI（自动生成 Swagger/ReDoc 文档）
+- **数据库**: SQLite (SQLModel) - 自动初始化数据库和表结构
+- **LLM 集成**: LangChain + LangGraph（状态图管理、工具调用、流式处理）
+- **工具系统**: fastapi-mcp（MCP 工具协议，39 个工具函数）
+- **HTTP 客户端**: httpx（支持超时配置）
 - **数据验证**: Pydantic + Pydantic Settings
-- **异步支持**: asyncio
+- **异步支持**: asyncio（异步路由、流式响应、后台任务）
 - **图像处理**: Pillow
-- **Civitai 集成**: civitai-py
-- **日志**: loguru
+- **Civitai 集成**: civitai-py（模型元数据获取、批量导入）
+- **文档处理**: docx2txt（支持 Word 文档解析）
+- **日志**: loguru（过滤健康检查日志、可配置日志级别）
 - **配置体系**: Pydantic Settings（`AppSettings`）+ `storage/config.json` 自动加载/保存
 - **可靠性工具**: 通用重试/超时装饰器（`api/utils/retry.py`, `api/utils/timeout.py`）
-- **安全**: 集成 `RateLimitSettings`、刷新令牌持久化、管理员自动初始化服务
+- **安全**: 集成 `RateLimitSettings`、刷新令牌持久化、管理员自动初始化服务、JWT 令牌、密码哈希（bcrypt）
+- **文件处理**: aiofiles（异步文件操作）
 
 ### 项目特点
 
 - **前后端分离**：清晰的架构分离，便于开发和维护
 - **类型安全**：前后端全面使用类型提示（TypeScript + Python）
-- **模块化设计**：清晰的分层架构
-- **异步支持**：后端使用 async/await 处理异步操作
+- **模块化设计**：清晰的分层架构（Router → Service → DB）
+- **MVVM 架构**：前端采用 MVVM 架构模式（pages/views/components + viewmodels）
+- **异步支持**：后端使用 async/await 处理异步操作，支持流式响应（SSE）
 - **响应式布局**：前端支持不同屏幕尺寸的自适应布局
-- **错误处理**：完善的错误处理和日志记录
-- **API 文档**：自动生成的 Swagger/OpenAPI 文档
-- **自动初始化**：首次启动即生成 `storage/config.json`、本地数据库及管理员账户
+- **错误处理**：完善的错误处理和日志记录（请求日志、对话日志）
+- **API 文档**：自动生成的 Swagger/OpenAPI 文档（`/docs` 和 `/redoc`）
+- **自动初始化**：首次启动即生成 `storage/config.json`、本地数据库及管理员账户（管理员凭证保存在配置文件中）
 - **限流/速率控制**：可配置的全局与登录限流策略，增强安全性
 - **离线能力**：PWA + 图片缓存支撑弱网环境
+- **工具安全**：所有 MCP 工具必须通过路由层暴露，确保安全性
+- **状态管理**：LangGraph 管理工具调用状态流转，Pinia 管理前端状态
+- **连接监控**：自动健康检查后端连接状态，连接失败时显示遮罩层
 
 ## 🧪 测试
 
@@ -717,7 +819,7 @@ def test_chat_stream():
 - ✅ 根端点和健康检查
 - ✅ 直接对话端点（`/chat/invoke`）- invoke 模式
 - ✅ 流式对话端点（`/chat/stream`）- stream 模式
-- ✅ SD-Forge ControlNet `reference_only`（含参考图像、批量生成、无 ControlNet 对照组，防止 regression）
+- ✅ SD-Forge ControlNet `reference_only`（含参考图像、批量生成、无 ControlNet 对照组，防止 regression，角色立绘自动绑定）
 - ✅ 迭代式对话端点（`/chat/iteration`）
 - ✅ 聊天总结功能（自动生成对话摘要）
 - ✅ 工具调用测试（invoke 和 stream 模式下的工具调用）
@@ -731,6 +833,7 @@ def test_chat_stream():
 1. **数据库**：测试会自动初始化数据库，测试数据会写入实际数据库文件
 2. **LLM 服务**：测试不验证 LLM 实际调用（需要 API 密钥），仅验证端点可访问性
 3. **依赖**：`httpx` 已包含在 `pyproject.toml` 中（TestClient 需要）
+4. **测试覆盖**：已覆盖聊天功能（invoke、stream、iteration、summary）、工具调用、项目管理、消息状态查询等核心功能
 
 ### 编写新测试
 
@@ -758,10 +861,11 @@ def test_your_endpoint(client):
 - ✅ 项目管理（CRUD、列表、切换）
 - ✅ 角色管理（创建、更新、删除、示例图管理、立绘生成、双模式立绘生成、自动清理示例图文件）
 - ✅ 记忆管理（键值存储、预定义键、批量操作）
-- ✅ 内容管理（文件上传、行/章节 CRUD、批量操作、范围查询、统计信息）
+- ✅ 内容管理（文件上传、行/章节 CRUD、批量操作、范围查询、统计信息、图像绑定）
 - ✅ 摘要管理（章节摘要、全文摘要、CRUD 操作）
-- ✅ 图像生成（SD-Forge 本地生成、Civitai 集成、批量创建任务）
+- ✅ 图像生成（SD-Forge 本地生成、Civitai 集成、批量创建任务、ControlNet 支持）
 - ✅ 任务管理（创建、批量创建、查询、删除、批量操作、状态跟踪、图片获取、SD-Forge 可用模型查询）
+- ✅ ControlNet 集成（角色立绘参考图像、可配置参数、自动绑定）
 - ✅ 模型元数据（本地扫描、Civitai 抓取、批量导入、筛选、模型喜爱）
 - ✅ LLM 集成（OpenAI/xAI/Ollama/Anthropic/Google）
 - ✅ AI 对话（invoke/stream 双模式、流式输出、工具调用、迭代模式、自动总结）
@@ -776,12 +880,12 @@ def test_your_endpoint(client):
 #### 前端 UI（Vue 3 + TypeScript）
 - ✅ 主页视图（项目信息、小说段落、图片展示）
 - ✅ 聊天视图（流式对话、Markdown 渲染、代码高亮、工具调用显示、消息状态、消息编辑）
-- ✅ 角色管理视图（角色列表、创建编辑、立绘生成、颜色标识、隐私模式、图片重试）
+- ✅ 角色管理视图（角色列表、创建编辑、立绘生成、颜色标识、隐私模式、图片重试、ControlNet 支持）
 - ✅ 记忆管理视图（键值对编辑、批量删除、预定义键查询）
 - ✅ 内容管理视图（章节导航、段落浏览、章节编辑）
 - ✅ 模型管理视图（模型列表、元数据查看、筛选、一键打开链接、模型喜爱、隐私模式）
-- ✅ 任务管理视图（任务列表、状态跟踪、批量操作、图片预览、下载）
-- ✅ 设置视图（LLM、绘图、SD-Forge、Civitai、前端配置，自动保存）
+- ✅ 任务管理视图（任务列表、状态跟踪、批量操作、图片预览、下载、段落迭代控制）
+- ✅ 设置视图（LLM、绘图、SD-Forge、Civitai、前端配置，自动保存，ControlNet 配置）
 - ✅ 帮助视图（MCP 工具说明、使用指南）
 - ✅ 导航组件（侧边栏、路由切换、连接状态指示、折叠/展开）
 - ✅ 状态管理（Pinia：项目状态、主题切换、连接状态监控、导航状态、隐私模式）
@@ -793,7 +897,7 @@ def test_your_endpoint(client):
 - ✅ API 客户端（Axios 配置、请求/响应拦截器、开发环境代理支持）
 
 #### 工具与服务
-- ✅ MCP 工具系统（43+ 工具函数，基于 LangChain tool 机制，所有工具通过路由层暴露）
+- ✅ MCP 工具系统（39 个工具函数：20 个读取工具 + 19 个写入工具，基于 LangChain tool 机制，所有工具通过路由层暴露，确保安全性）
 - ✅ 数据库服务（SQLite + SQLModel，自动初始化）
 - ✅ 聊天服务（LangGraph 状态图管理、流式处理、工具调用解析、自动总结，聊天消息管理在 `HistoryService` 中）
 - ✅ LLM 服务（抽象基类设计，支持多提供商扩展）
@@ -818,17 +922,16 @@ def test_your_endpoint(client):
 
 ### 🚧 进行中
 
-- 🔄 前端性能优化（虚拟滚动、懒加载）
 - 🔄 更多单元测试覆盖（其他路由和服务）
 - 🔄 错误处理增强
 
 ### 📋 计划中
 
 - 📝 用户手册和开发文档
-- 📝 Docker 容器化部署
 - 📝 更多 LLM 提供商支持
 - 📝 插件系统（可扩展工具）
 - 📝 多语言支持（i18n）
+- 📝 前端性能优化（虚拟滚动、懒加载）
 
 ### 🗑️ 已废弃
 

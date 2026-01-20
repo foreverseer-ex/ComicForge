@@ -1,0 +1,224 @@
+// Prisma Schema for ComicForge
+// 数据库和图片存储方案：所有图片存储在 storage/data/images/，使用 MD5 哈希值作为文件名
+// 在需要图片的地方直接存储哈希值字符串
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./storage/data/database.db"
+}
+
+// 项目表
+model Project {
+  id              String   @id @default(uuid())
+  title           String
+  novelPath       String?
+  projectPath     String
+  totalLines      Int      @default(0)
+  totalChapters   Int      @default(0)
+  currentLine     Int      @default(0)
+  currentChapter  Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  // 关联关系
+  actors          Actor[]
+  memories        Memory[]
+  contents        Content[]
+  summaries       Summary[]
+  chatMessages    ChatMessage[]
+
+  @@index([deletedAt])
+}
+
+// 角色表（也用于模板）
+model Actor {
+  id          String   @id @default(uuid())
+  projectId   String?  // 项目 ID（模板时为 null）
+  name        String
+  desc        String
+  color       String   // 颜色代码（如 #808080）
+  tags        String?  // 标签（JSON 字符串，键值对结构）
+  isTemplate  Boolean  @default(false)  // 是否为模板（模板不关联 project）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // 通过 Job 表关联获取 examples（where source = 'actor_example'）
+  exampleJobs Job[]    @relation("ActorExamples")
+
+  @@index([projectId])
+  @@index([name])
+  @@index([isTemplate])
+  @@index([deletedAt])
+}
+
+// 记忆表
+model Memory {
+  id          String   @id @default(uuid())
+  projectId   String
+  key         String   // 记忆键
+  value       String   // 记忆值
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([key])
+  @@index([deletedAt])
+}
+
+// 内容表（小说内容）
+model Content {
+  id          Int      @id @default(autoincrement())
+  projectId   String
+  chapter     Int
+  line        Int      // 行号
+  content     String
+  imageHash   String?  // 关联的图片哈希值（MD5，可选）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, chapter])
+  @@index([projectId, chapter, line])
+  @@index([imageHash])
+}
+
+// 摘要表
+model Summary {
+  id          String   @id @default(uuid())
+  projectId   String
+  content     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([deletedAt])
+}
+
+// 聊天消息表
+model ChatMessage {
+  id          String   @id @default(uuid())
+  projectId   String?
+  index       Int      // 消息索引
+  status      String   // 状态：pending, ready, error
+  messageType String   // 类型：normal, thinking, tool
+  role        String   // 角色：user, assistant, system
+  context     String
+  tools       String   // 工具调用记录（JSON 字符串，结构复杂且可能变化）
+  suggests    String   // 建议（JSON 字符串，数组结构，但内容灵活）
+  data        String   // 额外数据（JSON 字符串，结构不固定）
+  createdAt   DateTime @default(now())
+
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([index])
+  @@index([status])
+}
+
+// 绘图参数表
+model DrawArgs {
+  id            String   @id @default(uuid())
+  model         String   // 模型名称
+  prompt        String   // 提示词
+  negativePrompt String? // 负面提示词
+  steps         Int      @default(30)
+  cfgScale      Float    @default(7.0)
+  sampler       String?  // 采样器
+  seed          Int?     // 种子，-1 表示随机
+  width         Int      @default(1024)
+  height        Int      @default(1024)
+  clipSkip      Int?     // CLIP skip
+  vae           String?  // VAE
+  loras         String?  // LoRA 配置（JSON 字符串，键值对）
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // 关联关系
+  jobs          Job[]
+
+  @@index([model])
+  @@index([sampler])
+}
+
+// 绘图任务表
+model Job {
+  id            String   @id @default(uuid())
+  name          String?
+  desc          String?
+  status        String   // pending, completed, failed
+  source        String   // 来源：batch, single, actor_portrait, actor_example, model_example
+  drawArgsId    String   // 绘图参数 ID
+  results       String   @default("[]") // 结果列表（JSON 字符串，始终是列表，未完成时为空列表）
+  expectedCount Int?     // 预期数量（批量任务时使用，单个任务为 null）
+  actorId       String?  // 关联的角色 ID（如果是角色相关任务）
+  modelMetaId   Int?     // 关联的模型元数据 ID（如果是模型示例）
+  createdAt     DateTime @default(now())
+  completedAt   DateTime?
+
+  // 关联关系
+  drawArgs      DrawArgs @relation(fields: [drawArgsId], references: [id], onDelete: Cascade)
+  actor         Actor?   @relation("ActorExamples", fields: [actorId], references: [id], onDelete: Cascade)
+  modelMeta     ModelMeta? @relation(fields: [modelMetaId], references: [versionId], onDelete: SetNull)
+
+  @@index([status])
+  @@index([source])
+  @@index([drawArgsId])
+  @@index([actorId])
+  @@index([modelMetaId])
+  @@index([createdAt])
+}
+
+// 模型元数据表
+model ModelMeta {
+  versionId   Int      @id @default(autoincrement())
+  filename    String
+  name        String
+  version     String
+  desc        String?
+  modelId     Int
+  type        String   // checkpoint, lora
+  ecosystem   String   // sdxl, pony, illustrious
+  baseModel   String?
+  sha256      String   // 文件 SHA-256（用于文件完整性校验）
+  trainedWords String? // 训练关键词（JSON 字符串，数组结构，但内容灵活）
+  url         String?
+  webPageUrl  String?
+  preference  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // 关联关系
+  // 通过 Job 表关联获取 examples（where source = 'model_example'）
+  exampleJobs Job[]
+
+  @@unique([versionId])
+  @@index([modelId])
+  @@index([type])
+  @@index([ecosystem])
+  @@index([name, version])
+}
+
+// 用户表
+model User {
+  id          String   @id @default(uuid())
+  username    String   @unique
+  password    String   // bcrypt 哈希
+  isAdmin     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
